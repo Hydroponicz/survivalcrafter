@@ -12,7 +12,7 @@ export class Input {
       if (isTyping(e)) return;
       if (!this.keys.has(e.code)) this.pressed.add(e.code);
       this.keys.add(e.code);
-      if (['Space', 'Tab', 'F1'].includes(e.code)) e.preventDefault();
+      if (['Space', 'Tab', 'F1', 'F2'].includes(e.code)) e.preventDefault();
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
     window.addEventListener('blur', () => this.keys.clear());
@@ -59,5 +59,5 @@ export class Input {
 
 function isTyping(e: KeyboardEvent) {
   const t = e.target as HTMLElement | null;
-  return !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA');
+  return !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT');
 }

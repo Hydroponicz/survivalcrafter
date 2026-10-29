@@ -112,7 +112,7 @@ export class Player {
     return h;
   }
 
-  update(dt: number, input: Input, world: World, busy: boolean, overweight: number, allowMove: boolean) {
+  update(dt: number, input: Input, world: World, busy: boolean, overweight: number, allowMove: boolean, fly = false) {
     const t = world.terrain;
     if (input.locked) {
       this.yaw -= input.mouseDX * 0.0022;
@@ -122,6 +122,7 @@ export class Player {
     }
 
     const k = input.keys;
+    if (fly) return this.flyUpdate(dt, k, world, allowMove);
     let mx = 0, mz = 0;
     if (allowMove) {
       if (k.has('KeyW')) mz -= 1;
@@ -201,6 +202,32 @@ export class Player {
 
     if (this.sprinting) this.stamina -= dt * 9;
     this.stamina = Math.max(0, this.stamina);
+    this.animate(dt);
+  }
+
+  /** Dev fly mode: free movement along the view direction, no gravity or collisions. */
+  private flyUpdate(dt: number, k: Set<string>, world: World, allowMove: boolean) {
+    let mx = 0, mz = 0, my = 0;
+    if (allowMove) {
+      if (k.has('KeyW')) mz -= 1;
+      if (k.has('KeyS')) mz += 1;
+      if (k.has('KeyA')) mx -= 1;
+      if (k.has('KeyD')) mx += 1;
+      if (k.has('Space')) my += 1;
+      if (k.has('KeyQ')) my -= 1;
+    }
+    const speed = k.has('ShiftLeft') ? 28 : 10;
+    const s = Math.sin(this.yaw), c = Math.cos(this.yaw);
+    this.vel.set((mx * c + mz * s) * speed, my * speed, (-mx * s + mz * c) * speed);
+    this.pos.addScaledVector(this.vel, dt);
+    const maxXZ = world.terrain.size * TILE - 0.5;
+    this.pos.x = Math.max(0.5, Math.min(maxXZ, this.pos.x));
+    this.pos.z = Math.max(0.5, Math.min(maxXZ, this.pos.z));
+    this.pos.y = Math.max(this.groundAt(world, this.pos.x, this.pos.z), Math.min(200, this.pos.y));
+    this.moving = mx !== 0 || mz !== 0 || my !== 0;
+    this.sprinting = false;
+    this.swimming = false;
+    this.onGround = false;
     this.animate(dt);
   }
 

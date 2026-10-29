@@ -458,6 +458,7 @@ export const ACTIONS: ActionDef[] = [
     check: (c) => {
       const s = obj(c, 'structure')!;
       const def = STRUCTURES[s.type];
+      if (c.g.dev.on('freeBuild')) return null;
       if (def.tool && !toolIs(c, def.tool)) return `You need to activate a ${def.tool} to build this.`;
       const next = nextMaterial(def, s);
       if (next && c.g.inv.count(next) === 0) return `You need a ${itemDef(next).name.toLowerCase()} to continue.`;
@@ -470,6 +471,7 @@ export const ACTIONS: ActionDef[] = [
     repeat: (c) => { const s = obj(c, 'structure'); return !!s && !s.built; },
     run: (c, o) => {
       const s = obj(c, 'structure')!;
+      if (c.g.dev.on('freeBuild')) { c.g.devFinishStructure(s); return; }
       const def = STRUCTURES[s.type];
       const next = nextMaterial(def, s)!;
       const [m] = c.g.inv.take(next, 1);
@@ -751,6 +753,7 @@ function fuelItem(c: Ctx): Item | undefined {
 }
 
 export function craftProblem(g: Game, r: Recipe, tool?: Item): string | null {
+  if (g.dev.on('freeCraft')) return null;
   if (r.tool && (!tool || !g.inv.find(tool.uid) || itemDef(tool.type).tool !== r.tool)) return `You need a ${r.tool}.`;
   for (const inp of r.inputs) {
     if (g.inv.count(inp.item) < inp.count) return `Need ${inp.count} ${itemDef(inp.item).name.toLowerCase()}.`;

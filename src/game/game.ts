@@ -9,6 +9,7 @@ import {
   ANIMALS, World, type AnimalObj, type PileObj, type StructureObj, type WorldObj,
 } from '../world/world';
 import { ACTION_MAP, ACTIONS, craftProblem, type ActionDef, type Ctx, type Target } from './actions';
+import { DevSettings } from './dev';
 import { Input } from './input';
 import { CARRY_CAPACITY, Inventory } from './inventory';
 import { Player } from './player';
@@ -45,6 +46,7 @@ export class Game {
   sky: Sky;
   ui!: UI;
   foraged = new Map<number, number>();
+  dev = new DevSettings();
 
   target: Target | null = null;
   action: RunningAction | null = null;
@@ -191,7 +193,7 @@ export class Game {
     const list = p.kind === 'pile' ? p.items : (p.items ??= []);
     for (const it of items) {
       if (itemDef(it.type).noPickup) continue;
-      if (this.inv.weight() + itemDef(it.type).weight > CARRY_CAPACITY * 1.5) {
+      if (!this.dev.on('noWeight') && this.inv.weight() + itemDef(it.type).weight > CARRY_CAPACITY * 1.5) {
         this.msg('You cannot carry any more.', 'fail');
         break;
       }
@@ -318,9 +320,10 @@ export class Game {
     const toolQ = tool ? 0.9 + tool.ql / 500 : 1;
     const dmgSlow = tool ? 1 + tool.dmg / 200 : 1;
     // Skill speeds you up; crude or damaged tools slow you down.
-    const total = def.fixedTime
+    let total = def.fixedTime
       ? base * (1.15 - lvl / 250)
       : Math.max(base * 0.3, (base * (1.3 - lvl / 150) * dmgSlow) / ((0.5 + 0.5 * power) * toolQ));
+    if (this.dev.on('instantActions') || (this.dev.on('instantCraft') && def.id === 'craft')) total = 0;
     this.action = { def, ctx, elapsed: 0, total, startPos: this.player.pos.clone() };
     this.lastAction = { def, recipe: ctx.recipe };
     return true;
@@ -356,7 +359,7 @@ export class Game {
     let success = true;
     let ql = 10;
     if (skill) {
-      success = Math.random() < this.skills.successChance(skill, diff, toolQl, power);
+      success = this.dev.on('alwaysSucceed') || Math.random() < this.skills.successChance(skill, diff, toolQl, power);
       ql = this.skills.rollQuality(skill, toolQl, ctx.recipe ? 0 : 0, power);
       const before = this.skills.get(skill);
       const gain = this.skills.gain(skill, diff, success, a.total);
@@ -365,7 +368,7 @@ export class Game {
       }
     }
     this.player.stamina = Math.max(0, this.player.stamina - (def.stamina ?? 0));
-    if (tool && def.toolWear && this.inv.find(tool.uid)) {
+    if (tool && def.toolWear && !this.dev.on('noToolWear') && this.inv.find(tool.uid)) {
       tool.dmg += def.toolWear * (1.5 - tool.ql / 100) * (0.5 + Math.random());
       if (tool.dmg >= 100) {
         this.inv.remove(tool.uid);
@@ -400,7 +403,7 @@ export class Game {
 
   // ---------- combat & animals
   provoke(a: AnimalObj) {
-    if (ANIMALS[a.species].aggressive) { a.state = 'attack'; a.timer = 25; }
+    if (ANIMALS[a.species].aggressive && !this.dev.on('peaceful')) { a.state = 'attack'; a.timer = 25; }
     else { a.state = 'flee'; a.timer = 5; }
   }
 
@@ -421,6 +424,7 @@ export class Game {
       const toP = Math.hypot(p.x - a.x, p.z - a.z);
       a.timer -= dt;
       a.attackCooldown -= dt;
+      if (a.state === 'attack' && this.dev.on('peaceful')) { a.state = 'idle'; a.timer = 2; }
       // Deer are skittish: they bolt when you sprint nearby.
       if (a.species === 'deer' && a.state !== 'flee' && toP < 8 && this.player.sprinting) { a.state = 'flee'; a.timer = 4; }
       switch (a.state) {
@@ -450,7 +454,9 @@ export class Game {
           a.speed = toP > 1.4 ? d.speed * 0.9 : 0;
           if (toP < 1.8 && a.attackCooldown <= 0) {
             a.attackCooldown = 2.2;
-            if (Math.random() < 0.7 - this.skills.get('fighting') / 250) {
+            if (this.dev.on('godMode')) {
+              this.msg(`The ${d.name.toLowerCase()} bounces off you harmlessly.`, 'info');
+            } else if (Math.random() < 0.7 - this.skills.get('fighting') / 250) {
               const dmg = d.damage * (0.7 + Math.random() * 0.6);
               this.player.health -= dmg;
               this.msg(`The ${d.name.toLowerCase()} gores you! (${Math.round(dmg)})`, 'warn');
@@ -652,6 +658,15 @@ export class Game {
     this.placement = { def, valid, reason, tx: ex, tz: ez, axis };
   }
 
+  devFinishStructure(s: StructureObj) {
+    const def = STRUCTURES[s.type];
+    for (const m of def.materials) s.consumed[m.item] = m.count;
+    s.built = true;
+    s.ql = Math.max(s.ql, 50);
+    this.world.changed(s);
+    this.msg(`[dev] ${def.name} built instantly.`, 'info');
+  }
+
   private confirmPlacement() {
     const p = this.placement;
     if (!p) return;
@@ -663,7 +678,11 @@ export class Game {
       consumed: {}, built: false, ql: 0, fuel: 0, lit: false,
     });
     if (p.def.container) s.items = [];
-    this.msg(`You plan a ${p.def.name.toLowerCase()}. Use "Continue building" on it with the materials in your pack.`, 'good');
+    if (this.dev.on('freeBuild')) {
+      this.devFinishStructure(s);
+    } else {
+      this.msg(`You plan a ${p.def.name.toLowerCase()}. Use "Continue building" on it with the materials in your pack.`, 'good');
+    }
     if (!this.input.keys.has('ShiftLeft')) this.placing = null;
   }
 
@@ -695,7 +714,8 @@ export class Game {
     if (inp.hit('KeyR')) this.repeatLast();
     if (inp.hit('KeyX')) { if (this.action) this.cancelAction('You stop what you are doing.'); }
     if (inp.hit('Escape')) { this.placing = null; }
-    if (inp.hit('Backquote') || inp.hit('Digit0')) this.setActive(null);
+    if (inp.hit('Backquote') || inp.hit('F2')) this.ui.toggle('dev');
+    if (inp.hit('Digit0')) this.setActive(null);
     for (let i = 0; i < 9 && !this.ui.menuOpen; i++) {
       if (inp.hit(`Digit${i + 1}`)) {
         if (this.ui.hoveredItem !== null) {
@@ -710,8 +730,8 @@ export class Game {
     }
 
     // --- player
-    const over = this.inv.weight() - CARRY_CAPACITY;
-    p.update(dt, inp, this.world, !!this.action, over, !this.ui.menuOpen);
+    const over = this.dev.on('noWeight') ? 0 : this.inv.weight() - CARRY_CAPACITY;
+    p.update(dt, inp, this.world, !!this.action, over, !this.ui.menuOpen, this.dev.on('fly'));
     if (this.action && Math.hypot(p.pos.x - this.action.startPos.x, p.pos.z - this.action.startPos.z) > 0.6) {
       this.cancelAction('You moved and stopped what you were doing.');
     }
@@ -767,10 +787,12 @@ export class Game {
     } else if (p.food > 30 && p.water > 30) {
       p.health = Math.min(100, p.health + dt * 0.3);
     }
+    if (this.dev.on('noNeeds')) { p.food = 100; p.water = 100; p.stamina = 100; }
+    if (this.dev.on('godMode')) p.health = 100;
     if (p.health <= 0) this.die();
 
     // --- world
-    this.world.tick(dt);
+    this.world.tick(dt * this.dev.timeScale);
     this.updateAnimals(dt);
     this.world.terrain.rebuildDirty();
 

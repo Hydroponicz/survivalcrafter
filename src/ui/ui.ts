@@ -1,14 +1,15 @@
-import { itemDef, itemName, type Item } from '../data/items';
+import { ITEMS, itemDef, itemName, type Item } from '../data/items';
 import { RECIPES, STATION_NAMES, type Recipe } from '../data/recipes';
 import { SKILLS, type SkillId } from '../data/skills';
 import { STRUCTURE_LIST, STRUCTURES, totalMaterials } from '../data/structures';
 import { craftProblem, type ActionDef, type Ctx, type Target } from '../game/actions';
+import { DEV_FLAGS, devCommands, type DevFlag } from '../game/dev';
 import type { Game, MsgKind } from '../game/game';
 import { CARRY_CAPACITY } from '../game/inventory';
 import { TILE_NAMES } from '../world/terrain';
 import { ANIMALS, type PileObj, type StructureObj } from '../world/world';
 
-type WindowName = 'inventory' | 'crafting' | 'skills' | 'build' | 'help' | 'container';
+type WindowName = 'inventory' | 'crafting' | 'skills' | 'build' | 'help' | 'container' | 'dev';
 
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, html?: string) => {
   const e = document.createElement(tag);
@@ -45,6 +46,8 @@ export class UI {
   private expanded = new Set<string>();
   private refreshTimer = 0;
   private lastRefreshKey = '';
+  private devGive = { type: 'log', count: 10, ql: 50 };
+  private devSkill = 50;
 
   constructor(private g: Game) {
     this.root = document.getElementById('ui')!;
@@ -76,7 +79,7 @@ export class UI {
       this.bars[k] = b.querySelector('.bar-fill')!;
     }
 
-    for (const name of ['inventory', 'crafting', 'skills', 'build', 'help', 'container'] as WindowName[]) {
+    for (const name of ['inventory', 'crafting', 'skills', 'build', 'help', 'container', 'dev'] as WindowName[]) {
       const w = el('div', `window window-${name}`);
       w.style.display = 'none';
       w.addEventListener('mousedown', (e) => e.stopPropagation());
@@ -264,6 +267,7 @@ export class UI {
     this.clockEl.textContent = `Day ${g.world.day} · ${hh}:${mm}${f > 0.78 || f < 0.22 ? ' · night' : ''}`;
 
     const status: string[] = [];
+    if (g.dev.anyActive) status.push('<span class="dev-badge">DEV</span>');
     if (p.food < 20) status.push('<span class="warn">Hungry</span>');
     if (p.water < 20) status.push('<span class="warn">Thirsty</span>');
     if (p.stamina < 10) status.push('<span class="warn">Exhausted</span>');
@@ -314,7 +318,8 @@ export class UI {
   /** Re-render inventory-dependent UI. */
   refresh() {
     this.renderHotbar();
-    for (const n of this.open) if (n !== 'help') this.render(n);
+    // Static windows keep their DOM (and any half-typed form input).
+    for (const n of this.open) if (n !== 'help' && n !== 'dev') this.render(n);
   }
 
   private renderHotbar() {
@@ -358,6 +363,7 @@ export class UI {
       case 'build': return this.renderBuild();
       case 'help': return this.renderHelp();
       case 'container': return this.renderContainer();
+      case 'dev': return this.renderDev();
     }
   }
 
@@ -554,6 +560,99 @@ export class UI {
     this.frame('build', 'Build', body);
   }
 
+  private renderDev() {
+    const g = this.g;
+    const body = el('div', 'dev');
+    body.appendChild(el('div', 'hint', 'Cheats for testing. Toggles are remembered in this browser and apply to every world. Press <b>`</b> or <b>F2</b> to open or close.'));
+
+    body.appendChild(el('h3', '', 'Toggles'));
+    const grid = el('div', 'dev-toggles');
+    for (const [key, f] of Object.entries(DEV_FLAGS) as [DevFlag, { label: string; desc: string }][]) {
+      const row = el('label', 'dev-toggle');
+      row.title = f.desc;
+      const cb = el('input');
+      cb.type = 'checkbox';
+      cb.checked = g.dev.on(key);
+      cb.addEventListener('change', () => {
+        g.dev.set(key, cb.checked);
+        this.log(`[dev] ${f.label} ${cb.checked ? 'on' : 'off'}.`, 'info');
+      });
+      row.append(cb, el('span', '', `${f.label}<small>${esc(f.desc)}</small>`));
+      grid.appendChild(row);
+    }
+    body.appendChild(grid);
+
+    body.appendChild(el('h3', '', 'Time'));
+    const timeRow = el('div', 'dev-row');
+    timeRow.appendChild(el('span', '', 'Speed'));
+    const speed = el('select');
+    for (const [v, label] of [[0, 'Frozen'], [1, 'Normal'], [5, '5×'], [20, '20×'], [100, '100×']] as [number, string][]) {
+      const o = el('option', '', label);
+      o.value = String(v);
+      if (g.dev.timeScale === v) o.selected = true;
+      speed.appendChild(o);
+    }
+    speed.addEventListener('change', () => g.dev.setTimeScale(Number(speed.value)));
+    timeRow.appendChild(speed);
+    for (const [label, f] of [['Dawn', 0.25], ['Noon', 0.5], ['Dusk', 0.77], ['Midnight', 0]] as [string, number][]) {
+      timeRow.appendChild(this.devButton(label, () => devCommands.setTime(g, f)));
+    }
+    body.appendChild(timeRow);
+
+    body.appendChild(el('h3', '', 'Give item'));
+    const giveRow = el('div', 'dev-row');
+    const sel = el('select');
+    for (const d of Object.values(ITEMS).sort((a, b) => a.name.localeCompare(b.name))) {
+      const o = el('option', '', `${d.icon} ${esc(d.name)}`);
+      o.value = d.id;
+      if (d.id === this.devGive.type) o.selected = true;
+      sel.appendChild(o);
+    }
+    sel.addEventListener('change', () => { this.devGive.type = sel.value; });
+    const count = this.devNumber(this.devGive.count, 1, 500, (v) => { this.devGive.count = v; });
+    const ql = this.devNumber(this.devGive.ql, 1, 100, (v) => { this.devGive.ql = v; });
+    giveRow.append(sel, el('span', '', '×'), count, el('span', '', 'QL'), ql,
+      this.devButton('Give', () => devCommands.give(g, this.devGive.type, this.devGive.count, this.devGive.ql)));
+    body.appendChild(giveRow);
+
+    body.appendChild(el('h3', '', 'Player &amp; world'));
+    const skillRow = el('div', 'dev-row');
+    skillRow.append(el('span', '', 'All skills to'), this.devNumber(this.devSkill, 1, 99, (v) => { this.devSkill = v; }),
+      this.devButton('Set', () => devCommands.setSkills(g, this.devSkill)));
+    body.appendChild(skillRow);
+    const misc = el('div', 'dev-row');
+    misc.append(
+      this.devButton('Refill needs', () => devCommands.refill(g)),
+      this.devButton('Teleport home', () => devCommands.teleportHome(g)),
+      this.devButton('Grow everything', () => devCommands.growEverything(g)),
+      this.devButton('Spawn deer', () => devCommands.spawnAnimal(g, 'deer')),
+      this.devButton('Spawn boar', () => devCommands.spawnAnimal(g, 'boar')),
+      this.devButton('Clear inventory', () => devCommands.clearInventory(g)),
+    );
+    body.appendChild(misc);
+    this.frame('dev', 'Dev console', body);
+  }
+
+  private devButton(label: string, fn: () => void): HTMLButtonElement {
+    const b = el('button', '', label);
+    b.addEventListener('click', fn);
+    return b;
+  }
+
+  private devNumber(value: number, min: number, max: number, onChange: (v: number) => void): HTMLInputElement {
+    const inp = el('input');
+    inp.type = 'number';
+    inp.min = String(min);
+    inp.max = String(max);
+    inp.value = String(value);
+    inp.addEventListener('change', () => {
+      const v = Math.max(min, Math.min(max, Number(inp.value) || min));
+      inp.value = String(v);
+      onChange(v);
+    });
+    return inp;
+  }
+
   private renderHelp() {
     this.frame('help', 'Survival guide', `
       <h3>Controls</h3>
@@ -567,6 +666,7 @@ export class UI {
         <tr><td>R</td><td>Repeat last action · X: stop current action</td></tr>
         <tr><td>I / Tab · C · B · K</td><td>Inventory · Crafting · Build · Skills</td></tr>
         <tr><td>H · Esc</td><td>This guide · release mouse / close windows</td></tr>
+        <tr><td>&#96; or F2</td><td>Dev console (cheats: instant crafting, no needs, fly…)</td></tr>
       </table>
       <h3>How this world works</h3>
       <p>Like Wurm Online, everything you do is a <b>timed action</b> that uses a <b>skill</b>. Skills start at 1 and rise slowly with practice. Higher skill means faster work, fewer failures and better <b>quality (QL)</b>. Every item has its own QL; good tools and good materials make good products.</p>

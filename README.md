@@ -35,6 +35,15 @@ No server is needed — the world and your character save to the browser's `loca
 | 1-9 / 0 | Activate hotbar item / bare hands |
 | R / X | Repeat last action / stop current action |
 | I or Tab, C, B, K, H | Inventory, Crafting, Build, Skills, Help |
+| ` or F2 | Dev console (cheats) |
+
+## Dev console
+
+Press **`** (backtick) or **F2** for a cheat panel, handy for testing. Toggles: instant crafting, instant actions,
+always succeed, free crafting, free building, no player needs, god mode, no carry limit, no tool wear, peaceful
+animals and fly mode (Space up, Q down, Shift fast). It can also change time speed or jump to a time of day, give any
+item at any QL, set all skills, refill needs, teleport home, grow everything, spawn animals and clear your inventory.
+Toggles are remembered per browser; a purple **DEV** badge shows while any cheat is active.
 
 ## What makes it "Wurm-like"
 

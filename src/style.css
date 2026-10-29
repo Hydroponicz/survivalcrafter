@@ -155,6 +155,20 @@ table.keys { border-collapse: collapse; width: 100%; }
 table.keys td { padding: 3px 6px; border-bottom: 1px solid rgba(255,255,255,0.06); }
 table.keys td:first-child { color: var(--accent); white-space: nowrap; font-family: monospace; font-size: 13px; }
 
+/* ---------- dev console */
+.window-dev { right: 24px; top: 60px; width: 520px; }
+.dev-toggles { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; }
+.dev-toggle { display: flex; gap: 8px; align-items: flex-start; padding: 4px; border-radius: 4px; cursor: pointer; }
+.dev-toggle:hover { background: rgba(255,255,255,0.05); }
+.dev-toggle input { margin-top: 3px; accent-color: var(--accent); }
+.dev-toggle small { display: block; color: var(--muted); font-size: 11px; }
+.dev-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 6px; }
+.dev-row select, .dev-row input {
+  background: #1c1812; color: var(--ink); border: 1px solid var(--panel-edge); border-radius: 4px; padding: 3px 6px; font: inherit; font-size: 13px;
+}
+.dev-row input[type=number] { width: 64px; }
+.dev-badge { background: #8a2be2; color: #fff; padding: 1px 6px; border-radius: 3px; font-size: 12px; font-weight: bold; letter-spacing: 1px; }
+
 /* ---------- context menu */
 .context-menu {
   position: absolute; left: 50%; top: 50%; transform: translate(12px, -30%); min-width: 240px; max-width: 340px;
