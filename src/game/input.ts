@@ -24,7 +24,11 @@ export class Input {
     canvas.addEventListener('mousedown', (e) => {
       if (this.locked) this.clicks.push(e.button);
     });
-    canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+    // Block the browser menu everywhere, not just on the canvas: on Windows it opens on
+    // mouseup, after our action menu has already released the mouse over the UI.
+    document.addEventListener('contextmenu', (e) => {
+      if (!isTyping(e)) e.preventDefault();
+    });
     window.addEventListener('wheel', (e) => { if (this.locked) this.wheel += Math.sign(e.deltaY); }, { passive: true });
     document.addEventListener('pointerlockchange', () => {
       this.locked = document.pointerLockElement === this.canvas;
@@ -57,7 +61,7 @@ export class Input {
   }
 }
 
-function isTyping(e: KeyboardEvent) {
+function isTyping(e: Event) {
   const t = e.target as HTMLElement | null;
   return !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT');
 }
