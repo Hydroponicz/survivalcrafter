@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Survivalcrafter</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🪓</text></svg>" />
+  </head>
+  <body>
+    <canvas id="game"></canvas>
+    <div id="ui"></div>
+    <div id="menu" class="main-menu">
+      <div class="menu-box">
+        <h1>Survivalcrafter</h1>
+        <p class="tag">A slow, deep survival sandbox. Dig, mine, fell, forge, farm and build — one skill point at a time.</p>
+        <div class="menu-actions">
+          <button id="continue" style="display:none">Continue</button>
+          <div class="new-row">
+            <input id="seed" placeholder="World seed (optional)" />
+            <button id="new">New world</button>
+          </div>
+        </div>
+        <p class="status" id="menu-status"></p>
+        <p class="small">WASD move · Mouse look · V first/third person · LMB act · RMB action menu · I inventory · C craft · B build · H help</p>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
