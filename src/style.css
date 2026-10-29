@@ -187,12 +187,25 @@ table.keys td:first-child { color: var(--accent); white-space: nowrap; font-fami
 .good-text { color: var(--good); }
 
 /* ---------- context menu */
-.menu-cursor {
-  position: absolute; left: 0; top: 0; width: 0; height: 0; z-index: 30; pointer-events: none;
-  border-left: 7px solid transparent; border-right: 7px solid transparent; border-bottom: 16px solid #fff;
-  transform-origin: 0 0; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.8));
+/* In-game cursor (mouse stays captured while windows are open). */
+.ui-cursor {
+  position: absolute; left: 0; top: 0; z-index: 50; pointer-events: none !important;
+  width: 14px; height: 20px; margin: -1px 0 0 -1px;
+  background: #fff; clip-path: polygon(0 0, 100% 72%, 55% 68%, 72% 100%, 56% 100%, 40% 72%, 0 92%);
+  filter: drop-shadow(0 0 1px #000) drop-shadow(0 1px 2px rgba(0,0,0,0.7));
 }
-.menu-item.hover { background: rgba(232, 181, 98, 0.28); }
+.ui-drag-ghost {
+  position: absolute; left: 0; top: 0; z-index: 49; pointer-events: none !important;
+  font-size: 26px; opacity: 0.85; filter: drop-shadow(0 2px 3px rgba(0,0,0,0.6));
+}
+/* Hover styles for the in-game cursor (it can't trigger :hover). */
+.menu-item.vhover { background: rgba(232, 181, 98, 0.2); }
+.slot.vhover { border-color: rgba(255,255,255,0.35); }
+.window-head .close.vhover { color: var(--ink); }
+.window button.vhover:not(:disabled) { background: #5a4629; }
+.item-row.vhover { background: rgba(255,255,255,0.05); }
+.dev-toggle.vhover { background: rgba(255,255,255,0.05); }
+.pause-buttons button.vhover { background: #57452b; }
 .context-menu {
   position: absolute; left: 50%; top: 50%; transform: translate(12px, -30%); min-width: 240px; max-width: 340px;
   background: var(--panel); border: 1px solid var(--panel-edge); border-radius: 6px; pointer-events: auto !important;

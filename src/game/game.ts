@@ -988,9 +988,10 @@ export class Game {
       }
     }
 
-    // While the action menu is open the mouse drives its cursor, not the camera.
-    if (this.ui.menuOpen && inp.locked) {
-      this.ui.moveMenuCursor(inp.mouseDX, inp.mouseDY);
+    // While a window or menu is open the mouse drives the in-game cursor, not the camera.
+    if (this.ui.cursorActive()) {
+      this.ui.cursor.setVisible(true);
+      this.ui.cursor.move(inp.mouseDX, inp.mouseDY);
       inp.mouseDX = inp.mouseDY = inp.wheel = 0;
     }
 
@@ -1008,11 +1009,6 @@ export class Game {
     this.updatePlacement();
 
     for (const btn of inp.takeClicks()) {
-      if (this.ui.menuOpen) {
-        if (btn === 0) this.ui.clickMenuCursor();
-        else this.ui.closeMenu();
-        continue;
-      }
       if (this.placing) {
         if (btn === 0) this.confirmPlacement();
         else { this.stopPlacing(); this.msg('Stopped planning.', 'info'); }

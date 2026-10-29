@@ -5,6 +5,7 @@ import { STRUCTURE_LIST, STRUCTURES, totalMaterials } from '../data/structures';
 import { ACTION_MAP, craftProblem, forageName, type ActionDef, type Ctx, type Target } from '../game/actions';
 import { DEV_FLAGS, devCommands, type DevFlag } from '../game/dev';
 import { BIOME_NAMES, IDENTIFY } from '../data/forage';
+import { VirtualCursor } from './cursor';
 import { BIOMES, biomeAt } from '../game/forage';
 import type { Game, MsgKind } from '../game/game';
 import { CARRY_CAPACITY } from '../game/inventory';
@@ -54,8 +55,8 @@ export class UI {
   private pressedWindow: WindowName | null = null;
   private pendingRender = new Set<WindowName>();
   private lastRefreshKey = '';
-  private cursorEl: HTMLElement;
-  private menuCursor = { x: 0, y: 0 };
+  /** In-game cursor for windows and menus while the mouse stays captured. */
+  cursor: VirtualCursor;
   /** Seconds to keep the pause screen hidden after asking to re-capture the mouse. */
   relockGrace = 0;
   private devGive = { type: 'log', count: 10, ql: 50 };
@@ -105,9 +106,14 @@ export class UI {
     this.menuEl = el('div', 'context-menu');
     this.menuEl.style.display = 'none';
     this.root.appendChild(this.menuEl);
-    this.cursorEl = el('div', 'menu-cursor');
-    this.cursorEl.style.display = 'none';
-    this.root.appendChild(this.cursorEl);
+    this.cursor = new VirtualCursor(this.root, () => this.cursorActive(), (target, button) => {
+      // Right-click, or clicking off the action menu, closes it.
+      if (this.menuOpen && (button === 2 || !target || !this.menuEl.contains(target))) {
+        this.closeMenu();
+        return true;
+      }
+      return false;
+    });
 
     this.pauseEl = el('div', 'pause', `
       <div class="pause-box">
@@ -173,7 +179,6 @@ export class UI {
   show(name: WindowName) {
     this.open.add(name);
     this.windows.get(name)!.style.display = 'flex';
-    this.g.input.unlock();
     this.render(name);
   }
 
@@ -184,7 +189,7 @@ export class UI {
     this.pendingRender.delete(name);
     if (name === 'container') this.container = null;
     if (name === 'inventory') this.hoveredItem = null;
-    if (!this.anyWindowOpen()) this.wantsRelock = true;
+    if (!this.anyWindowOpen() && !this.g.input.locked) this.wantsRelock = true;
   }
 
   private onKey(e: KeyboardEvent) {
@@ -227,51 +232,18 @@ export class UI {
     this.menuEl.appendChild(el('div', 'menu-foot', `Active: ${active ? esc(itemName(active)) : 'bare hands'}`));
     this.menuEl.style.display = 'block';
     this.menuOpen = true;
-    // Keep the mouse captured and drive our own cursor over the menu: releasing
-    // and re-capturing it flashes the pause screen and the browser's
-    // "press Esc to show your cursor" notice every time.
-    if (this.g.input.locked) {
-      this.menuCursor = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
-      this.cursorEl.style.display = 'block';
-      this.moveMenuCursor(0, 0);
-    }
+    this.cursor.setVisible(this.cursorActive());
+  }
+
+  /** The in-game cursor drives the UI while the mouse is captured and a window or menu is open. */
+  cursorActive(): boolean {
+    return this.g.input.locked && this.anyWindowOpen();
   }
 
   closeMenu() {
     this.menuEl.style.display = 'none';
-    this.cursorEl.style.display = 'none';
     this.menuOpen = false;
     if (!this.anyWindowOpen() && !this.g.input.locked) this.wantsRelock = true;
-  }
-
-  /** Move the in-game menu cursor by a mouse delta and highlight the item under it. */
-  moveMenuCursor(dx: number, dy: number) {
-    const c = this.menuCursor;
-    c.x = Math.max(0, Math.min(window.innerWidth - 1, c.x + dx));
-    c.y = Math.max(0, Math.min(window.innerHeight - 1, c.y + dy));
-    // The arrow's tip sits on the cursor point.
-    this.cursorEl.style.transform = `translate(${c.x}px, ${c.y}px) rotate(-25deg) translate(-7px, 0)`;
-    const hit = this.menuItemAtCursor();
-    for (const item of this.menuEl.querySelectorAll('.menu-item')) item.classList.toggle('hover', item === hit);
-  }
-
-  private menuItemAtCursor(): HTMLElement | null {
-    for (const item of this.menuEl.querySelectorAll<HTMLElement>('.menu-item')) {
-      const r = item.getBoundingClientRect();
-      if (this.menuCursor.x >= r.left && this.menuCursor.x <= r.right && this.menuCursor.y >= r.top && this.menuCursor.y <= r.bottom) return item;
-    }
-    return null;
-  }
-
-  /** A click while the menu is driven by the in-game cursor. Returns true if it chose an action. */
-  clickMenuCursor(): boolean {
-    const item = this.menuItemAtCursor();
-    if (item) { item.click(); return true; }
-    // Clicking outside the menu closes it, like a normal context menu.
-    const r = this.menuEl.getBoundingClientRect();
-    const c = this.menuCursor;
-    if (c.x < r.left || c.x > r.right || c.y < r.top || c.y > r.bottom) this.closeMenu();
-    return false;
   }
 
   describeTarget(t: Target): string {
@@ -377,8 +349,8 @@ export class UI {
 
     // Don't flash the pause screen while the game is taking the mouse back.
     this.relockGrace = Math.max(0, this.relockGrace - 1 / 60);
-    // If the mouse was released (Esc), the real cursor takes over the menu.
-    if (this.menuOpen && !g.input.locked) this.cursorEl.style.display = 'none';
+    // If the mouse was released (Esc), the real cursor takes over.
+    this.cursor.setVisible(this.cursorActive());
     const showPause = !g.input.locked && !this.anyWindowOpen() && !this.wantsRelock && this.relockGrace <= 0;
     this.pauseEl.style.display = showPause ? 'flex' : 'none';
 
@@ -845,6 +817,7 @@ export class UI {
         <tr><td>I / Tab · C · B · K</td><td>Inventory · Crafting · Build · Skills</td></tr>
         <tr><td>H · Esc</td><td>This guide · release mouse / close windows</td></tr>
         <tr><td>G · J</td><td>Survey the area for things to pick · Field journal</td></tr>
+        <tr><td>Mouse in windows</td><td>While a window or the action menu is open, the mouse moves an in-game cursor (the camera holds still). Esc releases the real mouse.</td></tr>
         <tr><td>&#96; or F2</td><td>Dev console (cheats: instant crafting, no needs, fly…)</td></tr>
       </table>
       <h3>How this world works</h3>
