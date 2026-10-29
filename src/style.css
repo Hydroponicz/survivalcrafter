@@ -187,6 +187,12 @@ table.keys td:first-child { color: var(--accent); white-space: nowrap; font-fami
 .good-text { color: var(--good); }
 
 /* ---------- context menu */
+.menu-cursor {
+  position: absolute; left: 0; top: 0; width: 0; height: 0; z-index: 30; pointer-events: none;
+  border-left: 7px solid transparent; border-right: 7px solid transparent; border-bottom: 16px solid #fff;
+  transform-origin: 0 0; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.8));
+}
+.menu-item.hover { background: rgba(232, 181, 98, 0.28); }
 .context-menu {
   position: absolute; left: 50%; top: 50%; transform: translate(12px, -30%); min-width: 240px; max-width: 340px;
   background: var(--panel); border: 1px solid var(--panel-edge); border-radius: 6px; pointer-events: auto !important;

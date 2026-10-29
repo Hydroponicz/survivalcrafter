@@ -418,7 +418,7 @@ export const ACTIONS: ActionDef[] = [
     run: (c) => {
       const t = obj(c, 'tree')!;
       const stage = t.age < 0.3 ? 'young' : t.age < 0.8 ? 'mature' : 'old';
-      c.g.msg(`A ${stage} ${t.species} tree. It has ${t.branches} branches you could reach.`, 'info');
+      c.g.msg(`${stage === 'old' ? 'An' : 'A'} ${stage} ${t.species} tree. It has ${t.branches} branches you could reach.`, 'info');
     },
   },
   {

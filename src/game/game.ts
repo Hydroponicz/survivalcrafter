@@ -988,6 +988,12 @@ export class Game {
       }
     }
 
+    // While the action menu is open the mouse drives its cursor, not the camera.
+    if (this.ui.menuOpen && inp.locked) {
+      this.ui.moveMenuCursor(inp.mouseDX, inp.mouseDY);
+      inp.mouseDX = inp.mouseDY = inp.wheel = 0;
+    }
+
     // --- player
     const over = this.dev.on('noWeight') ? 0 : this.inv.weight() - CARRY_CAPACITY;
     p.update(dt, inp, this.world, !!this.action, over, !this.ui.menuOpen, this.dev.on('fly'));
@@ -1002,6 +1008,11 @@ export class Game {
     this.updatePlacement();
 
     for (const btn of inp.takeClicks()) {
+      if (this.ui.menuOpen) {
+        if (btn === 0) this.ui.clickMenuCursor();
+        else this.ui.closeMenu();
+        continue;
+      }
       if (this.placing) {
         if (btn === 0) this.confirmPlacement();
         else { this.stopPlacing(); this.msg('Stopped planning.', 'info'); }
@@ -1073,6 +1084,7 @@ export class Game {
 
     if (!uiOpen && !inp.locked && !this.ui.menuOpen && this.ui.wantsRelock) {
       this.ui.wantsRelock = false;
+      this.ui.relockGrace = 0.5;
       inp.lock();
     }
     this.ui.update();

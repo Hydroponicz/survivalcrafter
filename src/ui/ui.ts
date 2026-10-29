@@ -54,6 +54,10 @@ export class UI {
   private pressedWindow: WindowName | null = null;
   private pendingRender = new Set<WindowName>();
   private lastRefreshKey = '';
+  private cursorEl: HTMLElement;
+  private menuCursor = { x: 0, y: 0 };
+  /** Seconds to keep the pause screen hidden after asking to re-capture the mouse. */
+  relockGrace = 0;
   private devGive = { type: 'log', count: 10, ql: 50 };
   private devSkill = 50;
 
@@ -101,6 +105,9 @@ export class UI {
     this.menuEl = el('div', 'context-menu');
     this.menuEl.style.display = 'none';
     this.root.appendChild(this.menuEl);
+    this.cursorEl = el('div', 'menu-cursor');
+    this.cursorEl.style.display = 'none';
+    this.root.appendChild(this.cursorEl);
 
     this.pauseEl = el('div', 'pause', `
       <div class="pause-box">
@@ -145,7 +152,8 @@ export class UI {
     window.addEventListener('mouseup', release);
     window.addEventListener('dragend', release);
     document.addEventListener('mousedown', (e) => {
-      if (this.menuOpen && !this.menuEl.contains(e.target as Node)) this.closeMenu();
+      // With the mouse captured, clicks are routed through clickMenuCursor instead.
+      if (this.menuOpen && !this.g.input.locked && !this.menuEl.contains(e.target as Node)) this.closeMenu();
     });
     for (const [t, k] of g.pendingMsgs) this.log(t, k);
     g.pendingMsgs = [];
@@ -219,13 +227,51 @@ export class UI {
     this.menuEl.appendChild(el('div', 'menu-foot', `Active: ${active ? esc(itemName(active)) : 'bare hands'}`));
     this.menuEl.style.display = 'block';
     this.menuOpen = true;
-    this.g.input.unlock();
+    // Keep the mouse captured and drive our own cursor over the menu: releasing
+    // and re-capturing it flashes the pause screen and the browser's
+    // "press Esc to show your cursor" notice every time.
+    if (this.g.input.locked) {
+      this.menuCursor = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+      this.cursorEl.style.display = 'block';
+      this.moveMenuCursor(0, 0);
+    }
   }
 
   closeMenu() {
     this.menuEl.style.display = 'none';
+    this.cursorEl.style.display = 'none';
     this.menuOpen = false;
-    if (!this.anyWindowOpen()) this.wantsRelock = true;
+    if (!this.anyWindowOpen() && !this.g.input.locked) this.wantsRelock = true;
+  }
+
+  /** Move the in-game menu cursor by a mouse delta and highlight the item under it. */
+  moveMenuCursor(dx: number, dy: number) {
+    const c = this.menuCursor;
+    c.x = Math.max(0, Math.min(window.innerWidth - 1, c.x + dx));
+    c.y = Math.max(0, Math.min(window.innerHeight - 1, c.y + dy));
+    // The arrow's tip sits on the cursor point.
+    this.cursorEl.style.transform = `translate(${c.x}px, ${c.y}px) rotate(-25deg) translate(-7px, 0)`;
+    const hit = this.menuItemAtCursor();
+    for (const item of this.menuEl.querySelectorAll('.menu-item')) item.classList.toggle('hover', item === hit);
+  }
+
+  private menuItemAtCursor(): HTMLElement | null {
+    for (const item of this.menuEl.querySelectorAll<HTMLElement>('.menu-item')) {
+      const r = item.getBoundingClientRect();
+      if (this.menuCursor.x >= r.left && this.menuCursor.x <= r.right && this.menuCursor.y >= r.top && this.menuCursor.y <= r.bottom) return item;
+    }
+    return null;
+  }
+
+  /** A click while the menu is driven by the in-game cursor. Returns true if it chose an action. */
+  clickMenuCursor(): boolean {
+    const item = this.menuItemAtCursor();
+    if (item) { item.click(); return true; }
+    // Clicking outside the menu closes it, like a normal context menu.
+    const r = this.menuEl.getBoundingClientRect();
+    const c = this.menuCursor;
+    if (c.x < r.left || c.x > r.right || c.y < r.top || c.y > r.bottom) this.closeMenu();
+    return false;
   }
 
   describeTarget(t: Target): string {
@@ -329,7 +375,11 @@ export class UI {
       this.progress.style.display = 'none';
     }
 
-    const showPause = !g.input.locked && !this.anyWindowOpen();
+    // Don't flash the pause screen while the game is taking the mouse back.
+    this.relockGrace = Math.max(0, this.relockGrace - 1 / 60);
+    // If the mouse was released (Esc), the real cursor takes over the menu.
+    if (this.menuOpen && !g.input.locked) this.cursorEl.style.display = 'none';
+    const showPause = !g.input.locked && !this.anyWindowOpen() && !this.wantsRelock && this.relockGrace <= 0;
     this.pauseEl.style.display = showPause ? 'flex' : 'none';
 
     // Live windows refresh a few times per second.
