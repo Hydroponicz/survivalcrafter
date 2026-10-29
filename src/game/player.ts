@@ -1,17 +1,18 @@
 import * as THREE from 'three';
-import { STRUCTURES } from '../data/structures';
-import { TILE, WATER_LEVEL, type Terrain } from '../world/terrain';
-import type { World } from '../world/world';
+import { pieceBoxes, STRUCTURES } from '../data/structures';
+import { WATER_LEVEL, Y_MIN, type Terrain } from '../world/terrain';
+import { toLocal, type World } from '../world/world';
 import type { Input } from './input';
 
-const RADIUS = 0.32;
+const RADIUS = 0.3;
 const EYE = 1.62;
+const HEIGHT = 1.8;
+/** Highest ledge you can walk straight up onto (stairs, floor edges). */
+const STEP = 0.55;
 const GRAVITY = 22;
+const RING = [[1, 0], [-1, 0], [0, 1], [0, -1], [0.7, 0.7], [-0.7, 0.7], [0.7, -0.7], [-0.7, -0.7]];
 
 export type CameraMode = 'first' | 'third';
-
-interface Obstacle { type: 'circle'; x: number; z: number; r: number }
-interface BoxObstacle { type: 'box'; x: number; z: number; hx: number; hz: number }
 
 export class Player {
   pos = new THREE.Vector3();
@@ -23,6 +24,8 @@ export class Player {
   cameraMode: CameraMode = 'first';
   camDist = 4.5;
   moving = false;
+  /** Set while placing a building piece, so the wheel rotates it instead of zooming. */
+  wheelCaptured = false;
   sprinting = false;
 
   health = 100;
@@ -99,17 +102,46 @@ export class Player {
     );
   }
 
-  /** Ground height including walkable structures like floors. */
-  groundAt(world: World, x: number, z: number): number {
-    const t = world.terrain;
-    let h = t.heightAt(x, z);
-    const tx = Math.floor(x / TILE), tz = Math.floor(z / TILE);
-    const s = world.structureAt(tx, tz);
-    if (s && s.built && s.type === 'floor') {
-      const base = Math.min(t.cornerH(tx, tz), t.cornerH(tx + 1, tz), t.cornerH(tx, tz + 1), t.cornerH(tx + 1, tz + 1));
-      h = Math.max(h, base + 0.12 + t.tileSlope(tx, tz) / 10);
+  /**
+   * Ground under the feet: the voxel surface or the top of a built piece,
+   * whichever is highest without being more than a step above the feet.
+   */
+  groundAt(world: World, x: number, y: number, z: number): { y: number; piece: boolean } {
+    let g = world.terrain.groundBelow(x, y + STEP, z);
+    let piece = false;
+    for (const s of world.piecesNear(x, z)) {
+      if (!s.built) continue;
+      const [lx, , lz] = toLocal(s, x, y, z);
+      for (const b of pieceBoxes(STRUCTURES[s.type], s.open)) {
+        if (Math.abs(lx - b.c[0]) > b.h[0] + 0.05 || Math.abs(lz - b.c[2]) > b.h[2] + 0.05) continue;
+        const top = s.y + b.c[1] + b.h[1];
+        if (top <= y + STEP && top > g) { g = top; piece = true; }
+      }
     }
-    return h;
+    return { y: g, piece };
+  }
+
+  /** Would a body standing with its feet at (x, y, z) overlap anything solid? */
+  private blocked(world: World, x: number, y: number, z: number): boolean {
+    const t = world.terrain;
+    for (const h of [STEP + 0.05, 1.1, HEIGHT - 0.1]) {
+      if (t.solidAt(x, y + h, z)) return true;
+      for (const [ox, oz] of RING) if (t.solidAt(x + ox * RADIUS, y + h, z + oz * RADIUS)) return true;
+    }
+    for (const o of world.near(x, z, 2.5)) {
+      if (o.kind === 'tree') {
+        if (o.age > 0.35 && Math.hypot(x - o.x, z - o.z) < RADIUS + 0.12 + 0.18 * o.age) return true;
+        continue;
+      }
+      if (o.kind !== 'structure' || !o.built) continue;
+      const [lx, ly, lz] = toLocal(o, x, y, z);
+      for (const b of pieceBoxes(STRUCTURES[o.type], o.open)) {
+        const lo = b.c[1] - b.h[1], hi = b.c[1] + b.h[1];
+        if (hi <= ly + STEP || lo >= ly + HEIGHT) continue;
+        if (Math.abs(lx - b.c[0]) < b.h[0] + RADIUS && Math.abs(lz - b.c[2]) < b.h[2] + RADIUS) return true;
+      }
+    }
+    return false;
   }
 
   update(dt: number, input: Input, world: World, busy: boolean, overweight: number, allowMove: boolean, fly = false) {
@@ -118,7 +150,7 @@ export class Player {
       this.yaw -= input.mouseDX * 0.0022;
       this.pitch -= input.mouseDY * 0.0022;
       this.pitch = Math.max(-1.5, Math.min(1.5, this.pitch));
-      if (this.cameraMode === 'third') this.camDist = Math.max(2, Math.min(12, this.camDist + input.wheel * 0.6));
+      if (this.cameraMode === 'third' && !this.wheelCaptured) this.camDist = Math.max(2, Math.min(12, this.camDist + input.wheel * 0.6));
     }
 
     const k = input.keys;
@@ -146,13 +178,15 @@ export class Player {
       dz = (-mx * s + mz * c) * speed;
     }
 
-    // Slopes: walking uphill is slow and tiring, like hauling yourself up a Wurm hillside.
-    const here = this.groundAt(world, this.pos.x, this.pos.z);
-    if (len > 0 && !this.swimming) {
-      const ahead = this.groundAt(world, this.pos.x + dx * 0.15, this.pos.z + dz * 0.15);
-      const grade = (ahead - here) / Math.max(0.01, Math.hypot(dx, dz) * 0.15);
-      if (grade > 0.35) {
-        const f = Math.max(0.2, 1 - (grade - 0.35) * 0.8);
+    // Slopes: walking uphill is slow and tiring; very steep ground can't be walked up at all.
+    if (len > 0 && !this.swimming && this.onGround) {
+      const step = Math.hypot(dx, dz) * 0.15;
+      const here = this.groundAt(world, this.pos.x, this.pos.y, this.pos.z);
+      const ahead = this.groundAt(world, this.pos.x + dx * 0.15, this.pos.y, this.pos.z + dz * 0.15);
+      const grade = (ahead.y - here.y) / Math.max(0.01, step);
+      if (!ahead.piece && grade > 1.3) { dx = 0; dz = 0; }
+      else if (grade > 0.35 && !ahead.piece) {
+        const f = Math.max(0.25, 1 - (grade - 0.35) * 0.7);
         dx *= f; dz *= f;
         this.stamina -= dt * 4 * (grade - 0.35);
       }
@@ -160,15 +194,18 @@ export class Player {
 
     this.vel.x = dx;
     this.vel.z = dz;
-    const nx = this.pos.x + dx * dt;
-    const nz = this.pos.z + dz * dt;
-    const resolved = this.collide(world, nx, nz);
-    const maxXZ = t.size * TILE - 0.5;
-    this.pos.x = Math.max(0.5, Math.min(maxXZ, resolved.x));
-    this.pos.z = Math.max(0.5, Math.min(maxXZ, resolved.z));
+    const nx = this.pos.x + dx * dt, nz = this.pos.z + dz * dt;
+    // Slide along walls: try the full move, then each axis on its own.
+    if (!this.blocked(world, nx, this.pos.y, nz)) { this.pos.x = nx; this.pos.z = nz; }
+    else if (!this.blocked(world, nx, this.pos.y, this.pos.z)) this.pos.x = nx;
+    else if (!this.blocked(world, this.pos.x, this.pos.y, nz)) this.pos.z = nz;
+    const max = t.size - 0.5;
+    this.pos.x = Math.max(0.5, Math.min(max, this.pos.x));
+    this.pos.z = Math.max(0.5, Math.min(max, this.pos.z));
 
     // Vertical
-    const ground = this.groundAt(world, this.pos.x, this.pos.z);
+    let ground = this.groundAt(world, this.pos.x, this.pos.y, this.pos.z).y;
+    if (!Number.isFinite(ground)) ground = Y_MIN;
     const swimLevel = WATER_LEVEL - 1.25;
     this.swimming = ground < swimLevel && this.pos.y <= swimLevel + 0.05;
     if (this.swimming) {
@@ -176,7 +213,6 @@ export class Player {
       this.pos.y = swimLevel;
       this.onGround = false;
       this.stamina -= dt * 1.5;
-      if (k.has('Space') && allowMove) this.pos.y = swimLevel;
     } else {
       if (this.onGround && allowMove && input.hit('Space') && this.stamina > 3) {
         this.vel.y = 6.5;
@@ -184,16 +220,18 @@ export class Player {
         this.onGround = false;
       }
       this.vel.y -= GRAVITY * dt;
-      this.pos.y += this.vel.y * dt;
+      const ny = this.pos.y + this.vel.y * dt;
+      // Bump your head on ceilings and cave roofs.
+      if (this.vel.y > 0 && world.blockedAt(this.pos.x, ny + HEIGHT, this.pos.z)) this.vel.y = 0;
+      else this.pos.y = ny;
       if (this.pos.y <= ground) {
         this.pos.y = ground;
         this.vel.y = 0;
         this.onGround = true;
-      } else if (this.pos.y - ground < 0.25 && this.vel.y <= 0) {
+      } else if (this.pos.y - ground < 0.3 && this.vel.y <= 0 && this.onGround) {
         // stick to the ground when walking downhill
         this.pos.y = ground;
         this.vel.y = 0;
-        this.onGround = true;
       } else {
         this.onGround = false;
       }
@@ -205,7 +243,7 @@ export class Player {
     this.animate(dt);
   }
 
-  /** Dev fly mode: free movement along the view direction, no gravity or collisions. */
+  /** Dev fly mode: free movement, no gravity or collisions. */
   private flyUpdate(dt: number, k: Set<string>, world: World, allowMove: boolean) {
     let mx = 0, mz = 0, my = 0;
     if (allowMove) {
@@ -220,72 +258,15 @@ export class Player {
     const s = Math.sin(this.yaw), c = Math.cos(this.yaw);
     this.vel.set((mx * c + mz * s) * speed, my * speed, (-mx * s + mz * c) * speed);
     this.pos.addScaledVector(this.vel, dt);
-    const maxXZ = world.terrain.size * TILE - 0.5;
-    this.pos.x = Math.max(0.5, Math.min(maxXZ, this.pos.x));
-    this.pos.z = Math.max(0.5, Math.min(maxXZ, this.pos.z));
-    this.pos.y = Math.max(this.groundAt(world, this.pos.x, this.pos.z), Math.min(200, this.pos.y));
+    const max = world.terrain.size - 0.5;
+    this.pos.x = Math.max(0.5, Math.min(max, this.pos.x));
+    this.pos.z = Math.max(0.5, Math.min(max, this.pos.z));
+    this.pos.y = Math.max(Y_MIN + 1, Math.min(200, this.pos.y));
     this.moving = mx !== 0 || mz !== 0 || my !== 0;
     this.sprinting = false;
     this.swimming = false;
     this.onGround = false;
     this.animate(dt);
-  }
-
-  private obstacles(world: World, x: number, z: number): (Obstacle | BoxObstacle)[] {
-    const out: (Obstacle | BoxObstacle)[] = [];
-    for (const o of world.near(x, z, 3)) {
-      if (o.kind === 'tree') {
-        if (o.age > 0.35) out.push({ type: 'circle', x: o.x, z: o.z, r: 0.12 + 0.18 * o.age });
-      } else if (o.kind === 'structure' && o.built) {
-        const def = STRUCTURES[o.type];
-        if (o.type === 'floor' || (def.gate && o.open)) continue;
-        if (def.placement === 'edge') {
-          const long = TILE / 2 + 0.05, thin = o.type === 'stone_wall' ? 0.22 : 0.12;
-          out.push({ type: 'box', x: o.x, z: o.z, hx: o.axis === 'x' ? long : thin, hz: o.axis === 'x' ? thin : long });
-        } else if (o.type === 'campfire') {
-          out.push({ type: 'circle', x: o.x, z: o.z, r: 0.55 });
-        } else {
-          const half: Record<string, [number, number]> = {
-            forge: [0.75, 0.65], anvil: [0.5, 0.25], quern: [0.6, 0.6], workbench: [0.8, 0.4], chest: [0.5, 0.3], bed: [0.5, 0.95],
-          };
-          const [hx, hz] = half[o.type] ?? [0.5, 0.5];
-          out.push({ type: 'box', x: o.x, z: o.z, hx, hz });
-        }
-      }
-    }
-    return out;
-  }
-
-  private collide(world: World, x: number, z: number): { x: number; z: number } {
-    for (const ob of this.obstacles(world, x, z)) {
-      if (ob.type === 'circle') {
-        const dx = x - ob.x, dz = z - ob.z;
-        const d = Math.hypot(dx, dz);
-        const min = ob.r + RADIUS;
-        if (d < min && d > 1e-5) {
-          x = ob.x + (dx / d) * min;
-          z = ob.z + (dz / d) * min;
-        }
-      } else {
-        const cx = Math.max(ob.x - ob.hx, Math.min(x, ob.x + ob.hx));
-        const cz = Math.max(ob.z - ob.hz, Math.min(z, ob.z + ob.hz));
-        const dx = x - cx, dz = z - cz;
-        const d = Math.hypot(dx, dz);
-        if (d < RADIUS) {
-          if (d > 1e-5) {
-            x = cx + (dx / d) * RADIUS;
-            z = cz + (dz / d) * RADIUS;
-          } else {
-            // centre inside the box: push out along the shallowest axis
-            const px = ob.hx + RADIUS - Math.abs(x - ob.x);
-            const pz = ob.hz + RADIUS - Math.abs(z - ob.z);
-            if (px < pz) x += Math.sign(x - ob.x || 1) * px;
-            else z += Math.sign(z - ob.z || 1) * pz;
-          }
-        }
-      }
-    }
-    return { x, z };
   }
 
   private animate(dt: number) {
@@ -305,8 +286,8 @@ export class Player {
   }
 
   updateCamera(cam: THREE.PerspectiveCamera, terrain: Terrain) {
-    const eye = this.eye;
     this.model.visible = this.cameraMode === 'third';
+    const eye = this.eye;
     if (this.cameraMode === 'first') {
       cam.position.copy(eye);
       cam.lookAt(eye.clone().add(this.forward()));
@@ -317,10 +298,10 @@ export class Player {
     // Shoulder offset so the crosshair isn't blocked by your own head.
     const right = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
     target.addScaledVector(right, 0.45);
-    let d = this.camDist;
+    // Pull the camera in rather than letting it clip into hills or cave walls.
+    let d = 0.3;
+    while (d < this.camDist && !terrain.solidAt(target.x - f.x * (d + 0.3), target.y - f.y * (d + 0.3), target.z - f.z * (d + 0.3))) d += 0.15;
     const pos = target.clone().addScaledVector(f, -d);
-    const minY = terrain.heightAt(pos.x, pos.z) + 0.3;
-    if (pos.y < minY) pos.y = minY;
     cam.position.copy(pos);
     cam.lookAt(target.clone().addScaledVector(f, 4));
   }

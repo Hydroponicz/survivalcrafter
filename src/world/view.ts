@@ -2,9 +2,8 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { STRUCTURES, totalMaterials } from '../data/structures';
 import { hash2 } from './noise';
-import { TILE } from './terrain';
 import {
-  CROP_STAGES, type AnimalObj, type BushObj, type PileObj, type Species, type StructureObj,
+  CROP_STAGES, cropPos, type AnimalObj, type BushObj, type PileObj, type Species, type StructureObj,
   type TreeObj, type World, type WorldListener, type WorldObj,
 } from './world';
 
@@ -123,7 +122,7 @@ export class WorldView implements WorldListener {
 
     const stalks = [];
     for (let i = 0; i < 9; i++) {
-      const x = ((i % 3) - 1) * 0.55, z = (Math.floor(i / 3) - 1) * 0.55;
+      const x = ((i % 3) - 1) * 0.3, z = (Math.floor(i / 3) - 1) * 0.3;
       stalks.push(new THREE.CylinderGeometry(0.03, 0.04, 0.9, 4).translate(x, 0.45, z));
       stalks.push(new THREE.ConeGeometry(0.08, 0.25, 4).translate(x, 0.95, z));
     }
@@ -188,9 +187,7 @@ export class WorldView implements WorldListener {
     if (!crop) return;
     const stage = this.world.cropStage(crop);
     const m = new THREE.Mesh(this.cropGeo, this.cropMats[stage]);
-    const size = this.world.terrain.size;
-    const tx = k % size, tz = Math.floor(k / size);
-    const x = (tx + 0.5) * TILE, z = (tz + 0.5) * TILE;
+    const { x, z } = cropPos(k);
     m.position.set(x, this.world.terrain.heightAt(x, z), z);
     m.scale.set(1, 0.15 + (stage / (CROP_STAGES - 1)) * 0.85, 1);
     m.castShadow = true;
@@ -225,11 +222,10 @@ export class WorldView implements WorldListener {
 
   /** Re-sync heights of everything after terrain changes near a point. */
   refreshNear(x: number, z: number, r = 4) {
-    for (const o of this.world.near(x, z, r)) this.changed(o);
+    for (const o of this.world.near(x, z, r)) if (o.kind !== 'structure') this.changed(o);
     for (const [k] of this.cropMeshes) {
-      const size = this.world.terrain.size;
-      const cx = (k % size + 0.5) * TILE, cz = (Math.floor(k / size) + 0.5) * TILE;
-      if (Math.abs(cx - x) < r + TILE && Math.abs(cz - z) < r + TILE) this.cropsChanged(k);
+      const c = cropPos(k);
+      if (Math.abs(c.x - x) < r + 1 && Math.abs(c.z - z) < r + 1) this.cropsChanged(k);
     }
   }
 
@@ -248,8 +244,9 @@ export class WorldView implements WorldListener {
 
   private pileMesh(o: PileObj): THREE.Object3D {
     const g = new THREE.Group();
-    const y = this.world.terrain.heightAt(o.x, o.z);
-    g.position.set(o.x, y, o.z);
+    o.y = this.world.terrain.groundBelow(o.x, o.y + 0.3, o.z);
+    if (!Number.isFinite(o.y)) o.y = this.world.terrain.heightAt(o.x, o.z);
+    g.position.set(o.x, o.y, o.z);
     const corpse = o.items.find((i) => i.type === 'corpse');
     if (corpse) {
       const species = corpse.label?.includes('boar') ? 'boar' : 'deer';
@@ -280,135 +277,24 @@ export class WorldView implements WorldListener {
 
   private structureMesh(o: StructureObj): THREE.Object3D {
     const def = STRUCTURES[o.type];
-    const t = this.world.terrain;
-    const g = new THREE.Group();
-    let built = o.built;
-    const progress = built ? 1 : Object.values(o.consumed).reduce((a, b) => a + b, 0) / totalMaterials(def);
-    let baseY: number;
-    if (def.placement === 'edge') {
-      const x0 = o.tx, z0 = o.tz;
-      const x1 = o.axis === 'x' ? x0 + 1 : x0, z1 = o.axis === 'z' ? z0 + 1 : z0;
-      baseY = Math.min(t.cornerH(x0, z0), t.cornerH(x1, z1));
-    } else {
-      baseY = Math.min(
-        t.cornerH(o.tx, o.tz), t.cornerH(o.tx + 1, o.tz), t.cornerH(o.tx, o.tz + 1), t.cornerH(o.tx + 1, o.tz + 1));
-    }
-    g.position.set(o.x, baseY, o.z);
-    if (o.axis === 'z') g.rotation.y = Math.PI / 2;
-
-    const add = (geo: THREE.BufferGeometry, color: number, x = 0, y = 0, z = 0, extra?: THREE.MeshStandardMaterialParameters) => {
-      const m = new THREE.Mesh(geo, mat(color, extra));
-      m.position.set(x, y, z);
-      m.castShadow = true;
-      m.receiveShadow = true;
-      g.add(m);
-      return m;
-    };
-    const wood = 0x8a6440, stone = 0x8a8782;
-
-    switch (o.type) {
-      case 'campfire':
-      case 'forge': {
-        const forge = o.type === 'forge';
-        if (forge) {
-          add(new THREE.BoxGeometry(1.5, 0.9, 1.3), 0x7a6f66, 0, 0.45, 0, { flatShading: true });
-          add(new THREE.BoxGeometry(0.5, 1.2, 0.5), 0x6e655d, 0.45, 1.4, 0.3);
-          add(new THREE.BoxGeometry(0.8, 0.12, 0.7), 0x1a1a1a, 0, 0.91, 0);
-        } else {
-          for (let i = 0; i < 8; i++) {
-            const a = (i / 8) * Math.PI * 2;
-            add(new THREE.DodecahedronGeometry(0.16), stone, Math.cos(a) * 0.5, 0.1, Math.sin(a) * 0.5, { flatShading: true });
-          }
-          for (let i = 0; i < 3; i++) {
-            const l = add(new THREE.CylinderGeometry(0.06, 0.06, 0.8, 5), 0x5a3c22, 0, 0.12, 0);
-            l.rotation.set(Math.PI / 2, 0, (i / 3) * Math.PI);
-          }
-        }
-        if (o.lit) {
-          const flame = add(new THREE.ConeGeometry(forge ? 0.3 : 0.28, forge ? 0.5 : 0.75, 6), 0xffa030, 0, forge ? 1.1 : 0.4, 0,
-            { emissive: 0xff6a00, emissiveIntensity: 2.5, transparent: true, opacity: 0.85 });
-          flame.castShadow = false;
-          flame.userData.fire = o.id;
-          this.flames.add(flame);
-        }
-        break;
-      }
-      case 'anvil':
-        add(new THREE.BoxGeometry(0.6, 0.55, 0.5), stone, 0, 0.27, 0, { flatShading: true });
-        add(new THREE.BoxGeometry(1.0, 0.25, 0.45), 0x77746f, 0, 0.67, 0, { flatShading: true });
-        break;
-      case 'quern':
-        add(new THREE.CylinderGeometry(0.55, 0.6, 0.3, 12), stone, 0, 0.15, 0);
-        add(new THREE.CylinderGeometry(0.5, 0.5, 0.25, 12), 0x9a9792, 0, 0.42, 0);
-        add(new THREE.CylinderGeometry(0.04, 0.04, 0.5, 5), wood, 0.35, 0.7, 0);
-        break;
-      case 'workbench':
-        add(new THREE.BoxGeometry(1.6, 0.1, 0.8), wood, 0, 0.85, 0);
-        for (const [x, z] of [[-0.7, -0.3], [0.7, -0.3], [-0.7, 0.3], [0.7, 0.3]]) add(new THREE.BoxGeometry(0.1, 0.85, 0.1), 0x6e4e30, x, 0.42, z);
-        break;
-      case 'chest':
-        add(new THREE.BoxGeometry(1.0, 0.6, 0.6), wood, 0, 0.3, 0);
-        add(new THREE.BoxGeometry(1.04, 0.08, 0.64), 0x5a3c22, 0, 0.62, 0);
-        break;
-      case 'bed':
-        add(new THREE.BoxGeometry(1.0, 0.35, 1.9), wood, 0, 0.18, 0);
-        add(new THREE.BoxGeometry(0.9, 0.12, 1.8), 0x9b7552, 0, 0.42, 0);
-        break;
-      case 'floor':
-        add(new THREE.BoxGeometry(TILE, 0.12, TILE), wood, 0, 0.06 + (t.tileSlope(o.tx, o.tz) / 10), 0);
-        break;
-      case 'fence':
-      case 'gate': {
-        const open = o.type === 'gate' && o.open;
-        add(new THREE.BoxGeometry(0.12, 1.3, 0.12), 0x6e4e30, -TILE / 2, 0.55, 0);
-        add(new THREE.BoxGeometry(0.12, 1.3, 0.12), 0x6e4e30, TILE / 2, 0.55, 0);
-        const rails = new THREE.Group();
-        for (const y of [0.45, 0.9]) {
-          const r = new THREE.Mesh(new THREE.BoxGeometry(TILE - 0.1, 0.12, 0.05), mat(wood));
-          r.position.set(TILE / 2 - 0.05, y, 0);
-          r.castShadow = true;
-          rails.add(r);
-        }
-        if (o.type === 'gate') {
-          const brace = new THREE.Mesh(new THREE.BoxGeometry(TILE * 1.05, 0.08, 0.04), mat(0x6e4e30));
-          brace.position.set(TILE / 2 - 0.05, 0.67, 0.03);
-          brace.rotation.z = 0.25;
-          rails.add(brace);
-        }
-        rails.position.x = -TILE / 2;
-        if (open) rails.rotation.y = -Math.PI / 2;
-        g.add(rails);
-        break;
-      }
-      case 'log_wall':
-        for (let i = 0; i < 7; i++) {
-          const l = add(new THREE.CylinderGeometry(0.17, 0.17, TILE + 0.3, 7), i % 2 ? 0x6b4a30 : 0x765236, 0, 0.17 + i * 0.33 - 0.25, 0);
-          l.rotation.z = Math.PI / 2;
-        }
-        break;
-      case 'stone_wall':
-        add(new THREE.BoxGeometry(TILE + 0.1, 2.6, 0.4), stone, 0, 1.1, 0, { flatShading: true });
-        add(new THREE.BoxGeometry(TILE + 0.15, 0.15, 0.45), 0x77746f, 0, 2.45, 0);
-        break;
-    }
-
-    if (!built) {
-      // Unfinished: a translucent ghost that rises with build progress.
+    const g = buildPieceMesh(o.type, { lit: o.lit, open: o.open });
+    g.position.set(o.x, o.y, o.z);
+    g.rotation.y = o.yaw;
+    g.traverse((c) => { if (c instanceof THREE.Mesh && c.userData.flame) this.flames.add(c); });
+    if (!o.built) {
+      // A planned piece: a blueprint ghost that firms up as materials go in.
+      const progress = Object.values(o.consumed).reduce((a, b) => a + b, 0) / totalMaterials(def);
       g.traverse((c) => {
         if (c instanceof THREE.Mesh) {
           const m = (c.material as THREE.MeshStandardMaterial).clone();
           m.transparent = true;
-          m.opacity = 0.35 + progress * 0.4;
-          m.color.lerp(new THREE.Color(0xc8d8ff), 0.4);
+          m.opacity = 0.3 + progress * 0.5;
+          m.depthWrite = false;
+          m.color.lerp(new THREE.Color(0x9ec4ff), 0.55 * (1 - progress));
           c.material = m;
           c.castShadow = false;
         }
       });
-      g.scale.y = 0.15 + 0.85 * progress;
-      const stakes = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.7, 0.06), mat(0xd9c38f));
-      stakes.position.y = 0.35;
-      stakes.scale.y = 1 / g.scale.y;
-      g.add(stakes);
     }
     return g;
   }
@@ -441,8 +327,7 @@ export class WorldView implements WorldListener {
     this.fireLights.forEach((l, i) => {
       const f = lit[i];
       if (!f) { l.intensity = 0; return; }
-      const y = this.world.terrain.heightAt(f.x, f.z);
-      l.position.set(f.x, y + 1.2, f.z);
+      l.position.set(f.x, f.y + 1.2, f.z);
       l.intensity = 9 + Math.sin(time * 13 + i) * 1.5 + Math.sin(time * 7.3) * 1;
     });
     for (const fl of this.flames) {
@@ -496,4 +381,139 @@ function animateLegs(m: THREE.Group, a: AnimalObj, time: number) {
   const legs = m.userData.legs as THREE.Mesh[];
   const sw = a.speed > 0.1 ? Math.sin(time * a.speed * 3) * 0.6 : 0;
   legs.forEach((l, i) => { l.rotation.x = (i === 0 || i === 3 ? sw : -sw); });
+}
+
+const WOOD = 0x8a6440, DARK_WOOD = 0x6e4e30, STONE = 0x8a8782;
+
+/**
+ * Meshes for a building piece in its local frame (origin at bottom centre).
+ * Shared by placed pieces and the placement ghost.
+ */
+export function buildPieceMesh(type: string, state: { lit?: boolean; open?: boolean } = {}): THREE.Group {
+  const g = new THREE.Group();
+  const add = (geo: THREE.BufferGeometry, color: number, x = 0, y = 0, z = 0, extra?: THREE.MeshStandardMaterialParameters, parent: THREE.Object3D = g) => {
+    const m = new THREE.Mesh(geo, mat(color, extra));
+    m.position.set(x, y, z);
+    m.castShadow = true;
+    m.receiveShadow = true;
+    parent.add(m);
+    return m;
+  };
+  switch (type) {
+    case 'floor':
+      for (let i = 0; i < 5; i++) add(new THREE.BoxGeometry(0.39, 0.2, 2), i % 2 ? WOOD : 0x80603e, -0.8 + i * 0.4, 0.1, 0);
+      break;
+    case 'stone_foundation':
+      add(new THREE.BoxGeometry(2, 1, 2), STONE, 0, 0.5, 0, { flatShading: true });
+      add(new THREE.BoxGeometry(2.04, 0.08, 2.04), 0x77746f, 0, 0.97, 0);
+      break;
+    case 'wood_wall':
+      for (let i = 0; i < 5; i++) add(new THREE.BoxGeometry(0.39, 2, 0.16), i % 2 ? WOOD : 0x80603e, -0.8 + i * 0.4, 1, 0);
+      add(new THREE.BoxGeometry(2, 0.14, 0.22), DARK_WOOD, 0, 1.6, 0);
+      add(new THREE.BoxGeometry(2, 0.14, 0.22), DARK_WOOD, 0, 0.4, 0);
+      break;
+    case 'log_wall':
+      for (let i = 0; i < 6; i++) {
+        const l = add(new THREE.CylinderGeometry(0.18, 0.18, 2.2, 8), i % 2 ? 0x6b4a30 : 0x765236, 0, 0.18 + i * 0.328, 0);
+        l.rotation.z = Math.PI / 2;
+      }
+      break;
+    case 'stone_wall':
+      add(new THREE.BoxGeometry(2, 1.9, 0.4), STONE, 0, 0.95, 0, { flatShading: true });
+      add(new THREE.BoxGeometry(2.04, 0.12, 0.44), 0x77746f, 0, 1.94, 0);
+      break;
+    case 'beam':
+      add(new THREE.BoxGeometry(0.2, 2, 0.2), DARK_WOOD, 0, 1, 0);
+      break;
+    case 'roof': {
+      // A 45° slab rising toward +z, with thatch on top.
+      const len = Math.SQRT2 * 2;
+      const deck = add(new THREE.BoxGeometry(2, 0.08, len), WOOD, 0, 1, 0);
+      deck.rotation.x = -Math.PI / 4;
+      const thatch = add(new THREE.BoxGeometry(2.1, 0.16, len + 0.1), 0xb39a5c, 0, 1.08, -0.08, { flatShading: true });
+      thatch.rotation.x = -Math.PI / 4;
+      break;
+    }
+    case 'stairs':
+      for (let k = 0; k < 8; k++) add(new THREE.BoxGeometry(1.9, 0.08, 0.27), WOOD, 0, (k + 1) * 0.25 - 0.04, -1 + (k + 0.5) * 0.25);
+      for (const x of [-0.97, 0.97]) {
+        const s = add(new THREE.BoxGeometry(0.08, 0.25, Math.SQRT2 * 2), DARK_WOOD, x, 1, 0);
+        s.rotation.x = -Math.PI / 4;
+      }
+      break;
+    case 'door': {
+      add(new THREE.BoxGeometry(0.5, 2, 0.2), WOOD, -0.75, 1, 0);
+      add(new THREE.BoxGeometry(0.5, 2, 0.2), WOOD, 0.75, 1, 0);
+      const hinge = new THREE.Group();
+      hinge.position.set(-0.5, 0, 0);
+      add(new THREE.BoxGeometry(1, 1.95, 0.08), 0x7a5634, 0.5, 0.98, 0, undefined, hinge);
+      add(new THREE.BoxGeometry(0.9, 0.1, 0.1), DARK_WOOD, 0.5, 1.5, 0.05, undefined, hinge);
+      add(new THREE.BoxGeometry(0.9, 0.1, 0.1), DARK_WOOD, 0.5, 0.5, 0.05, undefined, hinge);
+      if (state.open) hinge.rotation.y = -Math.PI / 2;
+      g.add(hinge);
+      break;
+    }
+    case 'fence':
+    case 'gate': {
+      add(new THREE.BoxGeometry(0.12, 1.3, 0.12), DARK_WOOD, -1, 0.65, 0);
+      add(new THREE.BoxGeometry(0.12, 1.3, 0.12), DARK_WOOD, 1, 0.65, 0);
+      const rails = new THREE.Group();
+      rails.position.x = -1;
+      for (const y of [0.45, 0.9]) add(new THREE.BoxGeometry(1.9, 0.12, 0.05), WOOD, 1, y, 0, undefined, rails);
+      if (type === 'gate') {
+        const brace = add(new THREE.BoxGeometry(2.05, 0.08, 0.04), DARK_WOOD, 1, 0.67, 0.03, undefined, rails);
+        brace.rotation.z = 0.25;
+        if (state.open) rails.rotation.y = -Math.PI / 2;
+      }
+      g.add(rails);
+      break;
+    }
+    case 'campfire':
+    case 'forge': {
+      const forge = type === 'forge';
+      if (forge) {
+        add(new THREE.BoxGeometry(1.5, 0.9, 1.3), 0x7a6f66, 0, 0.45, 0, { flatShading: true });
+        add(new THREE.BoxGeometry(0.5, 1.2, 0.5), 0x6e655d, 0.45, 1.4, 0.3);
+        add(new THREE.BoxGeometry(0.8, 0.12, 0.7), 0x1a1a1a, 0, 0.91, 0);
+      } else {
+        for (let i = 0; i < 8; i++) {
+          const a = (i / 8) * Math.PI * 2;
+          add(new THREE.DodecahedronGeometry(0.16), STONE, Math.cos(a) * 0.5, 0.1, Math.sin(a) * 0.5, { flatShading: true });
+        }
+        for (let i = 0; i < 3; i++) {
+          const l = add(new THREE.CylinderGeometry(0.06, 0.06, 0.8, 5), 0x5a3c22, 0, 0.12, 0);
+          l.rotation.set(Math.PI / 2, 0, (i / 3) * Math.PI);
+        }
+      }
+      if (state.lit) {
+        const flame = add(new THREE.ConeGeometry(forge ? 0.3 : 0.28, forge ? 0.5 : 0.75, 6), 0xffa030, 0, forge ? 1.1 : 0.4, 0,
+          { emissive: 0xff6a00, emissiveIntensity: 2.5, transparent: true, opacity: 0.85 });
+        flame.castShadow = false;
+        flame.userData.flame = true;
+      }
+      break;
+    }
+    case 'anvil':
+      add(new THREE.BoxGeometry(0.6, 0.55, 0.5), STONE, 0, 0.27, 0, { flatShading: true });
+      add(new THREE.BoxGeometry(1.0, 0.25, 0.45), 0x77746f, 0, 0.67, 0, { flatShading: true });
+      break;
+    case 'quern':
+      add(new THREE.CylinderGeometry(0.55, 0.6, 0.3, 12), STONE, 0, 0.15, 0);
+      add(new THREE.CylinderGeometry(0.5, 0.5, 0.25, 12), 0x9a9792, 0, 0.42, 0);
+      add(new THREE.CylinderGeometry(0.04, 0.04, 0.5, 5), WOOD, 0.35, 0.7, 0);
+      break;
+    case 'workbench':
+      add(new THREE.BoxGeometry(1.6, 0.1, 0.8), WOOD, 0, 0.85, 0);
+      for (const [x, z] of [[-0.7, -0.3], [0.7, -0.3], [-0.7, 0.3], [0.7, 0.3]]) add(new THREE.BoxGeometry(0.1, 0.85, 0.1), DARK_WOOD, x, 0.42, z);
+      break;
+    case 'chest':
+      add(new THREE.BoxGeometry(1.0, 0.6, 0.6), WOOD, 0, 0.3, 0);
+      add(new THREE.BoxGeometry(1.04, 0.08, 0.64), 0x5a3c22, 0, 0.62, 0);
+      break;
+    case 'bed':
+      add(new THREE.BoxGeometry(1.0, 0.35, 1.9), WOOD, 0, 0.18, 0);
+      add(new THREE.BoxGeometry(0.9, 0.12, 1.8), 0x9b7552, 0, 0.42, 0);
+      break;
+  }
+  return g;
 }

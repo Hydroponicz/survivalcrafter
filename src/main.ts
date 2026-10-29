@@ -1,7 +1,7 @@
 import './style.css';
 import { RECIPES } from './data/recipes';
 import { STRUCTURES } from './data/structures';
-import { Game } from './game/game';
+import { Game, OLD_SAVE_KEY } from './game/game';
 import { UI } from './ui/ui';
 import { World } from './world/world';
 
@@ -13,6 +13,12 @@ const newBtn = document.getElementById('new') as HTMLButtonElement;
 const seedInput = document.getElementById('seed') as HTMLInputElement;
 
 if (Game.hasSave()) cont.style.display = '';
+try {
+  if (localStorage.getItem(OLD_SAVE_KEY)) {
+    status.textContent = 'The world is now made of voxels, so worlds from the old tile terrain can no longer be loaded. Start a new world to play.';
+    localStorage.removeItem(OLD_SAVE_KEY);
+  }
+} catch { /* storage unavailable */ }
 
 function seedFrom(text: string): number {
   if (!text.trim()) return Math.floor(Math.random() * 1e9);
@@ -37,7 +43,7 @@ function launch(make: () => Game | null) {
     });
     game.input.lock();
     // Handy for debugging from the browser console.
-    Object.assign(window, { game, __recipes: RECIPES, __data: { STRUCTURES } });
+    Object.assign(window, { game, __recipes: RECIPES, __data: { STRUCTURES }, __World: World });
   }, 30);
 }
 

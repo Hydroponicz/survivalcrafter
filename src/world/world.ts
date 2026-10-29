@@ -1,7 +1,7 @@
 import { type Item } from '../data/items';
-import { STRUCTURES } from '../data/structures';
+import { pieceBoxes, STRUCTURES, type V3 } from '../data/structures';
 import { mulberry32, Simplex } from './noise';
-import { Terrain, TILE, Tile, WATER_LEVEL } from './terrain';
+import { Mat, Terrain, WATER_LEVEL, WORLD_SIZE } from './terrain';
 
 export type Species = 'oak' | 'birch' | 'pine';
 export type AnimalSpecies = 'deer' | 'boar';
@@ -17,10 +17,10 @@ export interface BushObj {
   ripe: boolean; regrowAt: number;
 }
 
+/** A building piece or station. Position is its bottom centre; yaw turns it about Y. */
 export interface StructureObj {
   kind: 'structure'; id: number; type: string;
-  tx: number; tz: number; axis?: 'x' | 'z';
-  x: number; z: number;
+  x: number; y: number; z: number; yaw: number;
   /** Materials consumed so far, per item type. */
   consumed: Record<string, number>;
   built: boolean;
@@ -30,7 +30,7 @@ export interface StructureObj {
   items?: Item[];
 }
 
-export interface PileObj { kind: 'pile'; id: number; x: number; z: number; items: Item[] }
+export interface PileObj { kind: 'pile'; id: number; x: number; y: number; z: number; items: Item[] }
 
 export interface AnimalObj {
   kind: 'animal'; id: number; species: AnimalSpecies;
@@ -41,6 +41,7 @@ export interface AnimalObj {
   attackCooldown: number;
 }
 
+/** Crops grow on 1 m cells of tilled ground. */
 export interface Crop { planted: number; ql: number; tended: number }
 
 export type WorldObj = TreeObj | BushObj | StructureObj | PileObj;
@@ -49,17 +50,45 @@ export interface WorldListener {
   added(o: WorldObj): void;
   removed(o: WorldObj): void;
   changed(o: WorldObj): void;
-  cropsChanged(tileIndex: number): void;
+  cropsChanged(key: number): void;
 }
 
 export const DAY_LENGTH = 20 * 60; // seconds per in-game day
 export const CROP_STAGE_TIME = 120; // seconds per growth stage
 export const CROP_STAGES = 5;
+const CELL = 2; // spatial hash cell size in metres
+const GRID = WORLD_SIZE / CELL;
 
 export const ANIMALS: Record<AnimalSpecies, { name: string; hp: number; speed: number; aggressive: boolean; meat: number; damage: number }> = {
   deer: { name: 'Deer', hp: 35, speed: 4.5, aggressive: false, meat: 3, damage: 0 },
   boar: { name: 'Wild boar', hp: 40, speed: 3.6, aggressive: true, meat: 4, damage: 4 },
 };
+
+export const cropKey = (x: number, z: number) => Math.floor(z) * WORLD_SIZE + Math.floor(x);
+export const cropPos = (key: number) => ({ x: (key % WORLD_SIZE) + 0.5, z: Math.floor(key / WORLD_SIZE) + 0.5 });
+
+// ---------- piece geometry helpers
+
+/** A world point expressed in a piece's local frame. */
+export function toLocal(s: StructureObj, x: number, y: number, z: number): V3 {
+  const dx = x - s.x, dz = z - s.z;
+  const c = Math.cos(s.yaw), sn = Math.sin(s.yaw);
+  return [dx * c - dz * sn, y - s.y, dx * sn + dz * c];
+}
+
+export function toWorld(s: { x: number; y: number; z: number; yaw: number }, l: V3): V3 {
+  const c = Math.cos(s.yaw), sn = Math.sin(s.yaw);
+  return [s.x + l[0] * c + l[2] * sn, s.y + l[1], s.z - l[0] * sn + l[2] * c];
+}
+
+/** Is a point inside one of the piece's boxes (optionally grown by a margin)? */
+export function pointInPiece(s: StructureObj, x: number, y: number, z: number, margin = 0): boolean {
+  const [lx, ly, lz] = toLocal(s, x, y, z);
+  for (const b of pieceBoxes(STRUCTURES[s.type], s.open)) {
+    if (Math.abs(lx - b.c[0]) <= b.h[0] + margin && Math.abs(ly - b.c[1]) <= b.h[1] + margin && Math.abs(lz - b.c[2]) <= b.h[2] + margin) return true;
+  }
+  return false;
+}
 
 export class World {
   terrain: Terrain;
@@ -69,6 +98,7 @@ export class World {
   time = DAY_LENGTH * 0.36; // start in the morning
   private grid = new Map<number, Set<WorldObj>>();
   private nextId = 1;
+  private tickTimer = 0;
   listener?: WorldListener;
   spawn = { x: 0, z: 0 };
 
@@ -76,9 +106,11 @@ export class World {
     this.terrain = new Terrain(seed);
   }
 
-  // ---------- grid
+  // ---------- spatial hash
   private key(x: number, z: number) {
-    return Math.floor(z / TILE) * this.terrain.size + Math.floor(x / TILE);
+    const cx = Math.max(0, Math.min(GRID - 1, Math.floor(x / CELL)));
+    const cz = Math.max(0, Math.min(GRID - 1, Math.floor(z / CELL)));
+    return cz * GRID + cx;
   }
 
   add<T extends WorldObj>(o: Omit<T, 'id'> & { id?: number }): T {
@@ -104,33 +136,30 @@ export class World {
     this.listener?.changed(o);
   }
 
-  /** Objects whose anchor lies within the tiles overlapping the radius. */
+  /** Objects anchored within the cells overlapping a radius. */
   near(x: number, z: number, r: number): WorldObj[] {
     const out: WorldObj[] = [];
-    const t0x = Math.floor((x - r) / TILE), t1x = Math.floor((x + r) / TILE);
-    const t0z = Math.floor((z - r) / TILE), t1z = Math.floor((z + r) / TILE);
-    for (let tz = t0z; tz <= t1z; tz++) {
-      for (let tx = t0x; tx <= t1x; tx++) {
-        if (!this.terrain.inTiles(tx, tz)) continue;
-        const set = this.grid.get(tz * this.terrain.size + tx);
+    const c0x = Math.max(0, Math.floor((x - r) / CELL)), c1x = Math.min(GRID - 1, Math.floor((x + r) / CELL));
+    const c0z = Math.max(0, Math.floor((z - r) / CELL)), c1z = Math.min(GRID - 1, Math.floor((z + r) / CELL));
+    for (let cz = c0z; cz <= c1z; cz++) {
+      for (let cx = c0x; cx <= c1x; cx++) {
+        const set = this.grid.get(cz * GRID + cx);
         if (set) for (const o of set) out.push(o);
       }
     }
     return out;
   }
 
-  objectsOnTile(tx: number, tz: number): WorldObj[] {
-    const set = this.grid.get(tz * this.terrain.size + tx);
-    return set ? [...set] : [];
+  /** Built pieces whose colliders could touch a point. */
+  piecesNear(x: number, z: number, r = 2.5): StructureObj[] {
+    return this.near(x, z, r + 1.5).filter((o): o is StructureObj => o.kind === 'structure');
   }
 
-  structureAt(tx: number, tz: number, axis?: 'x' | 'z'): StructureObj | undefined {
-    for (const o of this.objectsOnTile(tx, tz)) {
-      if (o.kind !== 'structure') continue;
-      const def = STRUCTURES[o.type];
-      if (axis ? o.axis === axis : def.placement === 'tile') return o;
-    }
-    return undefined;
+  /** Is anything solid (terrain or a built piece) at this point? */
+  blockedAt(x: number, y: number, z: number): boolean {
+    if (this.terrain.solidAt(x, y, z)) return true;
+    for (const s of this.piecesNear(x, z, 0)) if (s.built && pointInPiece(s, x, y, z)) return true;
+    return false;
   }
 
   // ---------- generation
@@ -139,21 +168,19 @@ export class World {
     t.generate();
     const rng = mulberry32(t.seed + 5);
     const forest = new Simplex(t.seed + 1234);
-    for (let tz = 1; tz < t.size - 1; tz++) {
-      for (let tx = 1; tx < t.size - 1; tx++) {
-        if (t.tileType(tx, tz) !== Tile.Grass) continue;
-        const cx = (tx + 0.5) * TILE, cz = (tz + 0.5) * TILE;
-        const h = t.heightAt(cx, cz);
+    for (let z = 4; z < WORLD_SIZE - 4; z += 2) {
+      for (let x = 4; x < WORLD_SIZE - 4; x += 2) {
+        const px = x + rng() * 2, pz = z + rng() * 2;
+        const h = t.heightAt(px, pz);
         if (h < WATER_LEVEL + 0.5) continue;
-        const f = forest.fbm(tx * 0.04, tz * 0.04, 3);
-        const density = f > 0.15 ? 0.32 : f > -0.1 ? 0.06 : 0.012;
-        const x = cx + (rng() - 0.5) * TILE * 0.6;
-        const z = cz + (rng() - 0.5) * TILE * 0.6;
+        if (t.surfaceMaterial(px, pz) !== Mat.Grass) continue;
+        const f = forest.fbm(px * 0.02, pz * 0.02, 3);
+        const density = f > 0.15 ? 0.3 : f > -0.1 ? 0.055 : 0.011;
         if (rng() < density) {
           const species: Species = h > 14 ? 'pine' : rng() < 0.25 ? 'birch' : rng() < 0.3 ? 'pine' : 'oak';
-          this.add<TreeObj>({ kind: 'tree', species, x, z, age: 0.55 + rng() * 0.45, branches: 3 });
+          this.add<TreeObj>({ kind: 'tree', species, x: px, z: pz, age: 0.55 + rng() * 0.45, branches: 3 });
         } else if (rng() < 0.03) {
-          this.add<BushObj>({ kind: 'bush', x, z, ripe: rng() < 0.7, regrowAt: 0 });
+          this.add<BushObj>({ kind: 'bush', x: px, z: pz, ripe: rng() < 0.7, regrowAt: 0 });
         }
       }
     }
@@ -163,29 +190,30 @@ export class World {
 
   findSpawn() {
     const t = this.terrain;
-    const c = t.size / 2;
-    for (let r = 0; r < c; r++) {
-      for (let a = 0; a < 16; a++) {
-        const tx = Math.round(c + Math.cos(a / 16 * Math.PI * 2) * r);
-        const tz = Math.round(c + Math.sin(a / 16 * Math.PI * 2) * r);
-        if (!t.inTiles(tx, tz)) continue;
-        if (t.tileType(tx, tz) !== Tile.Grass) continue;
-        const x = (tx + 0.5) * TILE, z = (tz + 0.5) * TILE;
-        if (t.heightAt(x, z) < 1.5 || t.tileSlope(tx, tz) > 8) continue;
-        if (this.objectsOnTile(tx, tz).length) continue;
+    const c = WORLD_SIZE / 2;
+    for (let r = 0; r < c - 8; r += 2) {
+      for (let a = 0; a < 24; a++) {
+        const x = c + Math.cos((a / 24) * Math.PI * 2) * r;
+        const z = c + Math.sin((a / 24) * Math.PI * 2) * r;
+        if (t.surfaceMaterial(x, z) !== Mat.Grass) continue;
+        const h = t.heightAt(x, z);
+        if (h < 1.5) continue;
+        const flat = Math.max(...[[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dx, dz]) => Math.abs(t.heightAt(x + dx * 2, z + dz * 2) - h)));
+        if (flat > 0.8) continue;
+        if (this.near(x, z, 2).length) continue;
         this.spawn = { x, z };
         return;
       }
     }
-    this.spawn = { x: c * TILE, z: c * TILE };
+    this.spawn = { x: c, z: c };
   }
 
   populateAnimals(n: number) {
     const t = this.terrain;
     let tries = 0;
     while (this.animals.length < n && tries++ < n * 50) {
-      const x = (4 + Math.random() * (t.size - 8)) * TILE;
-      const z = (4 + Math.random() * (t.size - 8)) * TILE;
+      const x = 8 + Math.random() * (WORLD_SIZE - 16);
+      const z = 8 + Math.random() * (WORLD_SIZE - 16);
       if (t.heightAt(x, z) < 1) continue;
       if (Math.hypot(x - this.spawn.x, z - this.spawn.z) < 30) continue;
       this.spawnAnimal(Math.random() < 0.65 ? 'deer' : 'boar', x, z);
@@ -212,18 +240,25 @@ export class World {
     return Math.min(CROP_STAGES - 1, Math.floor((this.time - c.planted) / stageTime));
   }
 
+  /** Remove crops whose tilled soil was disturbed near a point. */
+  disturbCrops(x: number, z: number, r: number) {
+    for (const k of [...this.crops.keys()]) {
+      const p = cropPos(k);
+      if (Math.hypot(p.x - x, p.z - z) > r + 0.6) continue;
+      if (this.terrain.surfaceMaterial(p.x, p.z) !== Mat.Field) {
+        this.crops.delete(k);
+        this.listener?.cropsChanged(k);
+      }
+    }
+  }
+
   /** Slow world processes: tree growth, bush ripening, grass spreading. */
   tick(dt: number) {
     this.time += dt;
-    const t = this.terrain;
-    // Random tile ticks, like Minecraft's random ticks.
-    for (let i = 0; i < 40; i++) {
-      const tx = Math.floor(Math.random() * t.size);
-      const tz = Math.floor(Math.random() * t.size);
-      if (t.tileType(tx, tz) === Tile.Dirt && Math.random() < 0.05 && t.heightAt((tx + 0.5) * TILE, (tz + 0.5) * TILE) > WATER_LEVEL) {
-        const nb = [t.tileType(tx + 1, tz), t.tileType(tx - 1, tz), t.tileType(tx, tz + 1), t.tileType(tx, tz - 1)];
-        if (nb.includes(Tile.Grass) && !this.structureAt(tx, tz)) t.setTileType(tx, tz, Tile.Grass);
-      }
+    this.tickTimer += dt;
+    while (this.tickTimer > 0.25) {
+      this.tickTimer -= 0.25;
+      this.terrain.randomTick();
     }
     for (const o of this.objects.values()) {
       if (o.kind === 'tree') {
@@ -239,7 +274,6 @@ export class World {
         if (o.fuel <= 0) { o.fuel = 0; o.lit = false; this.changed(o); }
       }
     }
-    // Keep crop visuals in step with their growth stage.
     for (const [k, c] of this.crops) {
       const prev = (c as Crop & { _stage?: number })._stage;
       const s = this.cropStage(c);
@@ -252,10 +286,9 @@ export class World {
 
   // ---------- persistence
   serialize() {
-    const objs = [...this.objects.values()];
     return {
       terrain: this.terrain.serialize(),
-      objects: objs,
+      objects: [...this.objects.values()],
       crops: [...this.crops.entries()].map(([k, c]) => [k, { planted: c.planted, ql: c.ql, tended: c.tended }]),
       animals: this.animals.map((a) => ({ species: a.species, x: a.x, z: a.z, hp: a.hp })),
       time: this.time,
@@ -265,6 +298,7 @@ export class World {
 
   static load(data: ReturnType<World['serialize']>): World {
     const w = new World(data.terrain.seed);
+    w.terrain.generate();
     w.terrain.load(data.terrain);
     for (const o of data.objects) w.add(o);
     for (const [k, c] of data.crops as [number, Crop][]) w.crops.set(k, c);

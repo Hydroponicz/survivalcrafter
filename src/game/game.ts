@@ -2,13 +2,15 @@ import * as THREE from 'three';
 import { getNextUid, itemDef, itemName, makeItem, setNextUid, type Item } from '../data/items';
 import type { Recipe, StationKind } from '../data/recipes';
 import { SKILLS, Skills, type SkillId } from '../data/skills';
-import { STRUCTURES, type StructureDef } from '../data/structures';
-import { TILE, WATER_LEVEL } from '../world/terrain';
-import { WorldView } from '../world/view';
+import { pieceBoxes, STRUCTURES, type StructureDef } from '../data/structures';
+import { Mat, WATER_LEVEL, type Volumes } from '../world/terrain';
+import { buildPieceMesh, WorldView } from '../world/view';
 import {
-  ANIMALS, World, type AnimalObj, type PileObj, type StructureObj, type WorldObj,
+  ANIMALS, pointInPiece, toWorld, World, type AnimalObj, type PileObj, type StructureObj, type WorldObj,
 } from '../world/world';
-import { ACTION_MAP, ACTIONS, craftProblem, type ActionDef, type Ctx, type Target } from './actions';
+import {
+  ACTION_MAP, ACTIONS, craftProblem, DIG_RADIUS, EARTH_PER_ITEM, LEVEL_RADIUS, type ActionDef, type Ctx, type Target,
+} from './actions';
 import { DevSettings } from './dev';
 import { Input } from './input';
 import { CARRY_CAPACITY, Inventory } from './inventory';
@@ -17,7 +19,15 @@ import { Sky } from './sky';
 import type { UI } from '../ui/ui';
 
 const REACH = 4.5;
-const SAVE_KEY = 'survivalcrafter.save.v1';
+const BUILD_REACH = 8;
+const SAVE_KEY = 'survivalcrafter.save.v2';
+export const OLD_SAVE_KEY = 'survivalcrafter.save.v1';
+
+/** What digging each material gives you. */
+const EARTH_ITEMS: Partial<Record<Mat, string>> = {
+  [Mat.Grass]: 'dirt', [Mat.Dirt]: 'dirt', [Mat.Field]: 'dirt', [Mat.Sand]: 'sand', [Mat.Clay]: 'clay',
+  [Mat.Rock]: 'rock_shard', [Mat.Iron]: 'iron_ore',
+};
 
 export interface RunningAction {
   def: ActionDef;
@@ -31,7 +41,7 @@ interface QueuedAction { def: ActionDef; ctx: Ctx }
 
 export type MsgKind = 'info' | 'good' | 'fail' | 'warn' | 'skill';
 
-export interface Placement { def: StructureDef; valid: boolean; reason: string; tx: number; tz: number; axis?: 'x' | 'z' }
+export interface Placement { def: StructureDef; valid: boolean; reason: string; x: number; y: number; z: number; yaw: number; snapped: boolean }
 
 export class Game {
   renderer: THREE.WebGLRenderer;
@@ -59,9 +69,20 @@ export class Game {
   paused = false;
   private abandoned = false;
 
-  private highlight: THREE.LineLoop;
-  private cornerMarker: THREE.Mesh;
-  private ghost: THREE.Mesh;
+  /** Fractional earth dug (positive) or owed for fills (negative), per item type. */
+  earth: Record<string, number> = {};
+  /** Set by a levelling step that should continue. */
+  levelling = false;
+  placeYaw = 0;
+
+  private brush: THREE.LineLoop;
+  private brushOuter: THREE.LineLoop;
+  private ghost: THREE.Group | null = null;
+  private ghostType = '';
+  private ghostMats = {
+    ok: new THREE.MeshBasicMaterial({ color: 0x66ff88, transparent: true, opacity: 0.4, depthWrite: false }),
+    bad: new THREE.MeshBasicMaterial({ color: 0xff5555, transparent: true, opacity: 0.4, depthWrite: false }),
+  };
   private timer = new THREE.Timer();
   private saveTimer = 0;
   private respawnTimer = 0;
@@ -84,16 +105,16 @@ export class Game {
     this.view = new WorldView(world);
     this.scene.add(this.view.group);
     this.scene.add(this.player.model);
-    this.sky = new Sky(this.scene, world.terrain.size * TILE);
+    this.sky = new Sky(this.scene, world.terrain.size);
 
-    this.highlight = new THREE.LineLoop(
-      new THREE.BufferGeometry().setFromPoints(Array.from({ length: 4 }, () => new THREE.Vector3())),
-      new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.7, depthTest: true }),
+    const ring = (opacity: number) => new THREE.LineLoop(
+      new THREE.BufferGeometry().setFromPoints(Array.from({ length: 48 }, () => new THREE.Vector3())),
+      new THREE.LineBasicMaterial({ color: 0xfff2c0, transparent: true, opacity, depthTest: false }),
     );
-    this.cornerMarker = new THREE.Mesh(new THREE.SphereGeometry(0.09, 8, 6), new THREE.MeshBasicMaterial({ color: 0xffe08a }));
-    this.ghost = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ color: 0x66ff88, transparent: true, opacity: 0.35, depthWrite: false }));
-    this.scene.add(this.highlight, this.cornerMarker, this.ghost);
-    this.ghost.visible = false;
+    this.brush = ring(0.85);
+    this.brushOuter = ring(0.35);
+    this.brush.renderOrder = this.brushOuter.renderOrder = 5;
+    this.scene.add(this.brush, this.brushOuter);
 
     window.addEventListener('resize', () => {
       this.camera.aspect = window.innerWidth / window.innerHeight;
@@ -106,7 +127,7 @@ export class Game {
   // ---------- setup
   newCharacter() {
     const s = this.world.spawn;
-    this.player.pos.set(s.x, this.world.terrain.heightAt(s.x, s.z), s.z);
+    this.player.pos.set(s.x, this.world.terrain.heightAt(s.x, s.z) + 0.1, s.z);
     // A very humble start: a crude knife and a bit of fiber.
     this.inv.add(makeItem('stone_knife', 8));
     this.inv.add(makeItem('berries', 10));
@@ -117,6 +138,8 @@ export class Game {
   }
 
   start() {
+    // Mesh the land around you before the first frame; the rest streams in.
+    this.world.terrain.update(this.player.pos.x, this.player.pos.z, 400);
     this.renderer.setAnimationLoop((t) => this.frame(t));
   }
 
@@ -192,21 +215,55 @@ export class Game {
     this.setActive(active && active.type === type ? null : it.uid);
   }
 
-  dropToGround(items: Item[], x: number, z: number) {
-    const existing = this.world.near(x, z, 1.5).find((o) => o.kind === 'pile' && Math.hypot(o.x - x, o.z - z) < 1.2) as PileObj | undefined;
+  /** Drop items in a pile on the ground below a point, merging with a pile already there. */
+  dropToGround(items: Item[], x: number, y: number, z: number) {
+    const existing = this.world.near(x, z, 1.5).find((o) => o.kind === 'pile' && Math.hypot(o.x - x, o.z - z) < 1.2 && Math.abs(o.y - y) < 1.5) as PileObj | undefined;
     if (existing) {
       existing.items.push(...items);
       this.world.changed(existing);
       return existing;
     }
-    return this.world.add<PileObj>({ kind: 'pile', x, z, items });
+    let gy = this.world.terrain.groundBelow(x, y + 0.5, z);
+    if (!Number.isFinite(gy)) gy = this.world.terrain.heightAt(x, z);
+    return this.world.add<PileObj>({ kind: 'pile', x, y: gy, z, items });
   }
 
   dropItems(uids: number[]) {
     const items = uids.map((u) => this.inv.remove(u)).filter((i): i is Item => !!i);
     if (!items.length) return;
     const f = this.player.forward();
-    this.dropToGround(items, this.player.pos.x + f.x * 0.8, this.player.pos.z + f.z * 0.8);
+    const p = this.player.pos;
+    this.dropToGround(items, p.x + f.x * 0.8, p.y, p.z + f.z * 0.8);
+    this.inventoryChanged();
+  }
+
+  earthCredit(type: string): number {
+    return Math.max(0, this.earth[type] ?? 0);
+  }
+
+  /** Turn dug volume into items (whole items only; the rest carries over). Returns a description. */
+  collectEarth(vol: Volumes, ql: number): string {
+    const got: Record<string, number> = {};
+    for (const [m, v] of Object.entries(vol)) {
+      const type = EARTH_ITEMS[Number(m) as Mat];
+      if (!type || !v) continue;
+      this.earth[type] = (this.earth[type] ?? 0) + v;
+      while (this.earth[type] >= EARTH_PER_ITEM) {
+        this.earth[type] -= EARTH_PER_ITEM;
+        got[type] = (got[type] ?? 0) + 1;
+      }
+    }
+    for (const [type, n] of Object.entries(got)) this.give(type, Math.max(1, ql), n);
+    return Object.entries(got).map(([t, n]) => `${n} ${itemDef(t).name.toLowerCase()}`).join(', ');
+  }
+
+  /** Pay for filled-in volume with earth items. */
+  spendEarth(type: string, volume: number) {
+    this.earth[type] = (this.earth[type] ?? 0) - volume;
+    while (this.earth[type] < -1e-6) {
+      if (!this.inv.take(type, 1).length) { this.earth[type] = 0; break; }
+      this.earth[type] += EARTH_PER_ITEM;
+    }
     this.inventoryChanged();
   }
 
@@ -358,6 +415,7 @@ export class Game {
   cancelAction(reason?: string) {
     if (this.action && reason) this.msg(reason, 'fail');
     this.action = null;
+    this.levelling = false;
     this.queue = [];
     this.player.swing = 0;
   }
@@ -432,7 +490,7 @@ export class Game {
   killAnimal(a: AnimalObj) {
     this.world.animals = this.world.animals.filter((x) => x !== a);
     const d = ANIMALS[a.species];
-    this.dropToGround([makeItem('corpse', 50, `${d.name.toLowerCase()} corpse`)], a.x, a.z);
+    this.dropToGround([makeItem('corpse', 50, `${d.name.toLowerCase()} corpse`)], a.x, this.world.terrain.heightAt(a.x, a.z), a.z);
     this.msg(`You kill the ${d.name.toLowerCase()}! Butcher the corpse with a knife.`, 'good');
     if (this.action?.ctx.t.kind === 'animal' && this.action.ctx.t.animal === a) this.action = null;
     this.queue = this.queue.filter((q) => !(q.ctx.t.kind === 'animal' && q.ctx.t.animal === a));
@@ -440,7 +498,7 @@ export class Game {
 
   private updateAnimals(dt: number) {
     const w = this.world, t = w.terrain, p = this.player.pos;
-    const maxXZ = t.size * TILE - 2;
+    const maxXZ = t.size - 2;
     for (const a of w.animals) {
       const d = ANIMALS[a.species];
       const toP = Math.hypot(p.x - a.x, p.z - a.z);
@@ -493,7 +551,8 @@ export class Game {
         const nx = a.x + a.dirX * a.speed * dt;
         const nz = a.z + a.dirZ * a.speed * dt;
         const h = t.heightAt(nx, nz);
-        if (h < WATER_LEVEL + 0.2 || nx < 2 || nz < 2 || nx > maxXZ || nz > maxXZ || this.blocked(nx, nz)) {
+        if (h < WATER_LEVEL + 0.2 || nx < 2 || nz < 2 || nx > maxXZ || nz > maxXZ || w.blockedAt(nx, h + 0.6, nz) ||
+          Math.abs(h - t.heightAt(a.x, a.z)) > a.speed * dt * 1.5) {
           // turn away from water or walls
           const ang = Math.atan2(a.dirZ, a.dirX) + Math.PI * (0.5 + Math.random());
           a.dirX = Math.cos(ang); a.dirZ = Math.sin(ang);
@@ -513,7 +572,7 @@ export class Game {
       this.respawnTimer = 45;
       if (w.animals.length < 28) {
         for (let i = 0; i < 20; i++) {
-          const x = (4 + Math.random() * (t.size - 8)) * TILE, z = (4 + Math.random() * (t.size - 8)) * TILE;
+          const x = 8 + Math.random() * (t.size - 16), z = 8 + Math.random() * (t.size - 16);
           if (Math.hypot(x - p.x, z - p.z) < 50 || t.heightAt(x, z) < 1) continue;
           w.spawnAnimal(Math.random() < 0.65 ? 'deer' : 'boar', x, z);
           break;
@@ -522,162 +581,211 @@ export class Game {
     }
   }
 
-  /** Walls and fences keep animals in pens. */
-  private blocked(x: number, z: number): boolean {
-    for (const o of this.world.near(x, z, 2)) {
-      if (o.kind !== 'structure' || !o.built) continue;
-      const def = STRUCTURES[o.type];
-      if (def.placement !== 'edge' || (def.gate && o.open)) continue;
-      const hx = o.axis === 'x' ? TILE / 2 : 0.4, hz = o.axis === 'x' ? 0.4 : TILE / 2;
-      if (Math.abs(x - o.x) < hx && Math.abs(z - o.z) < hz) return true;
-    }
-    return false;
-  }
-
   // ---------- targeting
-  private raycast(): Target | null {
+  /** March a ray from the camera through animals, objects, pieces, water and voxels. */
+  raycast(maxReach = REACH, skipPieces = false): Target | null {
     const cam = this.camera;
     const dir = new THREE.Vector3();
     cam.getWorldDirection(dir);
     const origin = cam.position.clone();
     const eye = this.player.eye;
-    const maxD = this.player.cameraMode === 'third' ? this.player.camDist + REACH + 1 : REACH;
+    const third = this.player.cameraMode === 'third';
+    const maxD = third ? this.player.camDist + maxReach + 1 : maxReach;
     const t = this.world.terrain;
-    const objs = this.world.near(origin.x, origin.z, maxD + 2);
+    const objs = this.world.near(origin.x, origin.z, maxD + 3);
     const animals = this.world.animals.filter((a) => Math.hypot(a.x - origin.x, a.z - origin.z) < maxD + 2);
     const p = new THREE.Vector3();
-    for (let d = 0.2; d <= maxD; d += 0.05) {
+    for (let d = 0.1; d <= maxD; d += 0.05) {
       p.copy(origin).addScaledVector(dir, d);
-      if (this.player.cameraMode === 'third' && p.distanceTo(eye) > REACH + 0.5) {
-        // Too far from the character; but keep marching while still between camera and player.
-        if (d > this.player.camDist + 0.5) break;
-        continue;
+      const tooFar = third && p.distanceTo(eye) > maxReach + 0.5;
+      if (tooFar && d > this.player.camDist + 0.5) break;
+      if (!tooFar) {
+        for (const a of animals) {
+          const g = t.heightAt(a.x, a.z);
+          const tall = a.species === 'deer' ? 1.6 : 1.0;
+          if (Math.hypot(p.x - a.x, p.z - a.z) < 0.6 && p.y > g && p.y < g + tall) return { kind: 'animal', animal: a, point: p.clone() };
+        }
+        for (const o of objs) {
+          if (skipPieces && o.kind === 'structure') continue;
+          if (this.hitObject(o, p)) return { kind: 'object', obj: o, point: p.clone() };
+        }
       }
-      for (const a of animals) {
-        const g = t.heightAt(a.x, a.z);
-        const tall = a.species === 'deer' ? 1.6 : 1.0;
-        if (Math.hypot(p.x - a.x, p.z - a.z) < 0.6 && p.y > g && p.y < g + tall) return { kind: 'animal', animal: a, point: p.clone() };
+      if (t.solidAt(p.x, p.y, p.z)) {
+        if (tooFar) return null;
+        return { kind: 'terrain', point: p.clone(), normal: t.normalAt(p.x, p.y, p.z), mat: t.materialAt(p.x, p.y, p.z) };
       }
-      for (const o of objs) if (this.hitObject(o, p)) return { kind: 'object', obj: o, point: p.clone() };
-      const h = t.heightAt(p.x, p.z);
-      if (p.y < WATER_LEVEL && h < WATER_LEVEL - 0.05) {
-        return { kind: 'water', tx: Math.floor(p.x / TILE), tz: Math.floor(p.z / TILE), point: p.clone() };
-      }
-      if (p.y <= h) {
-        const tx = Math.floor(p.x / TILE), tz = Math.floor(p.z / TILE);
-        if (!t.inTiles(tx, tz)) return null;
-        return { kind: 'tile', tx, tz, cx: Math.round(p.x / TILE), cz: Math.round(p.z / TILE), point: p.clone() };
-      }
+      if (!tooFar && p.y < WATER_LEVEL) return { kind: 'water', point: p.clone() };
     }
     return null;
   }
 
   private hitObject(o: WorldObj, p: THREE.Vector3): boolean {
-    const t = this.world.terrain;
-    const g = t.heightAt(o.x, o.z);
     const dx = p.x - o.x, dz = p.z - o.z;
     switch (o.kind) {
       case 'tree': {
+        const g = this.world.terrain.heightAt(o.x, o.z);
         const s = 0.2 + 0.8 * o.age;
         const y = p.y - g;
         if (y < 0 || y > 6.5 * s) return false;
         const r = y < 2.6 * s ? 0.2 + 0.3 * s : 1.5 * s;
         return dx * dx + dz * dz < r * r;
       }
-      case 'bush':
+      case 'bush': {
+        const g = this.world.terrain.heightAt(o.x, o.z);
         return dx * dx + dz * dz + (p.y - g - 0.4) ** 2 < 0.45;
-      case 'pile':
-        return dx * dx + dz * dz + (p.y - g - 0.3) ** 2 < 0.3;
-      case 'structure': {
-        const def = STRUCTURES[o.type];
-        const base = def.placement === 'edge' ? Math.min(t.cornerH(o.tx, o.tz), t.cornerH(o.tx + (o.axis === 'x' ? 1 : 0), o.tz + (o.axis === 'z' ? 1 : 0))) : g;
-        const y = p.y - base;
-        if (def.placement === 'edge') {
-          const hx = o.axis === 'x' ? TILE / 2 : 0.2, hz = o.axis === 'x' ? 0.2 : TILE / 2;
-          const hgt = o.type === 'fence' || o.type === 'gate' ? 1.35 : 2.5;
-          return Math.abs(dx) < hx && Math.abs(dz) < hz && y > -0.3 && y < hgt;
-        }
-        if (o.type === 'floor') return Math.abs(dx) < TILE / 2 && Math.abs(dz) < TILE / 2 && y > -0.2 && y < 0.25 + t.tileSlope(o.tx, o.tz) / 10;
-        const half: Record<string, [number, number, number]> = {
-          campfire: [0.6, 0.5, 0.6], forge: [0.8, 1.8, 0.7], anvil: [0.5, 0.8, 0.3], quern: [0.6, 0.8, 0.6],
-          workbench: [0.8, 0.95, 0.4], chest: [0.55, 0.7, 0.35], bed: [0.55, 0.5, 1.0],
-        };
-        const [hx, hy, hz] = half[o.type] ?? [0.5, 1, 0.5];
-        return Math.abs(dx) < hx && Math.abs(dz) < hz && y > -0.2 && y < hy;
       }
+      case 'pile':
+        return dx * dx + dz * dz + (p.y - o.y - 0.3) ** 2 < 0.3;
+      case 'structure':
+        return pointInPiece(o, p.x, p.y, p.z, 0.04);
     }
   }
 
-  private updateHighlight() {
+  /** Ring(s) on the ground showing the area a shovel or pickaxe will work. */
+  private updateBrush() {
     const t = this.target;
-    const show = !!t && t.kind === 'tile' && !this.placing;
-    this.highlight.visible = show;
-    this.cornerMarker.visible = show;
-    if (!show || t?.kind !== 'tile') return;
-    const tr = this.world.terrain;
-    const pos = this.highlight.geometry.attributes.position as THREE.BufferAttribute;
-    const cs = [[t.tx, t.tz], [t.tx + 1, t.tz], [t.tx + 1, t.tz + 1], [t.tx, t.tz + 1]];
-    cs.forEach(([x, z], i) => pos.setXYZ(i, x * TILE, tr.cornerH(x, z) + 0.04, z * TILE));
-    pos.needsUpdate = true;
-    this.highlight.geometry.computeBoundingSphere();
-    this.cornerMarker.position.set(t.cx * TILE, tr.cornerH(t.cx, t.cz) + 0.06, t.cz * TILE);
+    const tool = this.activeItem() ? itemDef(this.activeItem()!.type).tool : undefined;
+    const show = !this.placing && t?.kind === 'terrain' && (tool === 'shovel' || tool === 'pickaxe');
+    this.brush.visible = show;
+    this.brushOuter.visible = show && tool === 'shovel';
+    if (!show || t?.kind !== 'terrain') return;
+    const place = (ring: THREE.LineLoop, r: number) => {
+      const pos = ring.geometry.attributes.position as THREE.BufferAttribute;
+      const n = pos.count;
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * Math.PI * 2;
+        const x = t.point.x + Math.cos(a) * r, z = t.point.z + Math.sin(a) * r;
+        let y = this.world.terrain.groundBelow(x, t.point.y + 1.5, z);
+        if (!Number.isFinite(y) || Math.abs(y - t.point.y) > 3) y = t.point.y;
+        pos.setXYZ(i, x, y + 0.06, z);
+      }
+      pos.needsUpdate = true;
+      ring.geometry.computeBoundingSphere();
+    };
+    place(this.brush, tool === 'pickaxe' ? 1.1 : DIG_RADIUS);
+    if (tool === 'shovel') place(this.brushOuter, LEVEL_RADIUS);
   }
 
-  // ---------- building placement
+  // ---------- building placement (Valheim-style planning)
   startPlacing(def: StructureDef) {
     this.placing = def;
-    this.msg(`Placing ${def.name.toLowerCase()}: left-click to set out the plan, right-click or Esc to cancel.`, 'info');
+    this.player.wheelCaptured = true;
+    this.msg(`Planning ${def.name.toLowerCase()}: left-click to place, mouse wheel or Q/E to rotate, right-click to stop.`, 'info');
+  }
+
+  stopPlacing() {
+    this.placing = null;
+    this.placement = null;
+    this.player.wheelCaptured = false;
+    if (this.ghost) { this.scene.remove(this.ghost); this.ghost = null; this.ghostType = ''; }
   }
 
   private updatePlacement() {
-    this.ghost.visible = false;
-    this.placement = null;
     const def = this.placing;
     if (!def) return;
-    let point: THREE.Vector3 | null = null;
-    const t = this.target;
-    if (t && t.kind !== 'none') point = t.point;
-    if (!point) return;
-    const tr = this.world.terrain;
-    const tx = Math.floor(point.x / TILE), tz = Math.floor(point.z / TILE);
-    if (!tr.inTiles(tx, tz)) return;
-    let valid = true, reason = '';
-    let axis: 'x' | 'z' | undefined;
-    let ex = tx, ez = tz;
-    if (def.placement === 'edge') {
-      const fx = point.x / TILE - tx, fz = point.z / TILE - tz;
-      const opts: [number, number, number, 'x' | 'z'][] = [
-        [fz, tx, tz, 'x'], [1 - fz, tx, tz + 1, 'x'], [fx, tx, tz, 'z'], [1 - fx, tx + 1, tz, 'z'],
-      ];
-      opts.sort((a, b) => a[0] - b[0]);
-      [, ex, ez, axis] = opts[0];
-      if (!tr.inTiles(ex, ez)) return;
-      if (tr.edgeSlope(ex, ez, axis) > def.maxSlope) { valid = false; reason = 'The ground is too steep along that edge.'; }
-      if (this.world.structureAt(ex, ez, axis)) { valid = false; reason = 'Something is already built there.'; }
-      const x = axis === 'x' ? (ex + 0.5) * TILE : ex * TILE;
-      const z = axis === 'z' ? (ez + 0.5) * TILE : ez * TILE;
-      for (const o of this.world.near(x, z, 1.5)) {
-        if (o.kind === 'tree' && Math.hypot(o.x - x, o.z - z) < 1.1) { valid = false; reason = 'A tree is in the way.'; }
-      }
-      const y = Math.min(tr.cornerH(ex, ez), tr.cornerH(ex + (axis === 'x' ? 1 : 0), ez + (axis === 'z' ? 1 : 0)));
-      this.ghost.scale.set(axis === 'x' ? TILE : 0.25, 1.6, axis === 'z' ? TILE : 0.25);
-      this.ghost.position.set(x, y + 0.8, z);
-    } else {
-      if (tr.tileSlope(tx, tz) > def.maxSlope) { valid = false; reason = `The tile is too steep (${tr.tileSlope(tx, tz)} dm, max ${def.maxSlope}). Flatten it with a shovel.`; }
-      if (this.world.structureAt(tx, tz)) { valid = false; reason = 'Something is already built there.'; }
-      if (this.world.objectsOnTile(tx, tz).some((o) => o.kind === 'tree' || o.kind === 'bush')) { valid = false; reason = 'Clear the vegetation first.'; }
-      if (this.world.crops.has(tz * tr.size + tx)) { valid = false; reason = 'There are crops here.'; }
-      const x = (tx + 0.5) * TILE, z = (tz + 0.5) * TILE;
-      if (tr.heightAt(x, z) < WATER_LEVEL) { valid = false; reason = 'You cannot build in water.'; }
-      const sz = def.id === 'floor' ? TILE : 1.2;
-      this.ghost.scale.set(sz, def.id === 'floor' ? 0.15 : 1, sz);
-      this.ghost.position.set(x, tr.heightAt(x, z) + (def.id === 'floor' ? 0.07 : 0.5), z);
+    if (this.ghostType !== def.id) {
+      if (this.ghost) this.scene.remove(this.ghost);
+      this.ghost = buildPieceMesh(def.id);
+      this.ghost.traverse((c) => { if (c instanceof THREE.Mesh) { c.castShadow = false; c.receiveShadow = false; } });
+      this.ghostType = def.id;
+      this.scene.add(this.ghost);
     }
-    const dist = Math.hypot(this.ghost.position.x - this.player.pos.x, this.ghost.position.z - this.player.pos.z);
-    if (dist > REACH + 1) { valid = false; reason = 'Too far away.'; }
-    this.ghost.visible = true;
-    (this.ghost.material as THREE.MeshBasicMaterial).color.set(valid ? 0x66ff88 : 0xff5555);
-    this.placement = { def, valid, reason, tx: ex, tz: ez, axis };
+    const inp = this.input;
+    if (inp.locked) {
+      const step = Math.PI / 8;
+      if (inp.wheel) this.placeYaw += Math.sign(inp.wheel) * step;
+      if (inp.hit('KeyQ')) this.placeYaw += step;
+      if (inp.hit('KeyE')) this.placeYaw -= step;
+    }
+    const hit = this.raycast(BUILD_REACH);
+    if (!hit || hit.kind === 'none' || hit.kind === 'animal') {
+      this.ghost!.visible = false;
+      this.placement = null;
+      return;
+    }
+    const pt = hit.point;
+    let x = pt.x, y = pt.y, z = pt.z, yaw = this.placeYaw, snapped = false;
+    let valid = true, reason = '';
+
+    if (hit.kind === 'object' && hit.obj.kind === 'structure') {
+      // Resting on another piece: sit on top of the box that was hit.
+      y = this.pieceTopAt(hit.obj, pt) ?? pt.y;
+    }
+    if (def.snap) {
+      const snap = this.findSnap(def, pt, yaw);
+      if (snap) ({ x, y, z, yaw } = snap), snapped = true;
+    }
+    if (!snapped && hit.kind === 'terrain' && !def.snap && hit.normal.y < 0.75) { valid = false; reason = 'The ground is too steep here. Level it with a shovel.'; }
+    if (!snapped && hit.kind === 'water') { valid = false; reason = 'You cannot build on water.'; }
+    if (!snapped && hit.kind === 'object' && hit.obj.kind !== 'structure') { valid = false; reason = 'Something is in the way.'; }
+    const probe: StructureObj = { kind: 'structure', id: -1, type: def.id, x, y, z, yaw, consumed: {}, built: true, ql: 0, fuel: 0, lit: false };
+    const pp = this.player.pos;
+    if (Math.hypot(x - pp.x, z - pp.z) > BUILD_REACH) { valid = false; reason = 'Too far away.'; }
+    for (const h of [0.3, 1.0, 1.6]) {
+      if (pointInPiece(probe, pp.x, pp.y + h, pp.z, 0.25)) { valid = false; reason = 'You are standing in the way.'; }
+    }
+    for (const o of this.world.near(x, z, 2)) {
+      if (o.kind === 'tree' && o.age > 0.2 && pointInPiece(probe, o.x, this.world.terrain.heightAt(o.x, o.z) + 0.5, o.z, 0.3)) { valid = false; reason = 'A tree is in the way.'; }
+      if (o.kind === 'structure' && o.type === def.id && Math.hypot(o.x - x, o.y - y, o.z - z) < 0.15) { valid = false; reason = 'There is already one there.'; }
+    }
+    if (!def.snap && y < WATER_LEVEL - 0.3) { valid = false; reason = 'That spot is under water.'; }
+
+    const g = this.ghost!;
+    g.visible = true;
+    g.position.set(x, y, z);
+    g.rotation.y = yaw;
+    const m = valid ? this.ghostMats.ok : this.ghostMats.bad;
+    g.traverse((c) => { if (c instanceof THREE.Mesh) c.material = m; });
+    this.placement = { def, valid, reason, x, y, z, yaw, snapped };
+  }
+
+  /** Top of whichever box of a piece contains a point. */
+  private pieceTopAt(s: StructureObj, p: THREE.Vector3): number | undefined {
+    const c = Math.cos(s.yaw), sn = Math.sin(s.yaw);
+    const dx = p.x - s.x, dz = p.z - s.z;
+    const lx = dx * c - dz * sn, ly = p.y - s.y, lz = dx * sn + dz * c;
+    for (const b of pieceBoxes(STRUCTURES[s.type], s.open)) {
+      if (Math.abs(lx - b.c[0]) <= b.h[0] + 0.05 && Math.abs(ly - b.c[1]) <= b.h[1] + 0.05 && Math.abs(lz - b.c[2]) <= b.h[2] + 0.05) {
+        return s.y + b.c[1] + b.h[1];
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Line a piece up with nearby pieces: pair one of its snap points with a
+   * nearby piece's snap point, turning in 90° steps relative to that piece,
+   * and keep the fit closest to where you're aiming that doesn't overlap.
+   */
+  private findSnap(def: StructureDef, aim: THREE.Vector3, yaw: number) {
+    let best: { x: number; y: number; z: number; yaw: number; score: number } | null = null;
+    const quarter = Math.PI / 2;
+    for (const o of this.world.near(aim.x, aim.z, 4)) {
+      if (o.kind !== 'structure') continue;
+      const od = STRUCTURES[o.type];
+      if (!od.snap) continue;
+      const qyaw = o.yaw + Math.round((yaw - o.yaw) / quarter) * quarter;
+      for (const sp of od.snaps) {
+        const T = toWorld(o, sp);
+        if (Math.hypot(T[0] - aim.x, T[1] - aim.y, T[2] - aim.z) > 1.6) continue;
+        for (const gs of def.snaps) {
+          const off = toWorld({ x: 0, y: 0, z: 0, yaw: qyaw }, gs);
+          const x = T[0] - off[0], y = T[1] - off[1], z = T[2] - off[2];
+          const probe: StructureObj = { kind: 'structure', id: -1, type: def.id, x, y, z, yaw: qyaw, consumed: {}, built: true, ql: 0, fuel: 0, lit: false };
+          const centre = toWorld(probe, def.boxes[0].c);
+          // Reject fits that sit inside an existing piece.
+          let clash = false;
+          for (const e of this.world.near(x, z, 3)) {
+            if (e.kind !== 'structure') continue;
+            if (pointInPiece(e, centre[0], centre[1], centre[2], -0.05) || (e.type === def.id && Math.hypot(e.x - x, e.y - y, e.z - z) < 0.15)) { clash = true; break; }
+          }
+          if (clash) continue;
+          const score = Math.hypot(centre[0] - aim.x, centre[1] - aim.y, centre[2] - aim.z);
+          if (!best || score < best.score) best = { x, y, z, yaw: qyaw, score };
+        }
+      }
+    }
+    return best;
   }
 
   devFinishStructure(s: StructureObj) {
@@ -693,19 +801,13 @@ export class Game {
     const p = this.placement;
     if (!p) return;
     if (!p.valid) return this.msg(p.reason, 'fail');
-    const x = p.axis === 'x' ? (p.tx + 0.5) * TILE : p.axis === 'z' ? p.tx * TILE : (p.tx + 0.5) * TILE;
-    const z = p.axis === 'z' ? (p.tz + 0.5) * TILE : p.axis === 'x' ? p.tz * TILE : (p.tz + 0.5) * TILE;
     const s = this.world.add<StructureObj>({
-      kind: 'structure', type: p.def.id, tx: p.tx, tz: p.tz, axis: p.axis, x, z,
+      kind: 'structure', type: p.def.id, x: p.x, y: p.y, z: p.z, yaw: p.yaw,
       consumed: {}, built: false, ql: 0, fuel: 0, lit: false,
     });
     if (p.def.container) s.items = [];
-    if (this.dev.on('freeBuild')) {
-      this.devFinishStructure(s);
-    } else {
-      this.msg(`You plan a ${p.def.name.toLowerCase()}. Use "Continue building" on it with the materials in your pack.`, 'good');
-    }
-    if (!this.input.keys.has('ShiftLeft')) this.placing = null;
+    if (this.dev.on('freeBuild')) this.devFinishStructure(s);
+    else this.msg(`Planned a ${p.def.name.toLowerCase()}. Build it with "Continue building" using the materials and tools it needs.`, 'good');
   }
 
   // ---------- main loop
@@ -735,7 +837,7 @@ export class Game {
     if (inp.hit('KeyH') || inp.hit('F1')) this.ui.toggle('help');
     if (inp.hit('KeyR')) this.repeatLast();
     if (inp.hit('KeyX')) { if (this.action) this.cancelAction('You stop what you are doing.'); }
-    if (inp.hit('Escape')) { this.placing = null; }
+    if (inp.hit('Escape')) this.stopPlacing();
     if (inp.hit('Backquote') || inp.hit('F2')) this.ui.toggle('dev');
     if (inp.hit('Digit0')) this.setActive(null);
     for (let i = 0; i < 9 && !this.ui.menuOpen; i++) {
@@ -756,13 +858,13 @@ export class Game {
 
     // --- targeting
     this.target = inp.locked || this.placing ? this.raycast() : this.target;
-    this.updateHighlight();
+    this.updateBrush();
     this.updatePlacement();
 
     for (const btn of inp.takeClicks()) {
       if (this.placing) {
         if (btn === 0) this.confirmPlacement();
-        else { this.placing = null; this.msg('Placement cancelled.', 'info'); }
+        else { this.stopPlacing(); this.msg('Stopped planning.', 'info'); }
         continue;
       }
       if (!this.target) continue;
@@ -774,8 +876,8 @@ export class Game {
         this.ui.openContextMenu(this.target, opts);
       }
     }
-    if (inp.hit('KeyF') && inp.locked && this.target) this.ui.openContextMenu(this.target, this.actionsFor(this.target));
-    if (inp.hit('KeyE') && inp.locked && this.target) {
+    if (inp.hit('KeyF') && inp.locked && this.target && !this.placing) this.ui.openContextMenu(this.target, this.actionsFor(this.target));
+    if (inp.hit('KeyE') && inp.locked && this.target && !this.placing) {
       const opts = this.actionsFor(this.target);
       const first = opts.find((o) => !o.problem) ?? opts[0];
       if (first) this.request(first.def, first.ctx);
@@ -811,7 +913,7 @@ export class Game {
     // --- world
     this.world.tick(dt * this.dev.timeScale);
     this.updateAnimals(dt);
-    this.world.terrain.rebuildDirty();
+    this.world.terrain.update(p.pos.x, p.pos.z, 6);
 
     this.saveTimer += dt;
     if (this.saveTimer > 60) { this.saveTimer = 0; this.save(); }
@@ -827,13 +929,13 @@ export class Game {
     const p = this.player;
     this.msg('You have died. Your belongings remain where you fell.', 'warn');
     if (this.inv.items.length) {
-      this.dropToGround(this.inv.items.splice(0), p.pos.x, p.pos.z);
+      this.dropToGround(this.inv.items.splice(0), p.pos.x, p.pos.y, p.pos.z);
     }
     this.setActive(null);
     this.cancelAction();
     p.health = 100; p.food = 60; p.water = 60; p.stamina = 100;
     const s = this.world.spawn;
-    p.pos.set(s.x, this.world.terrain.heightAt(s.x, s.z) + 0.5, s.z);
+    p.pos.set(s.x, this.world.terrain.heightAt(s.x, s.z) + 0.3, s.z);
     p.vel.set(0, 0, 0);
     for (const a of this.world.animals) if (a.state === 'attack') { a.state = 'idle'; a.timer = 3; }
     this.ui.showDeath();
@@ -853,7 +955,8 @@ export class Game {
     try {
       const p = this.player;
       const data = {
-        version: 1,
+        version: 2,
+        earth: this.earth,
         world: this.world.serialize(),
         player: {
           pos: [p.pos.x, p.pos.y, p.pos.z], yaw: p.yaw, pitch: p.pitch, cam: p.cameraMode,
@@ -900,6 +1003,7 @@ export class Game {
       g.inv.items = data.inv;
       Object.assign(g.skills.levels, data.skills);
       g.hotbar = data.hotbar;
+      g.earth = data.earth ?? {};
       g.activeUid = data.active;
       g.setActive(data.active);
       return g;

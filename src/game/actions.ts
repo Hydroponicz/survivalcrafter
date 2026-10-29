@@ -3,15 +3,15 @@ import { itemDef, itemName, makeItem, type Item, type ToolKind } from '../data/i
 import { STATION_NAMES, type Recipe } from '../data/recipes';
 import { STRUCTURES, totalMaterials, type StructureDef } from '../data/structures';
 import type { SkillId } from '../data/skills';
-import { TILE, TILE_NAMES, Tile, WATER_LEVEL } from '../world/terrain';
+import { isSoft, Mat, MAT_NAMES, WATER_LEVEL, Y_MIN } from '../world/terrain';
 import {
-  ANIMALS, CROP_STAGES, type AnimalObj, type BushObj, type PileObj, type StructureObj, type TreeObj, type WorldObj,
+  ANIMALS, CROP_STAGES, cropKey, type AnimalObj, type BushObj, type Crop, type PileObj, type StructureObj, type TreeObj, type WorldObj,
 } from '../world/world';
 import type { Game } from './game';
 
 export type Target =
-  | { kind: 'tile'; tx: number; tz: number; cx: number; cz: number; point: THREE.Vector3 }
-  | { kind: 'water'; tx: number; tz: number; point: THREE.Vector3 }
+  | { kind: 'terrain'; point: THREE.Vector3; normal: THREE.Vector3; mat: Mat }
+  | { kind: 'water'; point: THREE.Vector3 }
   | { kind: 'object'; obj: WorldObj; point: THREE.Vector3 }
   | { kind: 'animal'; animal: AnimalObj; point: THREE.Vector3 }
   | { kind: 'none' };
@@ -46,76 +46,79 @@ export interface ActionDef {
 }
 
 // ---------- helpers
-const isTile = (c: Ctx): c is Ctx & { t: Extract<Target, { kind: 'tile' }> } => c.t.kind === 'tile';
+type TerrainCtx = Ctx & { t: Extract<Target, { kind: 'terrain' }> };
+const isGround = (c: Ctx): c is TerrainCtx => c.t.kind === 'terrain';
 const obj = <K extends WorldObj['kind']>(c: Ctx, kind: K): Extract<WorldObj, { kind: K }> | undefined =>
   c.t.kind === 'object' && c.t.obj.kind === kind ? (c.t.obj as Extract<WorldObj, { kind: K }>) : undefined;
 const toolIs = (c: Ctx, kind: ToolKind) => !!c.tool && itemDef(c.tool.type).tool === kind;
-const tileType = (c: Ctx) => (isTile(c) ? c.g.world.terrain.tileType(c.t.tx, c.t.tz) : undefined);
-const softTile = (t?: Tile) => t !== undefined && t !== Tile.Rock;
+const groundMat = (c: Ctx) => (isGround(c) ? c.t.mat : undefined);
 
-function cornerLabel(c: Ctx) {
-  if (!isTile(c)) return '';
-  const h = c.g.world.terrain.surface[c.g.world.terrain.ci(c.t.cx, c.t.cz)];
-  return ` (corner ${h} dm)`;
-}
+/** Cubic metres of earth in one dirt/sand/clay item (and one rock shard). */
+export const EARTH_PER_ITEM = 0.5;
 
-function blockedByStructure(c: Ctx): string | null {
-  if (!isTile(c)) return null;
-  const w = c.g.world;
-  // A corner touches up to four tiles; refuse if any has a structure.
-  for (const [tx, tz] of [[c.t.cx, c.t.cz], [c.t.cx - 1, c.t.cz], [c.t.cx, c.t.cz - 1], [c.t.cx - 1, c.t.cz - 1]]) {
-    if (!w.terrain.inTiles(tx, tz)) continue;
-    for (const o of w.objectsOnTile(tx, tz)) if (o.kind === 'structure') return 'A structure is in the way.';
-  }
-  return null;
-}
-
-function afterTerrainChange(c: Ctx) {
-  if (!isTile(c)) return;
-  const w = c.g.world;
-  // Changing a corner disturbs any crops on the four surrounding tiles.
-  for (const [tx, tz] of [[c.t.cx, c.t.cz], [c.t.cx - 1, c.t.cz], [c.t.cx, c.t.cz - 1], [c.t.cx - 1, c.t.cz - 1]]) {
-    const k = tz * w.terrain.size + tx;
-    if (w.crops.delete(k)) w.listener?.cropsChanged(k);
-  }
-  c.g.view.refreshNear(c.t.cx * TILE, c.t.cz * TILE, 3);
-}
-
+/** Radius of the shovel/pickaxe brush (metres). */
+export const DIG_RADIUS = 1.3;
+export const LEVEL_RADIUS = 2.2;
 const FORAGE_COOLDOWN = 300;
+
+/** Forage spots are 2 m patches. */
+const patchKey = (x: number, z: number) => Math.floor(z / 2) * 1000 + Math.floor(x / 2);
+
+/** Bigger, faster earthworks with skill and a good tool. */
+function earthBudget(c: Ctx, base: number, skill: SkillId) {
+  const power = c.tool ? itemDef(c.tool.type).toolPower ?? 1 : 0.5;
+  return base * (0.6 + 0.4 * power) * (1 + c.g.skills.get(skill) / 120);
+}
+
+function afterEdit(c: Ctx, x: number, z: number, r: number) {
+  c.g.world.disturbCrops(x, z, r);
+  c.g.view.refreshNear(x, z, r + 1);
+}
+
+function cropAt(c: Ctx): { key: number; crop?: Crop } {
+  if (!isGround(c)) return { key: -1 };
+  const key = cropKey(c.t.point.x, c.t.point.z);
+  return { key, crop: c.g.world.crops.get(key) };
+}
+
+/** Earth items to fill with, best first. */
+function fillItem(g: Game): string | undefined {
+  return ['dirt', 'sand', 'clay'].find((t) => g.inv.count(t) > 0 || g.earthCredit(t) > 0);
+}
+const FILL_MAT: Record<string, Mat> = { dirt: Mat.Dirt, sand: Mat.Sand, clay: Mat.Clay };
 
 // ---------- actions
 export const ACTIONS: ActionDef[] = [
-  // ===== tiles
+  // ===== ground
   {
-    id: 'examine_tile', label: 'Examine',
-    show: (c) => isTile(c), time: 0,
-    run: ({ g, t }) => {
-      if (t.kind !== 'tile') return;
-      const tr = g.world.terrain;
-      const corners = [[t.tx, t.tz], [t.tx + 1, t.tz], [t.tx, t.tz + 1], [t.tx + 1, t.tz + 1]]
-        .map(([x, z]) => tr.surface[tr.ci(x, z)]);
-      const dirt = tr.dirtDepth(t.cx, t.cz);
-      g.msg(`${TILE_NAMES[tr.tileType(t.tx, t.tz)]} tile (${t.tx}, ${t.tz}). Corners: ${corners.join(' / ')} dm. ` +
-        `Soil depth at selected corner: ${dirt} dm. Slope: ${tr.tileSlope(t.tx, t.tz)} dm.`, 'info');
-      const crop = g.world.crops.get(t.tz * tr.size + t.tx);
+    id: 'examine_ground', label: 'Examine',
+    show: (c) => isGround(c), time: 0,
+    run: (c) => {
+      if (!isGround(c)) return;
+      const { point: p, normal: n, mat } = c.t;
+      const slope = Math.round((Math.acos(Math.min(1, Math.max(-1, n.y))) * 180) / Math.PI);
+      const under = c.g.world.terrain.heightAt(p.x, p.z) - p.y > 1.5 ? ' You are under the surface.' : '';
+      c.g.msg(`${MAT_NAMES[mat]} at ${p.y.toFixed(1)} m (${p.y >= 0 ? 'above' : 'below'} sea level), ${slope}° slope.${under}`, 'info');
+      const { crop } = cropAt(c);
       if (crop) {
-        const st = g.world.cropStage(crop);
-        g.msg(`Wheat, QL ${crop.ql.toFixed(1)}, growth ${st + 1}/${CROP_STAGES}${st === CROP_STAGES - 1 ? ' — ripe!' : ''}, tended ${crop.tended}x.`, 'info');
+        const st = c.g.world.cropStage(crop);
+        c.g.msg(`Wheat, QL ${crop.ql.toFixed(1)}, growth ${st + 1}/${CROP_STAGES}${st === CROP_STAGES - 1 ? ' — ripe!' : ''}, tended ${crop.tended}x.`, 'info');
       }
     },
   },
   {
     id: 'forage', label: 'Forage',
-    show: (c) => tileType(c) === Tile.Grass && !c.tool,
-    check: ({ g, t }) => {
-      if (t.kind !== 'tile') return 'Nothing to forage.';
-      const last = g.foraged.get(t.tz * g.world.terrain.size + t.tx);
-      return last !== undefined && g.world.time - last < FORAGE_COOLDOWN ? 'This tile has been picked clean recently.' : null;
+    show: (c) => groundMat(c) === Mat.Grass && !c.tool,
+    check: (c) => {
+      if (!isGround(c)) return 'Nothing to forage.';
+      const last = c.g.foraged.get(patchKey(c.t.point.x, c.t.point.z));
+      return last !== undefined && c.g.world.time - last < FORAGE_COOLDOWN ? 'This patch has been picked clean recently.' : null;
     },
     time: 6, skill: 'foraging', difficulty: 4, stamina: 2,
-    run: ({ g, t }, o) => {
-      if (t.kind !== 'tile') return;
-      g.foraged.set(t.tz * g.world.terrain.size + t.tx, g.world.time);
+    run: (c, o) => {
+      if (!isGround(c)) return;
+      const g = c.g;
+      g.foraged.set(patchKey(c.t.point.x, c.t.point.z), g.world.time);
       if (!o.success) return g.msg('You find nothing of use.', 'fail');
       const s = g.skills.get('foraging');
       const table: [string, number][] = [
@@ -135,200 +138,190 @@ export const ACTIONS: ActionDef[] = [
   },
   {
     id: 'gather_stones', label: 'Gather loose stones',
-    show: (c) => tileType(c) === Tile.Rock && !toolIs(c, 'pickaxe'),
-    check: ({ g, t }) => {
-      if (t.kind !== 'tile') return '';
-      const last = g.foraged.get(t.tz * g.world.terrain.size + t.tx);
-      return last !== undefined && g.world.time - last < 120 ? 'No loose stones left here. Try another rock tile or use a pickaxe.' : null;
+    show: (c) => (groundMat(c) === Mat.Rock || groundMat(c) === Mat.Iron) && !toolIs(c, 'pickaxe'),
+    check: (c) => {
+      if (!isGround(c)) return '';
+      const last = c.g.foraged.get(patchKey(c.t.point.x, c.t.point.z));
+      return last !== undefined && c.g.world.time - last < 120 ? 'No loose stones left here. Try elsewhere or use a pickaxe.' : null;
     },
     time: 5, skill: 'mining', difficulty: 2, stamina: 4,
-    run: ({ g, t }, o) => {
-      if (t.kind !== 'tile') return;
-      g.foraged.set(t.tz * g.world.terrain.size + t.tx, g.world.time);
-      if (!o.success) return g.msg('The stones here are all stuck fast.', 'fail');
-      const n = 1 + (Math.random() < 0.4 ? 1 : 0);
-      g.give('rock_shard', o.ql * 0.8, n);
-      g.msg(`You pry loose ${n} rock shard${n > 1 ? 's' : ''}.`, 'good');
-    },
-  },
-  {
-    id: 'dig', label: (c) => 'Dig' + cornerLabel(c),
-    show: (c) => toolIs(c, 'shovel') && isTile(c) && softTile(tileType(c)),
-    check: (c) => {
-      if (!isTile(c)) return '';
-      const tr = c.g.world.terrain;
-      if (tr.dirtDepth(c.t.cx, c.t.cz) <= 0) return 'You hit rock. You need a pickaxe to go deeper.';
-      if (tr.surface[tr.ci(c.t.cx, c.t.cz)] < -40) return 'The hole keeps filling with water.';
-      return blockedByStructure(c);
-    },
-    time: 5, skill: 'digging', difficulty: 6, stamina: 7, toolWear: 0.12,
     run: (c, o) => {
-      if (!isTile(c)) return;
-      const tr = c.g.world.terrain;
-      const tt = tr.tileType(c.t.tx, c.t.tz);
-      const yieldType = tt === Tile.Sand ? 'sand' : tt === Tile.Clay ? 'clay' : 'dirt';
-      tr.changeCorner(c.t.cx, c.t.cz, -1);
-      if (tt === Tile.Grass || tt === Tile.Field) tr.setTileType(c.t.tx, c.t.tz, Tile.Dirt);
-      afterTerrainChange(c);
-      c.g.give(yieldType, Math.max(1, o.ql), 1);
-      c.g.msg(`You dig up some ${yieldType}.`, o.success ? 'good' : 'info');
+      if (!isGround(c)) return;
+      c.g.foraged.set(patchKey(c.t.point.x, c.t.point.z), c.g.world.time);
+      if (!o.success) return c.g.msg('The stones here are all stuck fast.', 'fail');
+      const n = 1 + (Math.random() < 0.4 ? 1 : 0);
+      c.g.give('rock_shard', o.ql * 0.8, n);
+      c.g.msg(`You pry loose ${n} rock shard${n > 1 ? 's' : ''}.`, 'good');
     },
   },
   {
-    id: 'flatten', label: 'Flatten tile (to selected corner)',
-    show: (c) => toolIs(c, 'shovel') && isTile(c) && softTile(tileType(c)),
+    id: 'dig', label: 'Dig',
+    show: (c) => toolIs(c, 'shovel') && isGround(c),
     check: (c) => {
-      if (!isTile(c)) return '';
-      if (c.g.world.terrain.tileSlope(c.t.tx, c.t.tz) === 0) return 'The tile is already flat.';
+      if (!isGround(c)) return '';
+      if (!isSoft(c.t.mat)) return 'Too hard for a shovel. Use a pickaxe.';
+      if (c.t.point.y < Y_MIN + 3) return 'You can dig no deeper.';
       return null;
     },
-    time: 5, skill: 'digging', difficulty: 7, stamina: 7, toolWear: 0.12,
-    repeat: (c) => isTile(c) && c.g.world.terrain.tileSlope(c.t.tx, c.t.tz) > 0,
+    time: 4, skill: 'digging', difficulty: 6, stamina: 6, toolWear: 0.12,
     run: (c, o) => {
-      if (!isTile(c)) return;
-      const g = c.g, tr = g.world.terrain;
-      const target = tr.surface[tr.ci(c.t.cx, c.t.cz)];
-      const corners = [[c.t.tx, c.t.tz], [c.t.tx + 1, c.t.tz], [c.t.tx, c.t.tz + 1], [c.t.tx + 1, c.t.tz + 1]];
-      corners.sort((a, b) => Math.abs(tr.surface[tr.ci(b[0], b[1])] - target) - Math.abs(tr.surface[tr.ci(a[0], a[1])] - target));
-      const [x, z] = corners[0];
-      const h = tr.surface[tr.ci(x, z)];
-      const sub: Ctx = { ...c, t: { ...c.t, cx: x, cz: z } };
-      const block = blockedByStructure(sub);
-      if (block) { g.msg(block, 'fail'); g.cancelQueue(); return; }
-      if (!o.success) return g.msg('You move some earth around, to no real effect.', 'fail');
-      if (h > target) {
-        if (tr.dirtDepth(x, z) <= 0) { g.msg('A corner is solid rock. Flattening stops.', 'fail'); g.cancelQueue(); return; }
-        tr.changeCorner(x, z, -1);
-        g.give('dirt', o.ql, 1);
-      } else {
-        const dirt = g.inv.take('dirt', 1)[0];
-        if (!dirt) { g.msg('You need dirt in your inventory to raise the low corner.', 'fail'); g.cancelQueue(); return; }
-        tr.changeCorner(x, z, 1);
-      }
-      if (tr.tileType(c.t.tx, c.t.tz) === Tile.Grass) tr.setTileType(c.t.tx, c.t.tz, Tile.Dirt);
-      afterTerrainChange(sub);
-      g.msg(`You level the ground a little. Slope is now ${tr.tileSlope(c.t.tx, c.t.tz)} dm.`, 'info');
+      if (!isGround(c)) return;
+      const { point: p, normal: n } = c.t;
+      const budget = earthBudget(c, 0.9, 'digging') * (o.success ? 1 : 0.4);
+      const cx = p.x - n.x * 0.35, cy = p.y - n.y * 0.35, cz = p.z - n.z * 0.35;
+      const vol = c.g.world.terrain.dig(cx, cy, cz, DIG_RADIUS, budget, isSoft);
+      afterEdit(c, cx, cz, DIG_RADIUS);
+      const got = c.g.collectEarth(vol, o.ql);
+      c.g.msg(got ? `You dig out ${got}.` : 'You scrape at the ground but move almost nothing.', o.success ? 'good' : 'info');
     },
   },
   {
-    id: 'raise', label: (c) => `Drop ${c.tool ? itemName(c.tool).toLowerCase() : ''} (raise corner)`,
-    show: (c) => isTile(c) && !!c.tool && ['dirt', 'sand'].includes(c.tool.type),
-    check: (c) => blockedByStructure(c),
-    time: 3, skill: 'digging', difficulty: 3, stamina: 4,
-    run: (c) => {
-      if (!isTile(c) || !c.tool) return;
-      const type = c.tool.type;
-      c.g.consumeActive();
-      const tr = c.g.world.terrain;
-      tr.changeCorner(c.t.cx, c.t.cz, 1);
-      tr.setTileType(c.t.tx, c.t.tz, type === 'sand' ? Tile.Sand : Tile.Dirt);
-      afterTerrainChange(c);
-      c.g.msg(`You drop the ${type} and pack it down.`, 'info');
-    },
-  },
-  {
-    id: 'mine', label: (c) => 'Mine' + cornerLabel(c),
-    show: (c) => toolIs(c, 'pickaxe') && tileType(c) === Tile.Rock,
+    id: 'level', label: 'Level ground (to your feet)',
+    show: (c) => toolIs(c, 'shovel') && isGround(c),
     check: (c) => {
-      if (!isTile(c)) return '';
-      const tr = c.g.world.terrain;
-      if (tr.dirtDepth(c.t.cx, c.t.cz) > 0) return 'There is soil on that corner. Dig it away first.';
-      if (tr.surface[tr.ci(c.t.cx, c.t.cz)] < -30) return 'Water seeps in. You cannot mine deeper here.';
-      return blockedByStructure(c);
+      if (!isGround(c)) return '';
+      const p = c.t.point;
+      if (Math.hypot(p.x - c.g.player.pos.x, p.z - c.g.player.pos.z) > 6) return 'Stand closer to the ground you want to level.';
+      return null;
     },
-    time: 9, skill: 'mining', difficulty: (c) => (isTile(c) && c.g.world.terrain.oreAt(c.t.tx, c.t.tz) > 0.4 ? 18 : 8),
-    stamina: 12, toolWear: 0.2,
+    time: 4, skill: 'digging', difficulty: 9, stamina: 7, toolWear: 0.12,
+    repeat: (c) => !!c.g.levelling,
     run: (c, o) => {
-      if (!isTile(c)) return;
-      const tr = c.g.world.terrain;
-      if (!o.success) return c.g.msg('You chip at the rock but nothing breaks off.', 'fail');
-      tr.changeCorner(c.t.cx, c.t.cz, -1, -1);
-      afterTerrainChange(c);
-      const ore = tr.oreAt(c.t.tx, c.t.tz);
-      if (ore > 0.4 && Math.random() < 0.75) {
-        c.g.give('iron_ore', o.ql * (0.6 + ore * 0.6), 1);
-        c.g.msg('You mine some iron ore!', 'good');
-      } else {
-        const n = 1 + (Math.random() < 0.5 ? 1 : 0);
-        c.g.give('rock_shard', o.ql, n);
-        c.g.msg(`You mine ${n} rock shard${n > 1 ? 's' : ''}.${ore > 0.25 ? ' You notice rusty streaks in the rock nearby.' : ''}`, 'good');
+      if (!isGround(c)) return;
+      const g = c.g;
+      g.levelling = false;
+      const p = c.t.point;
+      // Level to where you stand, like Valheim's hoe.
+      const target = g.player.pos.y;
+      const fillType = fillItem(g) ?? 'dirt';
+      const budget = earthBudget(c, 1.6, 'digging') * (o.success ? 1 : 0.4);
+      const fillBudget = g.inv.count(fillType) * EARTH_PER_ITEM + g.earthCredit(fillType);
+      const res = g.world.terrain.level(p.x, p.z, LEVEL_RADIUS, target, budget, fillBudget, isSoft, FILL_MAT[fillType]);
+      afterEdit(c, p.x, p.z, LEVEL_RADIUS);
+      const got = g.collectEarth(res.removed, o.ql);
+      if (res.added > 0) g.spendEarth(fillType, res.added);
+      const moved = Object.values(res.removed).reduce((a, b) => a + (b ?? 0), 0) + res.added;
+      if (res.offBy < 0.12) { g.msg('The ground is level.', 'good'); return; }
+      if (moved < 0.02) {
+        g.msg(fillBudget <= 0 ? 'You need dirt, sand or clay in your pack to fill the low spots.' : 'Rock is in the way. Clear it with a pickaxe.', 'fail');
+        return;
       }
+      g.msg(`You level the ground${got ? ` and dig out ${got}` : ''}${res.added > 0.05 ? ', filling the hollows' : ''}. (${res.offBy.toFixed(2)} m off level)`, 'info');
+      g.levelling = true;
+    },
+  },
+  {
+    id: 'raise', label: (c) => `Raise ground (uses ${fillItem(c.g) ?? 'dirt'})`,
+    show: (c) => toolIs(c, 'shovel') && isGround(c) && !!fillItem(c.g),
+    time: 3, skill: 'digging', difficulty: 5, stamina: 5, toolWear: 0.06,
+    run: (c, o) => {
+      if (!isGround(c)) return;
+      const g = c.g;
+      const type = fillItem(g)!;
+      const { point: p, normal: n } = c.t;
+      const available = g.inv.count(type) * EARTH_PER_ITEM + g.earthCredit(type);
+      const budget = Math.min(available, earthBudget(c, 0.9, 'digging') * (o.success ? 1 : 0.5));
+      const added = g.world.terrain.fill(p.x + n.x * 0.4, p.y + n.y * 0.4, p.z + n.z * 0.4, DIG_RADIUS, budget, FILL_MAT[type]);
+      g.spendEarth(type, added);
+      afterEdit(c, p.x, p.z, DIG_RADIUS);
+      g.msg(`You pile up and pack down the ${type}.`, 'info');
+    },
+  },
+  {
+    id: 'smooth', label: 'Smooth ground',
+    show: (c) => toolIs(c, 'shovel') && isGround(c),
+    time: 3, skill: 'digging', difficulty: 4, stamina: 4, toolWear: 0.05,
+    run: (c) => {
+      if (!isGround(c)) return;
+      const p = c.t.point;
+      c.g.world.terrain.smooth(p.x, p.y, p.z, 1.8);
+      afterEdit(c, p.x, p.z, 1.8);
+      c.g.msg('You smooth out the bumps.', 'info');
+    },
+  },
+  {
+    id: 'mine', label: 'Mine',
+    show: (c) => toolIs(c, 'pickaxe') && isGround(c),
+    check: (c) => (isGround(c) && c.t.point.y < Y_MIN + 3 ? 'You have reached bedrock.' : null),
+    time: 7, skill: 'mining', difficulty: (c) => (groundMat(c) === Mat.Iron ? 18 : 8),
+    stamina: 10, toolWear: 0.2,
+    run: (c, o) => {
+      if (!isGround(c)) return;
+      if (!o.success) return c.g.msg('You chip at the rock but nothing breaks off.', 'fail');
+      const { point: p, normal: n } = c.t;
+      const cx = p.x - n.x * 0.3, cy = p.y - n.y * 0.3, cz = p.z - n.z * 0.3;
+      const vol = c.g.world.terrain.dig(cx, cy, cz, 1.1, earthBudget(c, 0.7, 'mining'), () => true);
+      afterEdit(c, cx, cz, 1.1);
+      const got = c.g.collectEarth(vol, o.ql);
+      c.g.msg(got ? `You mine ${got}.${vol[Mat.Iron] ? ' Iron!' : ''}` : 'You break off some gravel.', vol[Mat.Iron] ? 'good' : 'info');
     },
   },
   {
     id: 'cultivate', label: 'Cultivate',
-    show: (c) => toolIs(c, 'shovel') && (tileType(c) === Tile.Grass || tileType(c) === Tile.Dirt),
+    show: (c) => toolIs(c, 'shovel') && (groundMat(c) === Mat.Grass || groundMat(c) === Mat.Dirt),
     check: (c) => {
-      if (!isTile(c)) return '';
-      const w = c.g.world;
-      if (w.terrain.tileSlope(c.t.tx, c.t.tz) > 10) return 'The ground is too steep to farm.';
-      if (w.objectsOnTile(c.t.tx, c.t.tz).some((o) => o.kind !== 'pile')) return 'Something is in the way.';
-      if (w.terrain.heightAt((c.t.tx + 0.5) * TILE, (c.t.tz + 0.5) * TILE) < WATER_LEVEL + 0.1) return 'Too wet to farm.';
+      if (!isGround(c)) return '';
+      if (c.t.normal.y < 0.85) return 'The ground is too steep to farm. Level it first.';
+      if (c.t.point.y < WATER_LEVEL + 0.1) return 'Too wet to farm.';
+      if (c.g.world.near(c.t.point.x, c.t.point.z, 1.5).some((o) => o.kind === 'tree' && Math.hypot(o.x - c.t.point.x, o.z - c.t.point.z) < 1.2)) return 'Tree roots are in the way.';
       return null;
     },
-    time: 8, skill: 'farming', difficulty: 5, stamina: 8, toolWear: 0.1,
+    time: 6, skill: 'farming', difficulty: 5, stamina: 7, toolWear: 0.1,
     run: (c, o) => {
-      if (!isTile(c)) return;
+      if (!isGround(c)) return;
       if (!o.success) return c.g.msg('The roots are too tough here. You fail to break the soil.', 'fail');
-      c.g.world.terrain.setTileType(c.t.tx, c.t.tz, Tile.Field);
-      c.g.msg('You cultivate the soil into a field.', 'good');
+      const p = c.t.point;
+      c.g.world.terrain.paint(p.x, p.y, p.z, 1.3, Mat.Field, (m) => m === Mat.Grass || m === Mat.Dirt);
+      c.g.msg('You till the soil into a field. Sow seeds on it.', 'good');
     },
   },
   {
     id: 'sow', label: 'Sow wheat',
-    show: (c) => tileType(c) === Tile.Field && c.tool?.type === 'wheat_seeds',
-    check: (c) => (isTile(c) && c.g.world.crops.has(c.t.tz * c.g.world.terrain.size + c.t.tx) ? 'Something is already growing here.' : null),
-    time: 4, skill: 'farming', difficulty: 6, stamina: 3,
+    show: (c) => groundMat(c) === Mat.Field && c.tool?.type === 'wheat_seeds',
+    check: (c) => (cropAt(c).crop ? 'Something is already growing here.' : null),
+    time: 3, skill: 'farming', difficulty: 6, stamina: 2,
     run: (c, o) => {
-      if (!isTile(c) || !c.tool) return;
+      if (!isGround(c) || !c.tool) return;
       const seedQl = c.tool.ql;
       c.g.consumeActive();
       if (!o.success) return c.g.msg('You scatter the seeds badly; the birds get them.', 'fail');
-      const k = c.t.tz * c.g.world.terrain.size + c.t.tx;
-      c.g.world.crops.set(k, { planted: c.g.world.time, ql: (o.ql + seedQl) / 2, tended: 0 });
-      c.g.world.listener?.cropsChanged(k);
-      c.g.msg('You sow the field with wheat.', 'good');
+      const { key } = cropAt(c);
+      c.g.world.crops.set(key, { planted: c.g.world.time, ql: (o.ql + seedQl) / 2, tended: 0 });
+      c.g.world.listener?.cropsChanged(key);
+      c.g.msg('You sow a row of wheat.', 'good');
     },
   },
   {
-    id: 'tend', label: 'Tend field',
-    show: (c) => toolIs(c, 'shovel') && tileType(c) === Tile.Field && isTile(c) && c.g.world.crops.has(c.t.tz * c.g.world.terrain.size + c.t.tx),
+    id: 'tend', label: 'Tend crop',
+    show: (c) => toolIs(c, 'shovel') && !!cropAt(c).crop,
     check: (c) => {
-      if (!isTile(c)) return '';
-      const crop = c.g.world.crops.get(c.t.tz * c.g.world.terrain.size + c.t.tx)!;
-      if (crop.tended >= 3) return 'The field is already well tended.';
+      const crop = cropAt(c).crop!;
+      if (crop.tended >= 3) return 'The crop is already well tended.';
       if (c.g.world.cropStage(crop) >= CROP_STAGES - 1) return 'The crop is ready to harvest.';
       return null;
     },
-    time: 5, skill: 'farming', difficulty: 10, stamina: 5, toolWear: 0.05,
+    time: 4, skill: 'farming', difficulty: 10, stamina: 4, toolWear: 0.05,
     run: (c, o) => {
-      if (!isTile(c)) return;
-      const crop = c.g.world.crops.get(c.t.tz * c.g.world.terrain.size + c.t.tx);
+      const crop = cropAt(c).crop;
       if (!crop) return;
       if (!o.success) return c.g.msg('You pull up a few sprouts by mistake.', 'fail');
       crop.tended++;
       crop.ql = Math.min(100, crop.ql + 2 + c.g.skills.get('farming') * 0.05);
-      c.g.msg('You weed and tend the field. It will grow faster and better.', 'good');
+      c.g.msg('You weed and tend the crop. It will grow faster and better.', 'good');
     },
   },
   {
     id: 'harvest', label: 'Harvest',
-    show: (c) => tileType(c) === Tile.Field && isTile(c) && !!c.g.world.crops.get(c.t.tz * c.g.world.terrain.size + c.t.tx) &&
-      (!c.tool || toolIs(c, 'scythe')),
-    check: (c) => {
-      if (!isTile(c)) return '';
-      const crop = c.g.world.crops.get(c.t.tz * c.g.world.terrain.size + c.t.tx)!;
-      return c.g.world.cropStage(crop) < CROP_STAGES - 1 ? 'The wheat is not ripe yet.' : null;
-    },
-    time: (c) => (toolIs(c, 'scythe') ? 4 : 7), skill: 'farming', difficulty: 8, stamina: 6, toolWear: 0.1,
+    show: (c) => !!cropAt(c).crop && (!c.tool || toolIs(c, 'scythe')),
+    check: (c) => (c.g.world.cropStage(cropAt(c).crop!) < CROP_STAGES - 1 ? 'The wheat is not ripe yet.' : null),
+    time: (c) => (toolIs(c, 'scythe') ? 3 : 5), skill: 'farming', difficulty: 8, stamina: 5, toolWear: 0.1,
     run: (c, o) => {
-      if (!isTile(c)) return;
-      const k = c.t.tz * c.g.world.terrain.size + c.t.tx;
-      const crop = c.g.world.crops.get(k)!;
-      c.g.world.crops.delete(k);
-      c.g.world.listener?.cropsChanged(k);
+      const { key, crop } = cropAt(c);
+      if (!crop) return;
+      c.g.world.crops.delete(key);
+      c.g.world.listener?.cropsChanged(key);
       const scythe = toolIs(c, 'scythe');
-      const n = Math.max(1, Math.round((scythe ? 3 : 1.5) + crop.tended * 0.6 + Math.random() * 2 - (o.success ? 0 : 1.5)));
+      const n = Math.max(1, Math.round((scythe ? 2.5 : 1.3) + crop.tended * 0.5 + Math.random() * 1.5 - (o.success ? 0 : 1)));
       const ql = (crop.ql + o.ql) / 2;
       c.g.give('wheat', ql, n);
       const seeds = 1 + (Math.random() < 0.5 ? 1 : 0);
@@ -338,20 +331,21 @@ export const ACTIONS: ActionDef[] = [
   },
   {
     id: 'plant_sprout', label: 'Plant sprout',
-    show: (c) => c.tool?.type === 'sprout' && (tileType(c) === Tile.Grass || tileType(c) === Tile.Dirt),
+    show: (c) => c.tool?.type === 'sprout' && (groundMat(c) === Mat.Grass || groundMat(c) === Mat.Dirt),
     check: (c) => {
-      if (!isTile(c)) return '';
-      if (c.g.world.objectsOnTile(c.t.tx, c.t.tz).some((o) => o.kind !== 'pile')) return 'There is no room to plant here.';
+      if (!isGround(c)) return '';
+      const p = c.t.point;
+      if (c.g.world.near(p.x, p.z, 2).some((o) => o.kind !== 'pile' && Math.hypot(o.x - p.x, o.z - p.z) < 1.5)) return 'There is no room to plant here.';
       return null;
     },
     time: 4, skill: 'foraging', difficulty: 6, stamina: 3,
     run: (c, o) => {
-      if (!isTile(c) || !c.tool) return;
+      if (!isGround(c) || !c.tool) return;
       const label = c.tool.label ?? '';
       c.g.consumeActive();
       if (!o.success) return c.g.msg('The sprout wilts as you plant it.', 'fail');
       const species = label.includes('pine') ? 'pine' : label.includes('birch') ? 'birch' : 'oak';
-      c.g.world.add<TreeObj>({ kind: 'tree', species, x: (c.t.tx + 0.5) * TILE, z: (c.t.tz + 0.5) * TILE, age: 0.03, branches: 0 });
+      c.g.world.add<TreeObj>({ kind: 'tree', species, x: c.t.point.x, z: c.t.point.z, age: 0.03, branches: 0 });
       c.g.msg(`You plant the ${species} sprout. Give it time to grow.`, 'good');
     },
   },
@@ -404,7 +398,7 @@ export const ACTIONS: ActionDef[] = [
       for (let i = 0; i < logs; i++) items.push(makeItem('log', o.ql * (0.75 + t.age * 0.35), `${t.species} log`));
       for (let i = 0; i < 1 + Math.floor(Math.random() * 3); i++) items.push(makeItem('branch', o.ql));
       if (Math.random() < 0.35) items.push(makeItem('sprout', o.ql, `${t.species} sprout`));
-      c.g.dropToGround(items, t.x, t.z);
+      c.g.dropToGround(items, t.x, c.g.world.terrain.heightAt(t.x, t.z), t.z);
       c.g.msg(`The ${t.species} tree crashes down! It leaves ${logs} log${logs > 1 ? 's' : ''} and some branches on the ground.`, 'good');
     },
   },
@@ -504,7 +498,7 @@ export const ACTIONS: ActionDef[] = [
       const items: Item[] = [];
       for (const [type, n] of Object.entries(s.consumed)) for (let i = 0; i < n; i++) items.push(makeItem(type, s.ql));
       c.g.world.remove(s);
-      if (items.length) c.g.dropToGround(items, s.x, s.z);
+      if (items.length) c.g.dropToGround(items, s.x, s.y, s.z);
       c.g.msg('You tear down the unfinished structure. The materials are left on the ground.', 'info');
     },
   },
@@ -519,7 +513,7 @@ export const ACTIONS: ActionDef[] = [
       for (const m of def.materials) for (let i = 0; i < Math.floor(m.count / 2); i++) items.push(makeItem(m.item, s.ql * 0.6));
       for (const it of s.items ?? []) items.push(it);
       c.g.world.remove(s);
-      if (items.length) c.g.dropToGround(items, s.x, s.z);
+      if (items.length) c.g.dropToGround(items, s.x, s.y, s.z);
       c.g.msg(`You demolish the ${def.name.toLowerCase()} and salvage some materials.`, 'info');
     },
   },
@@ -584,8 +578,8 @@ export const ACTIONS: ActionDef[] = [
     run: (c) => c.g.ui.openContainer(obj(c, 'structure')!),
   },
   {
-    id: 'toggle_gate', label: (c) => (obj(c, 'structure')!.open ? 'Close gate' : 'Open gate'),
-    show: (c) => { const s = obj(c, 'structure'); return !!s && s.built && !!STRUCTURES[s.type].gate; },
+    id: 'toggle_open', label: (c) => `${obj(c, 'structure')!.open ? 'Close' : 'Open'} ${obj(c, 'structure')!.type === 'gate' ? 'gate' : 'door'}`,
+    show: (c) => { const s = obj(c, 'structure'); return !!s && s.built && !!STRUCTURES[s.type].opens; },
     time: 0,
     run: (c) => {
       const s = obj(c, 'structure')!;

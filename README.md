@@ -21,7 +21,8 @@ Vercel dashboard, or from the CLI:
 npx vercel --prod
 ```
 
-No server is needed — the world and your character save to the browser's `localStorage`.
+No server is needed — the world and your character save to the browser's `localStorage` (only the terrain
+chunks you changed are stored; the rest regenerates from the seed).
 
 ## Controls
 
@@ -54,11 +55,15 @@ Toggles are remembered per browser; a purple **DEV** badge shows while any cheat
   tool QL and material QL. Tools wear out and eventually break.
 - **The active item decides your options.** Activate a shovel and the action menu offers Dig, Flatten,
   Cultivate; a pickaxe offers Mine; bare hands forage.
-- **Terraforming on tile corners.** The land is a tile grid with heights on corners (in decimetres).
-  Digging lowers the highlighted corner by 1 dm and gives you dirt/sand/clay. Under the soil is a rock
-  layer that needs a pickaxe — and may hold iron ore. Buildings need flat ground, so you flatten first.
-- **Incremental construction.** Lay out a plan (B), then "Continue building", spending one material per
-  step. Walls and fences run along tile edges; everything else sits on tiles.
+- **Voxel terrain you can reshape anywhere.** The world is a smooth voxel landscape (Surface Nets on a
+  1 m grid, like Enshrouded). With a shovel you **dig**, **raise**, **smooth** and **level ground to your
+  feet** (Valheim-style); a pickaxe mines rock in any direction, so you can tunnel into hills, find caves
+  and dig out **iron veins**. Every 0.5 m³ you remove becomes an item, and filling hollows uses the dirt
+  you carry. A ring on the ground shows the area your tool will work.
+- **Valheim-style planning, Wurm-style building.** Pick a piece (B) and a ghost follows your aim,
+  snapping floors to floors, walls to floor edges and wall tops, roofs onto walls; rotate with the mouse
+  wheel or Q/E and keep placing. Each placed plan must then be built with "Continue building", spending
+  one material per step with the right tool and skill — so quality and failure still matter.
 - **Production chains.** Fiber → cordage → stone tools → logs → planks/shafts → shovel → clay → forge +
   anvil → iron ore → lumps → iron tools. Fields → wheat → quern → flour + jar of water → dough → bread.
 - **Survival.** Food, water, stamina and health. Fires need fuel and kindling. Boars fight back. Death
@@ -69,10 +74,10 @@ Toggles are remembered per browser; a purple **DEV** badge shows while any cheat
 ```
 src/
   data/       items, skills, recipes, structures (pure data — easy to extend)
-  world/      terrain heightmap + rock layer, world entities, noise, rendering
+  world/      voxel terrain (generation, meshing, sculpting), world entities, noise, rendering
   game/       game loop, player/camera, actions, inventory, input, sky
   ui/         HUD, windows, context menu
 ```
 
 Adding content is mostly data: new items go in `data/items.ts`, recipes in `data/recipes.ts`,
-buildings in `data/structures.ts`, and new interactions in `game/actions.ts`.
+building pieces (with their colliders and snap points) in `data/structures.ts`, and new interactions in `game/actions.ts`.

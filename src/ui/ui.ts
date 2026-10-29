@@ -6,8 +6,8 @@ import { craftProblem, type ActionDef, type Ctx, type Target } from '../game/act
 import { DEV_FLAGS, devCommands, type DevFlag } from '../game/dev';
 import type { Game, MsgKind } from '../game/game';
 import { CARRY_CAPACITY } from '../game/inventory';
-import { TILE_NAMES } from '../world/terrain';
-import { ANIMALS, type PileObj, type StructureObj } from '../world/world';
+import { MAT_NAMES } from '../world/terrain';
+import { ANIMALS, cropKey, type PileObj, type StructureObj } from '../world/world';
 
 type WindowName = 'inventory' | 'crafting' | 'skills' | 'build' | 'help' | 'container' | 'dev';
 
@@ -227,10 +227,9 @@ export class UI {
   describeTarget(t: Target): string {
     const g = this.g;
     switch (t.kind) {
-      case 'tile': {
-        const tt = g.world.terrain.tileType(t.tx, t.tz);
-        const crop = g.world.crops.get(t.tz * g.world.terrain.size + t.tx);
-        return `${TILE_NAMES[tt]}${crop ? ' (wheat)' : ''}`;
+      case 'terrain': {
+        const crop = g.world.crops.get(cropKey(t.point.x, t.point.z));
+        return `${MAT_NAMES[t.mat]}${crop ? ' (wheat)' : ''}`;
       }
       case 'water': return 'Water';
       case 'animal': return ANIMALS[t.animal.species].name;
@@ -247,9 +246,9 @@ export class UI {
         const def = STRUCTURES[o.type];
         if (!o.built) {
           const done = Object.values(o.consumed).reduce((a, b) => a + b, 0);
-          return `Unfinished ${def.name.toLowerCase()} (${Math.round((done / totalMaterials(def)) * 100)}%)`;
+          return `Planned ${def.name.toLowerCase()} (${Math.round((done / totalMaterials(def)) * 100)}% built)`;
         }
-        return `${def.name}${def.burns ? (o.lit ? ' — burning' : ' — cold') : ''}${def.gate ? (o.open ? ' (open)' : ' (closed)') : ''}`;
+        return `${def.name}${def.burns ? (o.lit ? ' — burning' : ' — cold') : ''}${def.opens ? (o.open ? ' (open)' : ' (closed)') : ''}`;
       }
     }
   }
@@ -295,7 +294,7 @@ export class UI {
     const w = g.inv.weight();
     if (w > CARRY_CAPACITY) status.push(`<span class="warn">Overloaded ${w.toFixed(0)}/${CARRY_CAPACITY} kg</span>`);
     if (p.swimming) status.push('Swimming');
-    if (g.placing) status.push(`Placing: ${g.placing.name} — LMB place, RMB cancel${g.placing.placement === 'edge' ? ' (aim near a tile edge)' : ''}`);
+    if (g.placing) status.push(`Planning: ${g.placing.name} — LMB place · wheel or Q/E rotate · RMB stop${g.placement?.snapped ? ' · snapped' : ''}`);
     if (g.placement && !g.placement.valid) status.push(`<span class="warn">${esc(g.placement.reason)}</span>`);
     this.statusEl.innerHTML = status.join(' · ');
 
@@ -615,29 +614,33 @@ export class UI {
   private renderBuild() {
     const g = this.g;
     const body = el('div');
-    body.appendChild(el('div', 'hint', 'Pick a structure to lay out its plan, then use <b>Continue building</b> on the plan, adding one material per step. Walls and fences go on tile edges; everything else sits on a tile. Hold Shift while placing to place several.'));
-    for (const def of STRUCTURE_LIST) {
-      const row = el('div', 'recipe');
-      const mats = def.materials.map((m) => {
-        const have = g.inv.count(m.item);
-        return `<span class="${have >= m.count ? 'ok' : 'no'}">${itemDef(m.item).icon} ${m.count} ${esc(itemDef(m.item).name.toLowerCase())} (${have})</span>`;
-      }).join(' ');
-      const tool = def.tool ? g.toolFor(def.tool) : undefined;
-      row.innerHTML = `
-        <div class="recipe-head"><span class="icon">${def.icon}</span><b>${def.name}</b>
-          <small>${SKILLS[def.skill]} · difficulty ${def.difficulty} · ${def.placement === 'edge' ? 'tile edge' : 'tile'} · max slope ${def.maxSlope} dm</small></div>
-        <div class="recipe-desc">${esc(def.desc)}</div>
-        <div class="recipe-in">${mats}</div>
-        ${def.tool ? `<div class="recipe-req"><span class="${tool ? 'ok' : 'no'}">tool: ${def.tool}</span></div>` : ''}`;
-      const b = el('button', '', 'Plan');
-      b.addEventListener('click', () => {
-        g.startPlacing(def);
-        this.close('build');
-      });
-      const btns = el('div', 'btns');
-      btns.appendChild(b);
-      row.appendChild(btns);
-      body.appendChild(row);
+    body.appendChild(el('div', 'hint', 'Pick a piece to plan it: a ghost follows your aim and snaps to nearby walls, floors and roofs. Left-click to place plans (you can keep placing), wheel or Q/E rotates, right-click stops. Then build each plan with <b>Continue building</b> — it takes the listed materials, tool and skill.'));
+    const cats = [...new Set(STRUCTURE_LIST.map((d) => d.category))];
+    for (const cat of cats) {
+      body.appendChild(el('h3', '', cat));
+      for (const def of STRUCTURE_LIST.filter((d) => d.category === cat)) {
+        const row = el('div', 'recipe');
+        const mats = def.materials.map((m) => {
+          const have = g.inv.count(m.item);
+          return `<span class="${have >= m.count ? 'ok' : 'no'}">${itemDef(m.item).icon} ${m.count} ${esc(itemDef(m.item).name.toLowerCase())} (${have})</span>`;
+        }).join(' ');
+        const tool = def.tool ? g.toolFor(def.tool) : undefined;
+        row.innerHTML = `
+          <div class="recipe-head"><span class="icon">${def.icon}</span><b>${def.name}</b>
+            <small>${SKILLS[def.skill]} · difficulty ${def.difficulty} · ${def.snap ? 'snaps to other pieces' : 'placed on the ground'}</small></div>
+          <div class="recipe-desc">${esc(def.desc)}</div>
+          <div class="recipe-in">${mats}</div>
+          ${def.tool ? `<div class="recipe-req"><span class="${tool ? 'ok' : 'no'}">tool: ${def.tool}</span></div>` : ''}`;
+        const b = el('button', '', 'Plan');
+        b.addEventListener('click', () => {
+          g.startPlacing(def);
+          this.close('build');
+        });
+        const btns = el('div', 'btns');
+        btns.appendChild(b);
+        row.appendChild(btns);
+        body.appendChild(row);
+      }
     }
     this.frame('build', 'Build', body);
   }
@@ -752,15 +755,16 @@ export class UI {
       </table>
       <h3>How this world works</h3>
       <p>Like Wurm Online, everything you do is a <b>timed action</b> that uses a <b>skill</b>. Skills start at 1 and rise slowly with practice. Higher skill means faster work, fewer failures and better <b>quality (QL)</b>. Every item has its own QL; good tools and good materials make good products.</p>
-      <p>The <b>active item</b> decides what you can do. Holding a shovel lets you dig and flatten the tile corner you are aiming at; a pickaxe mines rock; a hatchet fells trees. Bare hands forage, pick berries and gather stones.</p>
-      <p>The land is made of tiles with heights at their corners. <b>Digging</b> lowers the highlighted corner by 1 dm and gives you dirt, sand or clay. Below the soil lies rock: you need a pickaxe to go deeper, and rock may hide <b>iron ore</b>. Most buildings need flat ground, so terraform first.</p>
+      <p>The <b>active item</b> decides what you can do. A shovel digs, raises, smooths and levels earth; a pickaxe mines rock and tunnels; a hatchet fells trees. Bare hands forage, pick berries and gather stones.</p>
+      <p>The land is made of <b>voxels</b>: you can reshape it in any direction. The ring on the ground shows the area your tool will work. <b>Level ground</b> flattens the outer ring to the height of your feet, digging out the high parts and filling hollows with dirt from your pack. Below the soil is rock you need a pickaxe for — dig tunnels, find caves, and look for rusty <b>iron veins</b>. Every 0.5 m³ you dig out becomes an item.</p>
+      <p><b>Building</b> works like Valheim for planning: pick a piece (B) and place its ghost, snapping walls to floors, roofs to walls and so on. Then the work is Wurm-like: use <b>Continue building</b> on each plan, adding one material per step with the right tool and skill.</p>
       <h3>Getting started</h3>
       <ol>
-        <li><b>Forage</b> grass tiles (bare hands) for plant fiber, branches, berries, mushrooms and seeds.</li>
-        <li><b>Gather loose stones</b> on grey rock tiles (usually on hills and cliffs).</li>
+        <li><b>Forage</b> grass (bare hands) for plant fiber, branches, berries, mushrooms and seeds.</li>
+        <li><b>Gather loose stones</b> on bare grey rock (cliffs and hills).</li>
         <li>Craft <b>cordage</b> from fiber, then a <b>stone hatchet</b>, <b>stone pickaxe</b> and <b>stone hammer</b>.</li>
         <li>Fell trees for <b>logs</b> (heavy — they drop on the ground). Split them into <b>planks</b>; carve branches into <b>shafts</b>; make a <b>wooden shovel</b>.</li>
-        <li>Build a <b>campfire</b> (B), add fuel, and light it with <b>kindling</b>. Cook mushrooms and meat; fire clay jars.</li>
+        <li>Plan a <b>campfire</b> (B), build it, add fuel, and light it with <b>kindling</b>. Cook mushrooms and meat; fire clay jars.</li>
         <li>Dig <b>clay</b> by the water, build a <b>forge</b> and <b>stone anvil</b>, mine <b>iron ore</b>, smelt it, and smith iron tools.</li>
         <li><b>Cultivate</b> fields with a shovel, <b>sow</b> wheat seeds, tend them, harvest, grind flour at a <b>quern</b>, and bake <b>bread</b>.</li>
         <li>Hunt deer and boar (careful — boars fight back), <b>butcher</b> them with a knife for meat and hides, and build a <b>bed</b> to set your home.</li>
