@@ -12,6 +12,7 @@ import {
   ACTION_MAP, ACTIONS, craftProblem, DIG_RADIUS, EARTH_PER_ITEM, LEVEL_RADIUS, type ActionDef, type Ctx, type Target,
 } from './actions';
 import { DevSettings } from './dev';
+import { ForageState } from './forage';
 import { Input } from './input';
 import { CARRY_CAPACITY, Inventory } from './inventory';
 import { Player } from './player';
@@ -55,7 +56,7 @@ export class Game {
   input: Input;
   sky: Sky;
   ui!: UI;
-  foraged = new Map<number, number>();
+  forage = new ForageState();
   dev = new DevSettings();
 
   target: Target | null = null;
@@ -957,6 +958,7 @@ export class Game {
       const data = {
         version: 2,
         earth: this.earth,
+        forage: this.forage.serialize(),
         world: this.world.serialize(),
         player: {
           pos: [p.pos.x, p.pos.y, p.pos.z], yaw: p.yaw, pitch: p.pitch, cam: p.cameraMode,
@@ -1004,6 +1006,7 @@ export class Game {
       Object.assign(g.skills.levels, data.skills);
       g.hotbar = data.hotbar;
       g.earth = data.earth ?? {};
+      g.forage.load(data.forage);
       g.activeUid = data.active;
       g.setActive(data.active);
       return g;

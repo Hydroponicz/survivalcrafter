@@ -7,6 +7,7 @@ import { isSoft, Mat, MAT_NAMES, WATER_LEVEL, Y_MIN } from '../world/terrain';
 import {
   ANIMALS, CROP_STAGES, cropKey, type AnimalObj, type BushObj, type Crop, type PileObj, type StructureObj, type TreeObj, type WorldObj,
 } from '../world/world';
+import { BIOMES, biomeAt, type Biome } from './forage';
 import type { Game } from './game';
 
 export type Target =
@@ -59,10 +60,37 @@ export const EARTH_PER_ITEM = 0.5;
 /** Radius of the shovel/pickaxe brush (metres). */
 export const DIG_RADIUS = 1.3;
 export const LEVEL_RADIUS = 2.2;
-const FORAGE_COOLDOWN = 300;
 
-/** Forage spots are 2 m patches. */
-const patchKey = (x: number, z: number) => Math.floor(z / 2) * 1000 + Math.floor(x / 2);
+/** The biome under the target, for foraging. */
+function biome(c: Ctx): Biome | undefined {
+  if (!isGround(c)) return undefined;
+  const p = c.t.point;
+  return biomeAt(c.g.world, p.x, p.y, p.z, c.t.mat);
+}
+
+/** Refuse foraging an area that has been picked clean, saying when it recovers. */
+function forageProblem(c: Ctx, b: Biome | undefined): string | null {
+  if (!isGround(c) || !b) return 'Nothing to forage.';
+  const info = BIOMES[b];
+  if (!info.pool) return `${info.name}: nothing grows here to forage.`;
+  const p = c.t.point, now = c.g.world.time;
+  if (c.g.forage.left(p.x, p.z, b, now) >= 1) return null;
+  const mins = Math.ceil(c.g.forage.untilNext(p.x, p.z, b, now) / 60);
+  return `This area has been picked clean. It recovers in about ${mins} min — try further afield.`;
+}
+
+/** Nearest grown tree, for labelling seedlings found on the forest floor. */
+function nearestSpecies(c: Ctx): string {
+  if (!isGround(c)) return 'oak';
+  const p = c.t.point;
+  let best: TreeObj | undefined, bd = Infinity;
+  for (const o of c.g.world.near(p.x, p.z, 6)) {
+    if (o.kind !== 'tree') continue;
+    const d = Math.hypot(o.x - p.x, o.z - p.z);
+    if (d < bd) { bd = d; best = o; }
+  }
+  return best?.species ?? 'oak';
+}
 
 /** Bigger, faster earthworks with skill and a good tool. */
 function earthBudget(c: Ctx, base: number, skill: SkillId) {
@@ -99,6 +127,8 @@ export const ACTIONS: ActionDef[] = [
       const slope = Math.round((Math.acos(Math.min(1, Math.max(-1, n.y))) * 180) / Math.PI);
       const under = c.g.world.terrain.heightAt(p.x, p.z) - p.y > 1.5 ? ' You are under the surface.' : '';
       c.g.msg(`${MAT_NAMES[mat]} at ${p.y.toFixed(1)} m (${p.y >= 0 ? 'above' : 'below'} sea level), ${slope}° slope.${under}`, 'info');
+      const b = biome(c)!;
+      if (BIOMES[b].pool) c.g.msg(`${BIOMES[b].name}: ${BIOMES[b].hint} This area is ${c.g.forage.describe(p.x, p.z, b, c.g.world.time)}.`, 'info');
       const { crop } = cropAt(c);
       if (crop) {
         const st = c.g.world.cropStage(crop);
@@ -107,49 +137,52 @@ export const ACTIONS: ActionDef[] = [
     },
   },
   {
-    id: 'forage', label: 'Forage',
-    show: (c) => groundMat(c) === Mat.Grass && !c.tool,
-    check: (c) => {
-      if (!isGround(c)) return 'Nothing to forage.';
-      const last = c.g.foraged.get(patchKey(c.t.point.x, c.t.point.z));
-      return last !== undefined && c.g.world.time - last < FORAGE_COOLDOWN ? 'This patch has been picked clean recently.' : null;
-    },
-    time: 6, skill: 'foraging', difficulty: 4, stamina: 2,
+    id: 'forage', label: (c) => `Forage (${BIOMES[biome(c) ?? 'bare'].name.toLowerCase()})`,
+    show: (c) => !c.tool && isGround(c) && ['meadow', 'forest', 'shore', 'wetland'].includes(biome(c)!),
+    check: (c) => forageProblem(c, biome(c)),
+    time: 6, skill: 'foraging', difficulty: (c) => (biome(c) === 'forest' ? 5 : 3), stamina: 3,
     run: (c, o) => {
       if (!isGround(c)) return;
-      const g = c.g;
-      g.foraged.set(patchKey(c.t.point.x, c.t.point.z), g.world.time);
-      if (!o.success) return g.msg('You find nothing of use.', 'fail');
+      const g = c.g, p = c.t.point, b = biome(c)!;
+      // A failed search finds nothing but doesn't use the area up.
+      if (!o.success) return g.msg('You search around but find nothing of use.', 'fail');
+      g.forage.take(p.x, p.z, g.world.time);
       const s = g.skills.get('foraging');
-      const table: [string, number][] = [
-        ['plant_fiber', 40], ['branch', 22], ['berries', 12 + s * 0.2], ['mushroom', 10 + s * 0.2],
-        ['wheat_seeds', 4 + s * 0.15], ['rock_shard', 8],
-      ];
-      const n = 1 + (Math.random() < s / 60 ? 1 : 0) + (Math.random() < 0.35 ? 1 : 0);
+      const table = BIOMES[b].finds(s);
+      // Skilled foragers sometimes turn up a second find from the same search.
+      const rolls = 1 + (Math.random() < s / 100 ? 1 : 0);
       const found: string[] = [];
-      for (let i = 0; i < n; i++) {
+      for (let i = 0; i < rolls; i++) {
         const type = weighted(table);
-        const count = type === 'plant_fiber' ? 2 + Math.floor(Math.random() * 3) : 1;
-        g.give(type, o.ql, count);
-        found.push(`${count > 1 ? count + ' ' : ''}${itemDef(type).name.toLowerCase()}`);
+        const count = type === 'plant_fiber' ? 2 + Math.floor(Math.random() * 2) : 1;
+        if (type === 'sprout') {
+          const sp = nearestSpecies(c);
+          g.inv.add(makeItem('sprout', o.ql, `${sp} sprout`));
+          g.inventoryChanged();
+          found.push(`a ${sp} seedling`);
+        } else {
+          g.give(type, o.ql, count);
+          found.push(`${count > 1 ? count + ' ' : ''}${itemDef(type).name.toLowerCase()}`);
+        }
       }
-      g.msg(`You forage and find ${found.join(', ')}.`, 'good');
+      const left = Math.floor(g.forage.left(p.x, p.z, b, g.world.time));
+      const note = left === 0 ? ' The area is picked clean now.' : left === 1 ? ' There is little left around here.' : '';
+      g.msg(`You forage and find ${found.join(' and ')}.${note}`, 'good');
     },
   },
   {
     id: 'gather_stones', label: 'Gather loose stones',
-    show: (c) => (groundMat(c) === Mat.Rock || groundMat(c) === Mat.Iron) && !toolIs(c, 'pickaxe'),
+    show: (c) => biome(c) === 'rocky' && !toolIs(c, 'pickaxe'),
     check: (c) => {
-      if (!isGround(c)) return '';
-      const last = c.g.foraged.get(patchKey(c.t.point.x, c.t.point.z));
-      return last !== undefined && c.g.world.time - last < 120 ? 'No loose stones left here. Try elsewhere or use a pickaxe.' : null;
+      const problem = forageProblem(c, biome(c));
+      return problem && problem.startsWith('This area') ? 'No loose stones left around here. Try elsewhere, or use a pickaxe.' : problem;
     },
     time: 5, skill: 'mining', difficulty: 2, stamina: 4,
     run: (c, o) => {
       if (!isGround(c)) return;
-      c.g.foraged.set(patchKey(c.t.point.x, c.t.point.z), c.g.world.time);
       if (!o.success) return c.g.msg('The stones here are all stuck fast.', 'fail');
-      const n = 1 + (Math.random() < 0.4 ? 1 : 0);
+      c.g.forage.take(c.t.point.x, c.t.point.z, c.g.world.time);
+      const n = 1 + (Math.random() < 0.3 ? 1 : 0);
       c.g.give('rock_shard', o.ql * 0.8, n);
       c.g.msg(`You pry loose ${n} rock shard${n > 1 ? 's' : ''}.`, 'good');
     },

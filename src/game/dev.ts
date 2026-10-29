@@ -118,7 +118,7 @@ export const devCommands = {
       if (o.kind === 'tree' && o.age < 1) { o.age = 1; o.branches = 3; w.changed(o); }
       if (o.kind === 'bush' && !o.ripe) { o.ripe = true; w.changed(o); }
     }
-    g.foraged.clear();
+    g.forage.reset();
     g.msg('[dev] All crops ripe, trees grown, bushes and forage spots replenished.', 'info');
   },
 

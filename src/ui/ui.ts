@@ -4,6 +4,7 @@ import { SKILLS, type SkillId } from '../data/skills';
 import { STRUCTURE_LIST, STRUCTURES, totalMaterials } from '../data/structures';
 import { craftProblem, type ActionDef, type Ctx, type Target } from '../game/actions';
 import { DEV_FLAGS, devCommands, type DevFlag } from '../game/dev';
+import { BIOMES, biomeAt } from '../game/forage';
 import type { Game, MsgKind } from '../game/game';
 import { CARRY_CAPACITY } from '../game/inventory';
 import { MAT_NAMES } from '../world/terrain';
@@ -229,7 +230,9 @@ export class UI {
     switch (t.kind) {
       case 'terrain': {
         const crop = g.world.crops.get(cropKey(t.point.x, t.point.z));
-        return `${MAT_NAMES[t.mat]}${crop ? ' (wheat)' : ''}`;
+        const b = biomeAt(g.world, t.point.x, t.point.y, t.point.z, t.mat);
+        const name = b === 'meadow' || b === 'forest' || b === 'wetland' ? BIOMES[b].name : MAT_NAMES[t.mat];
+        return `${name}${crop ? ' (wheat)' : ''}`;
       }
       case 'water': return 'Water';
       case 'animal': return ANIMALS[t.animal.species].name;
@@ -760,7 +763,7 @@ export class UI {
       <p><b>Building</b> works like Valheim for planning: pick a piece (B) and place its ghost, snapping walls to floors, roofs to walls and so on. Then the work is Wurm-like: use <b>Continue building</b> on each plan, adding one material per step with the right tool and skill.</p>
       <h3>Getting started</h3>
       <ol>
-        <li><b>Forage</b> grass (bare hands) for plant fiber, branches, berries, mushrooms and seeds.</li>
+        <li><b>Forage</b> with bare hands. What you find depends on where you are: <b>meadows</b> give plant fiber and wild wheat seeds, the <b>forest floor</b> gives branches, mushrooms and seedlings, <b>shores</b> give pebbles and driftwood, <b>wetlands</b> give reeds. Each area only holds a few finds and takes a while to recover, so keep moving. Pick <b>berries</b> from berry bushes.</li>
         <li><b>Gather loose stones</b> on bare grey rock (cliffs and hills).</li>
         <li>Craft <b>cordage</b> from fiber, then a <b>stone hatchet</b>, <b>stone pickaxe</b> and <b>stone hammer</b>.</li>
         <li>Fell trees for <b>logs</b> (heavy — they drop on the ground). Split them into <b>planks</b>; carve branches into <b>shafts</b>; make a <b>wooden shovel</b>.</li>

@@ -64,6 +64,9 @@ Toggles are remembered per browser; a purple **DEV** badge shows while any cheat
   snapping floors to floors, walls to floor edges and wall tops, roofs onto walls; rotate with the mouse
   wheel or Q/E and keep placing. Each placed plan must then be built with "Continue building", spending
   one material per step with the right tool and skill — so quality and failure still matter.
+- **Foraging that reads the land.** Meadows, forest floor, shores and wetlands each give different finds
+  (fiber and wild seeds; branches, mushrooms and seedlings; pebbles and driftwood; reeds). Every 12 m area
+  holds only two or three finds and regrows one every four minutes, so you forage by roaming, not by spamming.
 - **Production chains.** Fiber → cordage → stone tools → logs → planks/shafts → shovel → clay → forge +
   anvil → iron ore → lumps → iron tools. Fields → wheat → quern → flour + jar of water → dough → bread.
 - **Survival.** Food, water, stamina and health. Fires need fuel and kindling. Boars fight back. Death
