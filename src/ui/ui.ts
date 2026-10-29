@@ -18,6 +18,9 @@ const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, html?: 
   return e;
 };
 
+const DRAG_ITEM = 'application/x-sc-item';
+const DRAG_SLOT = 'application/x-sc-slot';
+
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 
 export class UI {
@@ -127,13 +130,16 @@ export class UI {
     this.root.appendChild(this.damageEl);
 
     window.addEventListener('keydown', (e) => this.onKey(e));
-    window.addEventListener('mouseup', () => {
+    // A drag ends with dragend instead of mouseup; both release the redraw hold.
+    const release = () => {
       const name = this.pressedWindow;
       if (!name) return;
       this.pressedWindow = null;
       // Let the click event fire on the old DOM first, then catch up.
       if (this.pendingRender.delete(name)) setTimeout(() => { if (this.open.has(name)) this.render(name); }, 0);
-    });
+    };
+    window.addEventListener('mouseup', release);
+    window.addEventListener('dragend', release);
     document.addEventListener('mousedown', (e) => {
       if (this.menuOpen && !this.menuEl.contains(e.target as Node)) this.closeMenu();
     });
@@ -348,11 +354,50 @@ export class UI {
       const count = type ? g.inv.count(type) : 0;
       const slot = el('div', `slot${active && type === active.type ? ' active' : ''}${type && !count ? ' empty' : ''}`);
       slot.innerHTML = `<span class="slot-key">${i + 1}</span>${type ? `<span class="slot-icon">${itemDef(type).icon}</span>` : ''}${count > 1 ? `<span class="slot-count">${count}</span>` : ''}`;
-      slot.title = type ? itemDef(type).name : 'Empty — hover an item in your inventory and press this number';
+      slot.title = type
+        ? `${itemDef(type).name} — click to use, drag to move, right-click to clear`
+        : 'Empty — drag an item here from your inventory';
+      this.wireSlot(slot, i, type);
       this.hotbarEl.appendChild(slot);
     });
     const a = el('div', 'active-label', active ? `${itemDef(active.type).icon} ${esc(itemName(active))} <small>QL ${active.ql.toFixed(1)}${active.dmg > 0 ? `, dmg ${active.dmg.toFixed(1)}` : ''}</small>` : 'Bare hands');
     this.hotbarEl.appendChild(a);
+  }
+
+  private wireSlot(slot: HTMLElement, i: number, type: string | null) {
+    const g = this.g;
+    slot.addEventListener('click', () => g.useHotbar(i));
+    slot.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      g.bindHotbar(i, null);
+    });
+    if (type) {
+      slot.draggable = true;
+      slot.addEventListener('dragstart', (e) => {
+        e.dataTransfer!.setData(DRAG_SLOT, String(i));
+        e.dataTransfer!.effectAllowed = 'move';
+      });
+      // Dropped somewhere that isn't a slot: take it off the bar.
+      slot.addEventListener('dragend', (e) => {
+        if (e.dataTransfer!.dropEffect === 'none' && g.hotbar[i] === type) g.bindHotbar(i, null);
+      });
+    }
+    slot.addEventListener('dragover', (e) => {
+      const types = e.dataTransfer!.types;
+      if (!types.includes(DRAG_ITEM) && !types.includes(DRAG_SLOT)) return;
+      e.preventDefault();
+      e.dataTransfer!.dropEffect = types.includes(DRAG_SLOT) ? 'move' : 'copy';
+      slot.classList.add('drop-target');
+    });
+    slot.addEventListener('dragleave', () => slot.classList.remove('drop-target'));
+    slot.addEventListener('drop', (e) => {
+      e.preventDefault();
+      slot.classList.remove('drop-target');
+      const item = e.dataTransfer!.getData(DRAG_ITEM);
+      const from = e.dataTransfer!.getData(DRAG_SLOT);
+      if (item) g.bindHotbar(i, item);
+      else if (from !== '') g.swapHotbar(Number(from), i);
+    });
   }
 
   private frame(name: WindowName, title: string, body: HTMLElement | string) {
@@ -413,6 +458,15 @@ export class UI {
     }
     row.appendChild(btns);
     row.addEventListener('mouseenter', () => { this.hoveredItem = best.uid; });
+    if (!def.noPickup) {
+      row.draggable = true;
+      row.addEventListener('dragstart', (e) => {
+        e.dataTransfer!.setData(DRAG_ITEM, best.type);
+        e.dataTransfer!.effectAllowed = 'copy';
+        this.hotbarEl.classList.add('dragging');
+      });
+      row.addEventListener('dragend', () => this.hotbarEl.classList.remove('dragging'));
+    }
     row.addEventListener('mouseleave', () => { if (this.hoveredItem === best.uid) this.hoveredItem = null; });
     return row;
   }
@@ -422,7 +476,7 @@ export class UI {
     const body = el('div');
     const w = g.inv.weight();
     body.appendChild(el('div', 'inv-weight', `Carrying <b>${w.toFixed(1)}</b> / ${CARRY_CAPACITY} kg${w > CARRY_CAPACITY ? ' — <span class="warn">overloaded, you move slowly</span>' : ''}`));
-    body.appendChild(el('div', 'hint', 'Click <b>Use</b> to make an item your active item (tools, seeds, dirt…). Hover an item and press <b>1-9</b> to bind it to the hotbar.'));
+    body.appendChild(el('div', 'hint', 'Click <b>Use</b> to make an item your active item (tools, seeds, dirt…). Drag an item onto the hotbar (or hover it and press <b>1-9</b>) to bind it.'));
     const groups = g.inv.grouped().sort((a, b) => itemDef(a.type).name.localeCompare(itemDef(b.type).name));
     if (!groups.length) body.appendChild(el('div', 'empty', 'Your pack is empty.'));
     const chest = this.container?.kind === 'structure' ? this.container : null;

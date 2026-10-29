@@ -170,6 +170,28 @@ export class Game {
     if (free >= 0) this.hotbar[free] = it.type;
   }
 
+  /** Put an item type in a hotbar slot. A type lives in one slot only, so it moves (swapping with the target). */
+  bindHotbar(slot: number, type: string | null) {
+    const from = type ? this.hotbar.indexOf(type) : -1;
+    if (from >= 0 && from !== slot) this.hotbar[from] = this.hotbar[slot];
+    this.hotbar[slot] = type;
+    this.ui?.refresh();
+  }
+
+  swapHotbar(a: number, b: number) {
+    [this.hotbar[a], this.hotbar[b]] = [this.hotbar[b], this.hotbar[a]];
+    this.ui?.refresh();
+  }
+
+  /** Activate the best item of the slot's type, or put it away if it's already active. */
+  useHotbar(slot: number) {
+    const type = this.hotbar[slot];
+    const it = type ? this.inv.ofType(type)[0] : undefined;
+    if (!it) return;
+    const active = this.activeItem();
+    this.setActive(active && active.type === type ? null : it.uid);
+  }
+
   dropToGround(items: Item[], x: number, z: number) {
     const existing = this.world.near(x, z, 1.5).find((o) => o.kind === 'pile' && Math.hypot(o.x - x, o.z - z) < 1.2) as PileObj | undefined;
     if (existing) {
@@ -718,14 +740,9 @@ export class Game {
     if (inp.hit('Digit0')) this.setActive(null);
     for (let i = 0; i < 9 && !this.ui.menuOpen; i++) {
       if (inp.hit(`Digit${i + 1}`)) {
-        if (this.ui.hoveredItem !== null) {
-          const it = this.inv.find(this.ui.hoveredItem);
-          if (it) { this.hotbar[i] = it.type; this.ui.refresh(); }
-        } else {
-          const type = this.hotbar[i];
-          const it = type ? this.inv.ofType(type)[0] : undefined;
-          if (it) this.setActive(this.activeUid === it.uid ? null : it.uid);
-        }
+        const hovered = this.ui.hoveredItem !== null ? this.inv.find(this.ui.hoveredItem) : undefined;
+        if (hovered) this.bindHotbar(i, hovered.type);
+        else this.useHotbar(i);
       }
     }
 

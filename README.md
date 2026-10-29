@@ -32,7 +32,7 @@ No server is needed — the world and your character save to the browser's `loca
 | **V** | Toggle first / third person (mouse wheel zooms in third person) |
 | Left click / E | Default action on what you're looking at |
 | Right click / F | Action menu (choose with mouse or 1-9) |
-| 1-9 / 0 | Activate hotbar item / bare hands |
+| 1-9 / 0 | Activate hotbar item / bare hands (drag items from the inventory onto the hotbar to bind them) |
 | R / X | Repeat last action / stop current action |
 | I or Tab, C, B, K, H | Inventory, Crafting, Build, Skills, Help |
 | ` or F2 | Dev console (cheats) |
