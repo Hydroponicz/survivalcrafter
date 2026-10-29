@@ -108,6 +108,7 @@ export class UI {
         <div class="pause-buttons">
           <button data-act="resume">Resume</button>
           <button data-act="save">Save game</button>
+          <button data-act="unstuck">Unstuck</button>
           <button data-act="help">Controls &amp; guide</button>
           <button data-act="new" class="danger">Abandon world</button>
         </div>
@@ -115,6 +116,7 @@ export class UI {
     this.pauseEl.addEventListener('click', (e) => {
       const act = (e.target as HTMLElement).dataset.act;
       if (act === 'save') { g.save(); this.log('Game saved.', 'good'); return; }
+      if (act === 'unstuck') { g.unstuck(); g.input.lock(); return; }
       if (act === 'help') { this.toggle('help'); return; }
       if (act === 'new') {
         if (confirm('Abandon this world and start a new one? Your save will be deleted.')) {

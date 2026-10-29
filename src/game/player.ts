@@ -121,16 +121,21 @@ export class Player {
     return { y: g, piece };
   }
 
-  /** Would a body standing with its feet at (x, y, z) overlap anything solid? */
-  private blocked(world: World, x: number, y: number, z: number): boolean {
+  /**
+   * How much a body standing with its feet at (x, y, z) overlaps solid things:
+   * terrain samples inside the ground, plus how deep it sits in trees and pieces.
+   * Zero means the spot is clear.
+   */
+  penetration(world: World, x: number, y: number, z: number): number {
     const t = world.terrain;
+    let score = 0;
     for (const h of [STEP + 0.05, 1.1, HEIGHT - 0.1]) {
-      if (t.solidAt(x, y + h, z)) return true;
-      for (const [ox, oz] of RING) if (t.solidAt(x + ox * RADIUS, y + h, z + oz * RADIUS)) return true;
+      if (t.solidAt(x, y + h, z)) score += 2;
+      for (const [ox, oz] of RING) if (t.solidAt(x + ox * RADIUS, y + h, z + oz * RADIUS)) score++;
     }
     for (const o of world.near(x, z, 2.5)) {
       if (o.kind === 'tree') {
-        if (o.age > 0.35 && Math.hypot(x - o.x, z - o.z) < RADIUS + 0.12 + 0.18 * o.age) return true;
+        if (o.age > 0.35) score += Math.max(0, RADIUS + 0.12 + 0.18 * o.age - Math.hypot(x - o.x, z - o.z)) * 10;
         continue;
       }
       if (o.kind !== 'structure' || !o.built) continue;
@@ -138,10 +143,39 @@ export class Player {
       for (const b of pieceBoxes(STRUCTURES[o.type], o.open)) {
         const lo = b.c[1] - b.h[1], hi = b.c[1] + b.h[1];
         if (hi <= ly + STEP || lo >= ly + HEIGHT) continue;
-        if (Math.abs(lx - b.c[0]) < b.h[0] + RADIUS && Math.abs(lz - b.c[2]) < b.h[2] + RADIUS) return true;
+        const px = b.h[0] + RADIUS - Math.abs(lx - b.c[0]);
+        const pz = b.h[2] + RADIUS - Math.abs(lz - b.c[2]);
+        if (px > 0 && pz > 0) score += Math.min(px, pz) * 10;
       }
     }
-    return false;
+    return score;
+  }
+
+  /**
+   * A move is allowed into clear space, or — if you're already wedged against
+   * something (a steep bank, a tree) — anywhere that doesn't push you deeper,
+   * so you can always walk back out.
+   */
+  private canMove(world: World, here: number, x: number, z: number): boolean {
+    const there = this.penetration(world, x, this.pos.y, z);
+    return there === 0 || there <= here - 1e-6 || (here > 0 && there <= here);
+  }
+
+  /** Nearest spot within a few metres where you can stand freely, or null. */
+  findFreeSpot(world: World): THREE.Vector3 | null {
+    const t = world.terrain;
+    for (let r = 0; r <= 6; r += 0.5) {
+      const n = Math.max(1, Math.round(r * 6));
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * Math.PI * 2;
+        const x = this.pos.x + Math.cos(a) * r, z = this.pos.z + Math.sin(a) * r;
+        if (x < 1 || z < 1 || x > t.size - 1 || z > t.size - 1) continue;
+        const y = t.heightAt(x, z);
+        if (y < WATER_LEVEL) continue;
+        if (this.penetration(world, x, y + 0.05, z) === 0) return new THREE.Vector3(x, y + 0.05, z);
+      }
+    }
+    return null;
   }
 
   update(dt: number, input: Input, world: World, busy: boolean, overweight: number, allowMove: boolean, fly = false) {
@@ -196,9 +230,12 @@ export class Player {
     this.vel.z = dz;
     const nx = this.pos.x + dx * dt, nz = this.pos.z + dz * dt;
     // Slide along walls: try the full move, then each axis on its own.
-    if (!this.blocked(world, nx, this.pos.y, nz)) { this.pos.x = nx; this.pos.z = nz; }
-    else if (!this.blocked(world, nx, this.pos.y, this.pos.z)) this.pos.x = nx;
-    else if (!this.blocked(world, this.pos.x, this.pos.y, nz)) this.pos.z = nz;
+    if (dx || dz) {
+      const here = this.penetration(world, this.pos.x, this.pos.y, this.pos.z);
+      if (this.canMove(world, here, nx, nz)) { this.pos.x = nx; this.pos.z = nz; }
+      else if (this.canMove(world, here, nx, this.pos.z)) this.pos.x = nx;
+      else if (this.canMove(world, here, this.pos.x, nz)) this.pos.z = nz;
+    }
     const max = t.size - 0.5;
     this.pos.x = Math.max(0.5, Math.min(max, this.pos.x));
     this.pos.z = Math.max(0.5, Math.min(max, this.pos.z));

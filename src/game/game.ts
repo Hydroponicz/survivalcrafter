@@ -976,6 +976,22 @@ export class Game {
     }
   }
 
+  /** Pause-menu escape hatch: hop to the nearest clear spot, or home if there is none. */
+  unstuck() {
+    this.cancelAction();
+    const p = this.player;
+    const spot = p.findFreeSpot(this.world);
+    if (spot) {
+      p.pos.copy(spot);
+      this.msg('You scramble free.', 'info');
+    } else {
+      const s = this.world.spawn;
+      p.pos.set(s.x, this.world.terrain.heightAt(s.x, s.z) + 0.1, s.z);
+      this.msg('You could not find footing nearby, so you made your way back home.', 'info');
+    }
+    p.vel.set(0, 0, 0);
+  }
+
   abandon() {
     this.abandoned = true;
     Game.clearSave();

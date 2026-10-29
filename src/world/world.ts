@@ -188,21 +188,33 @@ export class World {
     this.populateAnimals(28);
   }
 
+  /**
+   * A gentle lowland meadow near the middle of the island: not a mountaintop,
+   * with walkable ground all around so a new character can head off any way.
+   */
   findSpawn() {
     const t = this.terrain;
     const c = WORLD_SIZE / 2;
-    for (let r = 0; r < c - 8; r += 2) {
-      for (let a = 0; a < 24; a++) {
-        const x = c + Math.cos((a / 24) * Math.PI * 2) * r;
-        const z = c + Math.sin((a / 24) * Math.PI * 2) * r;
-        if (t.surfaceMaterial(x, z) !== Mat.Grass) continue;
-        const h = t.heightAt(x, z);
-        if (h < 1.5) continue;
-        const flat = Math.max(...[[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dx, dz]) => Math.abs(t.heightAt(x + dx * 2, z + dz * 2) - h)));
-        if (flat > 0.8) continue;
-        if (this.near(x, z, 2).length) continue;
-        this.spawn = { x, z };
-        return;
+    const ok = (x: number, z: number, maxH: number) => {
+      if (t.surfaceMaterial(x, z) !== Mat.Grass) return false;
+      const h = t.heightAt(x, z);
+      if (h < 1.5 || h > maxH) return false;
+      // Gentle in a 6 m radius, so you don't start on a ledge.
+      for (let a = 0; a < 8; a++) {
+        for (const r of [2, 4, 6]) {
+          const nx = x + Math.cos((a / 8) * Math.PI * 2) * r, nz = z + Math.sin((a / 8) * Math.PI * 2) * r;
+          if (Math.abs(t.heightAt(nx, nz) - h) > r * 0.35) return false;
+        }
+      }
+      return !this.near(x, z, 2).some((o) => Math.hypot(o.x - x, o.z - z) < 2);
+    };
+    for (const maxH of [10, 16, 40]) {
+      for (let r = 0; r < c - 12; r += 2) {
+        for (let a = 0; a < 24; a++) {
+          const x = c + Math.cos((a / 24) * Math.PI * 2) * r;
+          const z = c + Math.sin((a / 24) * Math.PI * 2) * r;
+          if (ok(x, z, maxH)) { this.spawn = { x, z }; return; }
+        }
       }
     }
     this.spawn = { x: c, z: c };
