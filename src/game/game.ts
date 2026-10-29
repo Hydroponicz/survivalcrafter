@@ -13,6 +13,7 @@ import {
   ACTION_MAP, ACTIONS, craftProblem, DIG_RADIUS, EARTH_PER_ITEM, LEVEL_RADIUS, type ActionDef, type Ctx, type Target,
 } from './actions';
 import { DevSettings } from './dev';
+import { MinigameSession, minigameVerb, type MinigameSpec } from './minigames';
 import { FORAGE, type ForageCategory } from '../data/forage';
 import { ForageGrowth, Knowledge, noticeOf, populateForage } from './forage';
 import { Input } from './input';
@@ -22,6 +23,8 @@ import { Sky } from './sky';
 import type { UI } from '../ui/ui';
 
 const REACH = 4.5;
+/** Skill above a task's difficulty needed to do it the quick way. */
+export const QUICK_MARGIN = 10;
 const BUILD_REACH = 8;
 const SAVE_KEY = 'survivalcrafter.save.v2';
 export const OLD_SAVE_KEY = 'survivalcrafter.save.v1';
@@ -77,6 +80,11 @@ export class Game {
   placement: Placement | null = null;
   paused = false;
   private abandoned = false;
+
+  /** Hands-on work in progress (a crafting or building minigame). */
+  working: { session: MinigameSession; def: ActionDef; ctx: Ctx } | null = null;
+  /** Windows to reopen once the work is done. */
+  private reopen: string[] = [];
 
   /** Fractional earth dug (positive) or owed for fills (negative), per item type. */
   earth: Record<string, number> = {};
@@ -484,7 +492,7 @@ export class Game {
     for (const def of ACTIONS) {
       // Structures pick the right tool automatically.
       let c = ctx;
-      if (def.id === 'continue_build' && t.kind === 'object' && t.obj.kind === 'structure') {
+      if ((def.id === 'continue_build' || def.id === 'quick_build') && t.kind === 'object' && t.obj.kind === 'structure') {
         c = { ...ctx, tool: this.toolFor(STRUCTURES[t.obj.type].tool) ?? ctx.tool };
       }
       if (!def.show(c)) continue;
@@ -497,7 +505,7 @@ export class Game {
   }
 
   request(def: ActionDef, ctx: Ctx) {
-    if (this.action) {
+    if (this.action || this.working) {
       if (this.queue.length >= 5) return this.msg('You cannot queue any more actions.', 'fail');
       this.queue.push({ def, ctx });
       this.msg(`Queued: ${typeof def.label === 'function' ? def.label(ctx) : def.label}.`, 'info');
@@ -506,9 +514,9 @@ export class Game {
     this.begin(def, ctx);
   }
 
-  craft(r: Recipe, count: number) {
+  craft(r: Recipe, count: number, quick = false) {
     const tool = this.toolFor(r.tool);
-    const ctx: Ctx = { g: this, t: { kind: 'none' }, tool, recipe: r };
+    const ctx: Ctx = { g: this, t: { kind: 'none' }, tool, recipe: r, quick };
     const problem = craftProblem(this, r, tool);
     if (problem) { this.msg(problem, 'fail'); return; }
     for (let i = 0; i < count; i++) this.request(ACTION_MAP.craft, ctx);
@@ -524,6 +532,12 @@ export class Game {
       def.run(ctx, { success: true, ql: 0, toolQl: 0 });
       return true;
     }
+    const instant = this.dev.on('instantActions') || (this.dev.on('instantCraft') && def.id === 'craft');
+    const spec = !instant && !ctx.quick && !def.quick ? def.minigame?.(ctx) : undefined;
+    if (spec) {
+      this.startWork(def, ctx, spec);
+      return true;
+    }
     const skill = this.skillOf(def, ctx);
     const lvl = skill ? this.skills.get(skill) : 1;
     const tool = ctx.tool;
@@ -534,10 +548,49 @@ export class Game {
     let total = def.fixedTime
       ? base * (1.15 - lvl / 250)
       : Math.max(base * 0.3, (base * (1.3 - lvl / 150) * dmgSlow) / ((0.5 + 0.5 * power) * toolQ));
-    if (this.dev.on('instantActions') || (this.dev.on('instantCraft') && def.id === 'craft')) total = 0;
+    if (instant) total = 0;
     this.action = { def, ctx, elapsed: 0, total, startPos: this.player.pos.clone() };
     this.lastAction = { def, recipe: ctx.recipe };
     return true;
+  }
+
+  /** Can this work be done the quick way (a plain timed action at a quality cost)? */
+  canQuick(skill: SkillId, difficulty: number): boolean {
+    return this.skills.get(skill) >= difficulty + QUICK_MARGIN;
+  }
+
+  /** Start hands-on work: the view moves to the workstation and you do the job yourself. */
+  private startWork(def: ActionDef, ctx: Ctx, spec: MinigameSpec) {
+    const skill = this.skillOf(def, ctx);
+    const diff = typeof def.difficulty === 'function' ? def.difficulty(ctx) : def.difficulty ?? 1;
+    const lvl = skill ? this.skills.get(skill) : 1;
+    const tool = ctx.tool;
+    const power = tool ? itemDef(tool.type).toolPower ?? 1 : 1;
+    // Skill above the task's difficulty, and a good tool, make the work more forgiving.
+    const ease = Math.max(0.15, Math.min(1, 0.32 + (lvl - diff) / 50 + (power - 0.7) * 0.3 + (tool?.ql ?? 0) / 400));
+    if (!this.working && !this.reopen.length) this.reopen = this.ui.closeAllWindows();
+    const label = typeof def.label === 'function' ? def.label(ctx) : def.label;
+    const session = new MinigameSession(spec, ease, this.ui.root, (perf, secs) => this.endWork(perf, secs), label);
+    this.working = { session, def, ctx };
+    this.lastAction = { def, recipe: ctx.recipe };
+    this.msg(`You set to work (${minigameVerb(spec)}). Right-click to stop.`, 'info');
+  }
+
+  private endWork(perf: number | null, seconds: number) {
+    const w = this.working;
+    this.working = null;
+    if (!w) return;
+    if (perf === null) {
+      this.msg('You stop working.', 'info');
+      this.queue = [];
+      this.repeatBlocked = false;
+    } else {
+      this.complete(w.def, w.ctx, Math.max(2, seconds), perf);
+    }
+    if (!this.working && !this.action && this.reopen.length) {
+      for (const n of this.reopen) this.ui.show(n as Parameters<UI['show']>[0]);
+      this.reopen = [];
+    }
   }
 
   private skillOf(def: ActionDef, ctx: Ctx): SkillId | undefined {
@@ -545,6 +598,7 @@ export class Game {
   }
 
   cancelAction(reason?: string) {
+    if (this.working) this.working.session.cancel();
     if (this.action && reason) this.msg(reason, 'fail');
     this.action = null;
     this.levelling = false;
@@ -559,10 +613,18 @@ export class Game {
   private repeatBlocked = false;
 
   private finish(a: RunningAction) {
-    const { def, ctx } = a;
+    this.complete(a.def, a.ctx, a.total);
+  }
+
+  /**
+   * Resolve a finished piece of work. `perf` (0..1) is how well a minigame
+   * went; without it, the outcome is a plain skill roll.
+   */
+  private complete(def: ActionDef, ctx: Ctx, seconds: number, perf?: number) {
     // Conditions may have changed while working.
     const problem = def.check?.(ctx) ?? null;
     if (problem) { this.msg(problem, 'fail'); this.action = null; this.queue = []; return; }
+    const quick = !!ctx.quick || !!def.quick;
     const skill = this.skillOf(def, ctx);
     const diff = typeof def.difficulty === 'function' ? def.difficulty(ctx) : def.difficulty ?? 1;
     const tool = ctx.tool;
@@ -571,10 +633,17 @@ export class Game {
     let success = true;
     let ql = 10;
     if (skill) {
-      success = this.dev.on('alwaysSucceed') || Math.random() < this.skills.successChance(skill, diff, toolQl, power);
-      ql = this.skills.rollQuality(skill, toolQl, ctx.recipe ? 0 : 0, power);
+      const base = this.skills.rollQuality(skill, toolQl, 0, power);
+      if (perf !== undefined) {
+        // Your hands decide: performance sets most of the quality, skill caps it.
+        success = this.dev.on('alwaysSucceed') || perf >= 0.3;
+        ql = Math.max(1, Math.min(this.skills.get(skill) + 8, base * (0.55 + 0.65 * perf)));
+      } else {
+        success = this.dev.on('alwaysSucceed') || Math.random() < this.skills.successChance(skill, diff, toolQl, power);
+        ql = quick ? base * 0.85 : base;
+      }
       const before = this.skills.get(skill);
-      const gain = this.skills.gain(skill, diff, success, a.total);
+      const gain = this.skills.gain(skill, diff, success, seconds);
       if (Math.floor(before) !== Math.floor(before + gain)) {
         this.msg(`${skillName(skill)} increased to ${Math.floor(before + gain)}.`, 'skill');
       }
@@ -961,7 +1030,17 @@ export class Game {
   private update(dt: number) {
     const inp = this.input;
     const p = this.player;
-    const uiOpen = this.ui.anyWindowOpen();
+    this.ui.root.classList.toggle('working', !!this.working);
+
+    if (this.working) {
+      // Hands-on work: the mouse drives the minigame; you stand still.
+      if (!inp.locked) this.working.session.cancel();
+      else this.working.session.update(dt, inp);
+      p.update(dt, inp, this.world, true, 0, false, false);
+      p.updateCamera(this.camera, this.world.terrain);
+      this.tickLife(dt);
+      return;
+    }
 
     // --- hotkeys
     if (inp.hit('KeyV')) {
@@ -1040,8 +1119,16 @@ export class Game {
       p.swing = 0;
     }
 
+    this.tickLife(dt);
+  }
+
+  /** Needs, effects, the world and autosave: everything that runs whatever you're doing. */
+  private tickLife(dt: number) {
+    const inp = this.input;
+    const p = this.player;
+    const uiOpen = this.ui.anyWindowOpen();
     // --- survival
-    const busy = !!this.action || p.sprinting;
+    const busy = !!this.action || !!this.working || p.sprinting;
     p.food = Math.max(0, p.food - dt * 0.05);
     p.water = Math.max(0, p.water - dt * 0.08);
     const fx = p.effects;
@@ -1110,6 +1197,7 @@ export class Game {
     this.view.syncAnimals(this.elapsed);
     this.view.updateFires(p.pos.x, p.pos.z, this.elapsed);
     this.renderer.render(this.scene, this.camera);
+    this.working?.session.render(this.renderer);
   }
 
   // ---------- persistence

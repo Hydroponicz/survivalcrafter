@@ -7,7 +7,8 @@ import { DEV_FLAGS, devCommands, type DevFlag } from '../game/dev';
 import { BIOME_NAMES, IDENTIFY } from '../data/forage';
 import { VirtualCursor } from './cursor';
 import { BIOMES, biomeAt } from '../game/forage';
-import type { Game, MsgKind } from '../game/game';
+import { QUICK_MARGIN, type Game, type MsgKind } from '../game/game';
+import { minigameVerb, RECIPE_MINIGAMES } from '../game/minigames';
 import { CARRY_CAPACITY } from '../game/inventory';
 import { MAT_NAMES } from '../world/terrain';
 import { ANIMALS, cropKey, type PileObj, type StructureObj } from '../world/world';
@@ -180,6 +181,15 @@ export class UI {
     this.open.add(name);
     this.windows.get(name)!.style.display = 'flex';
     this.render(name);
+  }
+
+  /** Close every window (and the action menu); returns which were open. */
+  closeAllWindows(): WindowName[] {
+    const was = [...this.open];
+    for (const n of was) this.close(n);
+    if (this.menuOpen) this.closeMenu();
+    this.wantsRelock = false;
+    return was;
   }
 
   close(name: WindowName) {
@@ -606,7 +616,7 @@ export class UI {
     const chance = Math.round(g.skills.successChance(r.skill, r.difficulty, tool?.ql ?? 0) * 100);
     row.innerHTML = `
       <div class="recipe-head"><span class="icon">${out.icon}</span><b>${esc(r.name)}</b>${r.output.count > 1 ? ` ×${r.output.count}` : ''}
-        <small>${SKILLS[r.skill]} ${lvl.toFixed(1)} · difficulty ${r.difficulty} · ~${chance}% success</small></div>
+        <small>${SKILLS[r.skill]} ${lvl.toFixed(1)} · difficulty ${r.difficulty}${RECIPE_MINIGAMES[r.id] ? ` · hands-on: ${minigameVerb(RECIPE_MINIGAMES[r.id])}` : ` · ~${chance}% success`}</small></div>
       <div class="recipe-in">${inputs}</div>
       ${reqs.length ? `<div class="recipe-req">${reqs.join(' · ')}</div>` : ''}`;
     const btns = el('div', 'btns');
@@ -615,6 +625,15 @@ export class UI {
       b.disabled = !!problem;
       b.addEventListener('click', () => g.craft(r, n));
       btns.appendChild(b);
+    }
+    // Once you've mastered it, skip the hands-on work at a quality cost.
+    if (RECIPE_MINIGAMES[r.id]) {
+      const quick = el('button', 'quick', 'Quick ×5');
+      const ok = g.canQuick(r.skill, r.difficulty);
+      quick.disabled = !!problem || !ok;
+      quick.title = ok ? 'Skip the hands-on work. Lower quality.' : `Unlocks at ${SKILLS[r.skill]} ${r.difficulty + QUICK_MARGIN}`;
+      quick.addEventListener('click', () => g.craft(r, 5, true));
+      btns.appendChild(quick);
     }
     row.appendChild(btns);
     if (problem) row.title = problem;
@@ -822,6 +841,7 @@ export class UI {
       </table>
       <h3>How this world works</h3>
       <p>Like Wurm Online, everything you do is a <b>timed action</b> that uses a <b>skill</b>. Skills start at 1 and rise slowly with practice. Higher skill means faster work, fewer failures and better <b>quality (QL)</b>. Every item has its own QL; good tools and good materials make good products.</p>
+      <p><b>Crafting and building are hands-on.</b> The view moves to the workstation and you do the job with the mouse: draw the saw along the line, strike the anvil as the ring closes, pump the bellows to hold the heat, turn the quern at a steady pace, lift the bread off the fire at the right moment. How well you do sets most of the quality; your skill makes the work more forgiving and caps the quality. Right-click stops. Once your skill is 10 above a task's difficulty you can <b>Quick</b> craft or build it, skipping the minigame at a quality cost.</p>
       <p>The <b>active item</b> decides what you can do. A shovel digs, raises, smooths and levels earth; a pickaxe mines rock and tunnels; a hatchet fells trees. Bare hands forage, pick berries and gather stones.</p>
       <p>The land is made of <b>voxels</b>: you can reshape it in any direction. The ring on the ground shows the area your tool will work. <b>Level ground</b> flattens the outer ring to the height of your feet, digging out the high parts and filling hollows with dirt from your pack. Below the soil is rock you need a pickaxe for — dig tunnels, find caves, and look for rusty <b>iron veins</b>. Every 0.5 m³ you dig out becomes an item.</p>
       <p><b>Building</b> works like Valheim for planning: pick a piece (B) and place its ghost, snapping walls to floors, roofs to walls and so on. Then the work is Wurm-like: use <b>Continue building</b> on each plan, adding one material per step with the right tool and skill.</p>

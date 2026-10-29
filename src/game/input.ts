@@ -4,6 +4,8 @@ export class Input {
   mouseDY = 0;
   wheel = 0;
   locked = false;
+  /** Mouse buttons currently held down (while the mouse is captured). */
+  held = new Set<number>();
   private pressed = new Set<string>();
   private clicks: number[] = [];
 
@@ -22,8 +24,11 @@ export class Input {
       this.mouseDY += e.movementY;
     });
     canvas.addEventListener('mousedown', (e) => {
-      if (this.locked) this.clicks.push(e.button);
+      if (!this.locked) return;
+      this.clicks.push(e.button);
+      this.held.add(e.button);
     });
+    window.addEventListener('mouseup', (e) => this.held.delete(e.button));
     // Block the browser menu everywhere, not just on the canvas: on Windows it opens on
     // mouseup, after our action menu has already released the mouse over the UI.
     document.addEventListener('contextmenu', (e) => {
@@ -32,7 +37,7 @@ export class Input {
     window.addEventListener('wheel', (e) => { if (this.locked) this.wheel += Math.sign(e.deltaY); }, { passive: true });
     document.addEventListener('pointerlockchange', () => {
       this.locked = document.pointerLockElement === this.canvas;
-      if (!this.locked) this.keys.clear();
+      if (!this.locked) { this.keys.clear(); this.held.clear(); }
     });
   }
 

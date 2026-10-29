@@ -10,6 +10,7 @@ import {
 import { FORAGE, IDENTIFY } from '../data/forage';
 import { BIOMES, biomeAt, type Biome } from './forage';
 import type { Game } from './game';
+import { buildStepMinigame, RECIPE_MINIGAMES, type MinigameSpec } from './minigames';
 
 export type Target =
   | { kind: 'terrain'; point: THREE.Vector3; normal: THREE.Vector3; mat: Mat }
@@ -24,6 +25,8 @@ export interface Ctx {
   tool?: Item;
   /** The inventory item an action is about (e.g. studying a herb). */
   item?: Item;
+  /** Skip the hands-on minigame: a plain timed action at a quality cost. */
+  quick?: boolean;
   recipe?: Recipe;
 }
 
@@ -44,6 +47,10 @@ export interface ActionDef {
   toolWear?: number;
   /** Duration ignores tool power (e.g. weapon swings). */
   fixedTime?: boolean;
+  /** Hands-on work: the minigame to play instead of waiting out a timer. */
+  minigame?: (c: Ctx) => MinigameSpec | undefined;
+  /** Always the quick, timed version (no minigame). */
+  quick?: boolean;
   /** Re-queue automatically after completing, while still valid. */
   repeat?: boolean | ((c: Ctx) => boolean);
   run(c: Ctx, o: Outcome): void;
@@ -497,6 +504,11 @@ export const ACTIONS: ActionDef[] = [
       return null;
     },
     time: (c) => STRUCTURES[obj(c, 'structure')!.type].stepTime,
+    minigame: (c) => {
+      const s = obj(c, 'structure')!;
+      const next = nextMaterial(STRUCTURES[s.type], s);
+      return next ? buildStepMinigame(next) : undefined;
+    },
     skill: (c) => STRUCTURES[obj(c, 'structure')!.type].skill,
     difficulty: (c) => STRUCTURES[obj(c, 'structure')!.type].difficulty,
     stamina: 6, toolWear: 0.08,
@@ -599,6 +611,7 @@ export const ACTIONS: ActionDef[] = [
       return null;
     },
     time: 6, skill: 'firemaking', difficulty: 8, stamina: 3,
+    minigame: () => ({ kind: 'bowdrill' }),
     run: (c, o) => {
       const s = obj(c, 'structure')!;
       c.g.inv.take('kindling', 1);
@@ -727,6 +740,7 @@ export const ACTIONS: ActionDef[] = [
     show: () => false,
     check: (c) => craftProblem(c.g, c.recipe!, c.tool),
     time: (c) => c.recipe!.time,
+    minigame: (c) => RECIPE_MINIGAMES[c.recipe!.id],
     skill: (c) => c.recipe!.skill,
     difficulty: (c) => c.recipe!.difficulty,
     stamina: 4, toolWear: 0.1,
@@ -753,10 +767,28 @@ export const ACTIONS: ActionDef[] = [
       g.inventoryChanged();
       const name = itemDef(r.output.item).name.toLowerCase();
       const article = r.output.count > 1 ? `${r.output.count} ` : /^[aeiou]/.test(name) ? 'an ' : 'a ';
-      g.msg(`You create ${article}${name} (QL ${ql.toFixed(1)}).`, 'good');
+      const plural = r.output.count > 1 && !name.endsWith('s') ? 's' : '';
+      g.msg(`You create ${article}${name}${plural} (QL ${ql.toFixed(1)}).`, 'good');
     },
   },
 ];
+
+// Skilled builders can do a step the quick way: a plain timed action, a bit lower quality.
+{
+  const i = ACTIONS.findIndex((a) => a.id === 'continue_build');
+  const cb = ACTIONS[i];
+  const quickOk = (c: Ctx) => {
+    const s = obj(c, 'structure');
+    if (!s) return false;
+    const d = STRUCTURES[s.type];
+    return c.g.canQuick(d.skill, d.difficulty);
+  };
+  ACTIONS.splice(i + 1, 0, {
+    ...cb, id: 'quick_build', quick: true, minigame: undefined,
+    label: (c) => `Quick build ${STRUCTURES[obj(c, 'structure')!.type].name.toLowerCase()} (lower quality)`,
+    show: (c) => cb.show(c) && quickOk(c),
+  });
+}
 
 export const ACTION_MAP: Record<string, ActionDef> = Object.fromEntries(ACTIONS.map((a) => [a.id, a]));
 

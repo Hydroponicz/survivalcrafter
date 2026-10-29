@@ -73,6 +73,13 @@ Toggles are remembered per browser; a purple **DEV** badge shows while any cheat
   ("red spotted mushroom"). Recognise them as you pick (Herbalism), **Study** them, or learn by handling
   enough. Some are poisonous — eating an unknown one is a gamble; a yarrow poultice draws out poison.
   Mint tea and hearty stew reward knowing your plants. The field journal (**J**) records it all.
+- **Hands-on crafting and building (Schedule 1–style).** Crafting and building steps are 3D minigames at
+  the workstation: draw a saw along the line to cut planks, split logs and knap stone with timed strikes,
+  carve shafts along a guide, pump the bellows to hold smelting heat, hammer hot iron on the anvil before it
+  cools, turn the quern, stir and pound, throw clay on the wheel, cook over the fire without burning it,
+  nail planks, lay stones and stack logs, and start fires with a bow drill. Performance sets most of the
+  quality; skill makes the work more forgiving and caps the quality. At skill 10 above a task's difficulty
+  you can Quick craft/build to skip the minigame at a quality cost. Right-click stops working.
 - **Production chains.** Fiber → cordage → stone tools → logs → planks/shafts → shovel → clay → forge +
   anvil → iron ore → lumps → iron tools. Fields → wheat → quern → flour + jar of water → dough → bread.
 - **Survival.** Food, water, stamina and health. Fires need fuel and kindling. Boars fight back. Death
@@ -85,6 +92,7 @@ src/
   data/       items, skills, recipes, structures (pure data — easy to extend)
   world/      voxel terrain (generation, meshing, sculpting), world entities, noise, rendering
   game/       game loop, player/camera, actions, inventory, input, sky
+  game/minigames/  the hands-on crafting and building minigames
   ui/         HUD, windows, context menu
 ```
 
