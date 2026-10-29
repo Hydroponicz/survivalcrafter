@@ -6,6 +6,7 @@ export const SKILLS = {
   mining: 'Mining',
   digging: 'Digging',
   foraging: 'Foraging',
+  herbalism: 'Herbalism',
   toolcrafting: 'Toolcrafting',
   ropemaking: 'Ropemaking',
   carpentry: 'Carpentry',

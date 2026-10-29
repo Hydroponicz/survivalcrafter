@@ -3,6 +3,7 @@
 import { itemDef, makeItem } from '../data/items';
 import type { SkillId } from '../data/skills';
 import { ANIMALS, CROP_STAGE_TIME, CROP_STAGES, DAY_LENGTH, type AnimalSpecies } from '../world/world';
+import { populateForage } from './forage';
 import type { Game } from './game';
 
 const DEV_KEY = 'survivalcrafter.dev.v1';
@@ -118,8 +119,8 @@ export const devCommands = {
       if (o.kind === 'tree' && o.age < 1) { o.age = 1; o.branches = 3; w.changed(o); }
       if (o.kind === 'bush' && !o.ripe) { o.ripe = true; w.changed(o); }
     }
-    g.forage.reset();
-    g.msg('[dev] All crops ripe, trees grown, bushes and forage spots replenished.', 'info');
+    populateForage(g.world);
+    g.msg('[dev] All crops ripe, trees grown, bushes ripe and wild plants regrown.', 'info');
   },
 
   clearInventory(g: Game) {

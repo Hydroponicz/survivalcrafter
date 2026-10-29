@@ -1,16 +1,17 @@
-import { ITEMS, itemDef, itemName, type Item } from '../data/items';
+import { isIdentified, ITEMS, itemDef, itemName, typeDesc, type Item } from '../data/items';
 import { RECIPES, STATION_NAMES, type Recipe } from '../data/recipes';
 import { SKILLS, type SkillId } from '../data/skills';
 import { STRUCTURE_LIST, STRUCTURES, totalMaterials } from '../data/structures';
-import { craftProblem, type ActionDef, type Ctx, type Target } from '../game/actions';
+import { ACTION_MAP, craftProblem, forageName, type ActionDef, type Ctx, type Target } from '../game/actions';
 import { DEV_FLAGS, devCommands, type DevFlag } from '../game/dev';
+import { BIOME_NAMES, IDENTIFY } from '../data/forage';
 import { BIOMES, biomeAt } from '../game/forage';
 import type { Game, MsgKind } from '../game/game';
 import { CARRY_CAPACITY } from '../game/inventory';
 import { MAT_NAMES } from '../world/terrain';
 import { ANIMALS, cropKey, type PileObj, type StructureObj } from '../world/world';
 
-type WindowName = 'inventory' | 'crafting' | 'skills' | 'build' | 'help' | 'container' | 'dev';
+type WindowName = 'inventory' | 'crafting' | 'skills' | 'build' | 'help' | 'container' | 'dev' | 'journal';
 
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, html?: string) => {
   const e = document.createElement(tag);
@@ -86,7 +87,7 @@ export class UI {
       this.bars[k] = b.querySelector('.bar-fill')!;
     }
 
-    for (const name of ['inventory', 'crafting', 'skills', 'build', 'help', 'container', 'dev'] as WindowName[]) {
+    for (const name of ['inventory', 'crafting', 'skills', 'build', 'help', 'container', 'dev', 'journal'] as WindowName[]) {
       const w = el('div', `window window-${name}`);
       w.style.display = 'none';
       w.addEventListener('mousedown', (e) => {
@@ -243,6 +244,7 @@ export class UI {
         const o = t.obj;
         if (o.kind === 'tree') return `${o.species[0].toUpperCase()}${o.species.slice(1)} tree${o.age < 0.3 ? ' (young)' : ''}`;
         if (o.kind === 'bush') return o.ripe ? 'Berry bush (ripe)' : 'Berry bush';
+        if (o.kind === 'forage') return forageName(o);
         if (o.kind === 'pile') {
           const corpse = o.items.find((i) => i.type === 'corpse');
           if (corpse) return itemName(corpse)[0].toUpperCase() + itemName(corpse).slice(1);
@@ -299,6 +301,9 @@ export class UI {
     const w = g.inv.weight();
     if (w > CARRY_CAPACITY) status.push(`<span class="warn">Overloaded ${w.toFixed(0)}/${CARRY_CAPACITY} kg</span>`);
     if (p.swimming) status.push('Swimming');
+    if (p.effects.poisoned) status.push(`<span class="bad">Poisoned ${Math.ceil(p.effects.poisoned.t)}s</span>`);
+    if (p.effects.nauseous) status.push('<span class="warn">Nauseous</span>');
+    if (p.effects.refreshed) status.push('<span class="good-text">Refreshed</span>');
     if (g.placing) status.push(`Planning: ${g.placing.name} — LMB place · wheel or Q/E rotate · RMB stop${g.placement?.snapped ? ' · snapped' : ''}`);
     if (g.placement && !g.placement.valid) status.push(`<span class="warn">${esc(g.placement.reason)}</span>`);
     this.statusEl.innerHTML = status.join(' · ');
@@ -439,6 +444,7 @@ export class UI {
       case 'help': return this.renderHelp();
       case 'container': return this.renderContainer();
       case 'dev': return this.renderDev();
+      case 'journal': return this.renderJournal();
     }
   }
 
@@ -453,7 +459,7 @@ export class UI {
     row.innerHTML = `<span class="icon">${def.icon}</span>
       <span class="name">${esc(itemName(best))}${items.length > 1 ? ` <b>×${items.length}</b>` : ''}
         <small>${ql}${def.tool && best.dmg > 0 ? ` · dmg ${best.dmg.toFixed(1)}` : ''} · ${weight.toFixed(1)} kg</small></span>`;
-    row.title = def.desc;
+    row.title = typeDesc(best.type);
     const btns = el('span', 'btns');
     for (const a of actions) {
       const b = el('button', '', a.label);
@@ -489,7 +495,8 @@ export class UI {
       const actions: { label: string; fn: (it: Item) => void }[] = [];
       const isActive = grp.items.some((i) => i.uid === g.activeUid);
       actions.push({ label: isActive ? 'Unuse' : 'Use', fn: (it) => g.setActive(isActive ? null : it.uid) });
-      if (def.food) actions.push({ label: def.food.nutrition ? 'Eat' : 'Drink', fn: (it) => g.eat(it.uid) });
+      if (def.food) actions.push({ label: def.food.verb ?? (def.food.nutrition || def.food.effect ? 'Eat' : 'Drink'), fn: (it) => g.eat(it.uid) });
+      if (!isIdentified(grp.type)) actions.push({ label: 'Study', fn: (it) => g.request(ACTION_MAP.study, { g, t: { kind: 'none' }, item: it }) });
       if (chest) {
         actions.push({ label: 'Store', fn: (it) => g.putIntoContainer(chest, [it.uid]) });
         if (grp.items.length > 1) actions.push({ label: 'Store all', fn: () => g.putIntoContainer(chest, grp.items.map((i) => i.uid)) });
@@ -567,7 +574,7 @@ export class UI {
     const row = el('div', `recipe${problem ? ' blocked' : ''}`);
     const out = itemDef(r.output.item);
     const inputs = r.inputs.map((i) => {
-      const have = g.inv.count(i.item);
+      const have = g.usableCount(i.item);
       return `<span class="${have >= i.count ? 'ok' : 'no'}">${itemDef(i.item).icon} ${i.count} ${esc(itemDef(i.item).name.toLowerCase())} (${have})</span>`;
     }).join(' ');
     const reqs: string[] = [];
@@ -743,6 +750,37 @@ export class UI {
     return inp;
   }
 
+  private renderJournal() {
+    const g = this.g;
+    const species = Object.keys(IDENTIFY);
+    const known = species.filter((t) => isIdentified(t)).length;
+    const groups: [string, string[]][] = [
+      ['Mushrooms', species.filter((t) => ['mushroom', 'chanterelle', 'red_cap', 'pale_cap'].includes(t))],
+      ['Herbs & wild plants', species.filter((t) => !['mushroom', 'chanterelle', 'red_cap', 'pale_cap'].includes(t))],
+    ];
+    const where = (t: string) => (g.knowledge.seen[t]?.biomes ?? []).map((b) => BIOME_NAMES[b]).join(', ');
+    let html = `<div class="hint">Every wild species you have come across. Identify them by picking with care, by studying them, or by handling enough of them. ${known}/${species.length} identified.</div>`;
+    for (const [title, list] of groups) {
+      html += `<h3>${title}</h3>`;
+      for (const t of list) {
+        const d = itemDef(t);
+        const seen = g.knowledge.seen[t];
+        if (isIdentified(t)) {
+          const danger = d.food?.effect === 'nausea' || d.food?.effect === 'poison' || d.food?.effect === 'severe_poison';
+          html += `<div class="journal-entry"><div><span class="icon">${d.icon}</span><b>${esc(d.name)}</b>${danger ? ' <span class="bad">poisonous</span>' : ''}</div>
+            <div class="journal-look">${esc(d.unknownName ?? '')}${seen ? ` · found on ${where(t)} (${seen.count} picked)` : ''}</div>
+            <div>${esc(d.desc)}</div></div>`;
+        } else if (seen) {
+          html += `<div class="journal-entry unknown"><div><span class="icon">${d.icon}</span><b>${esc(d.unknownName ?? '?')}</b> <small>unidentified</small></div>
+            <div class="journal-look">Found on ${where(t)} (${seen.count} picked). Study it from your inventory to learn what it is.</div></div>`;
+        } else {
+          html += `<div class="journal-entry missing"><span class="icon">❔</span> Not yet found</div>`;
+        }
+      }
+    }
+    this.frame('journal', 'Field journal', html);
+  }
+
   private renderHelp() {
     this.frame('help', 'Survival guide', `
       <h3>Controls</h3>
@@ -756,6 +794,7 @@ export class UI {
         <tr><td>R</td><td>Repeat last action · X: stop current action</td></tr>
         <tr><td>I / Tab · C · B · K</td><td>Inventory · Crafting · Build · Skills</td></tr>
         <tr><td>H · Esc</td><td>This guide · release mouse / close windows</td></tr>
+        <tr><td>G · J</td><td>Survey the area for things to pick · Field journal</td></tr>
         <tr><td>&#96; or F2</td><td>Dev console (cheats: instant crafting, no needs, fly…)</td></tr>
       </table>
       <h3>How this world works</h3>
@@ -765,7 +804,8 @@ export class UI {
       <p><b>Building</b> works like Valheim for planning: pick a piece (B) and place its ghost, snapping walls to floors, roofs to walls and so on. Then the work is Wurm-like: use <b>Continue building</b> on each plan, adding one material per step with the right tool and skill.</p>
       <h3>Getting started</h3>
       <ol>
-        <li><b>Forage</b> with bare hands. What you find depends on where you are: <b>meadows</b> give plant fiber and wild wheat seeds, the <b>forest floor</b> gives branches, mushrooms and seedlings, <b>shores</b> give pebbles and driftwood, <b>wetlands</b> give reeds. Each area only holds a few finds and takes a while to recover, so keep moving. Pick <b>berries</b> from berry bushes.</li>
+        <li><b>Forage</b>: pick up what grows on the ground — fiber grass and wild wheat in <b>meadows</b>, branches and mushrooms on the <b>forest floor</b>, pebbles and driftwood on <b>shores</b>, reeds and mint in <b>wetlands</b>. Picked spots regrow over time elsewhere. Hold still and press <b>G</b> to <b>survey</b>: nearby finds glow, including rarer ones you'd otherwise miss (gold). Higher Foraging lets you spot rare herbs and mushrooms on your own.</li>
+        <li><b>Learn what you pick.</b> Wild mushrooms and herbs start out <b>unidentified</b> — you only know what they look like. You may recognise them as you pick them (Herbalism), <b>Study</b> them from your inventory, or learn them after handling a few. Some are <b>poisonous</b>: eating an unknown one is a gamble. A <b>yarrow poultice</b> draws out poison. Your <b>field journal</b> (J) records everything you've found.</li>
         <li><b>Gather loose stones</b> on bare grey rock (cliffs and hills).</li>
         <li>Craft <b>cordage</b> from fiber, then a <b>stone hatchet</b>, <b>stone pickaxe</b> and <b>stone hammer</b>.</li>
         <li>Fell trees for <b>logs</b> (heavy — they drop on the ground). Split them into <b>planks</b>; carve branches into <b>shafts</b>; make a <b>wooden shovel</b>.</li>

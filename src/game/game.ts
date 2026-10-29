@@ -1,18 +1,20 @@
 import * as THREE from 'three';
-import { getNextUid, itemDef, itemName, makeItem, setNextUid, type Item } from '../data/items';
+import { getNextUid, isIdentified, itemDef, itemName, learnSpecies, makeItem, setNextUid, type Item } from '../data/items';
 import type { Recipe, StationKind } from '../data/recipes';
 import { SKILLS, Skills, type SkillId } from '../data/skills';
 import { pieceBoxes, STRUCTURES, type StructureDef } from '../data/structures';
 import { Mat, WATER_LEVEL, type Volumes } from '../world/terrain';
+import { forageHeight, forageScale } from '../world/forageProps';
 import { buildPieceMesh, WorldView } from '../world/view';
 import {
-  ANIMALS, pointInPiece, toWorld, World, type AnimalObj, type PileObj, type StructureObj, type WorldObj,
+  ANIMALS, pointInPiece, toWorld, World, type AnimalObj, type ForageObj, type PileObj, type StructureObj, type WorldObj,
 } from '../world/world';
 import {
   ACTION_MAP, ACTIONS, craftProblem, DIG_RADIUS, EARTH_PER_ITEM, LEVEL_RADIUS, type ActionDef, type Ctx, type Target,
 } from './actions';
 import { DevSettings } from './dev';
-import { ForageState } from './forage';
+import { FORAGE, type ForageCategory } from '../data/forage';
+import { ForageGrowth, Knowledge, noticeOf, populateForage } from './forage';
 import { Input } from './input';
 import { CARRY_CAPACITY, Inventory } from './inventory';
 import { Player } from './player';
@@ -56,7 +58,13 @@ export class Game {
   input: Input;
   sky: Sky;
   ui!: UI;
-  forage = new ForageState();
+  knowledge = new Knowledge();
+  growth = new ForageGrowth();
+  /** Forage finds revealed by a survey, until a time (seconds of play). */
+  revealed = new Map<number, number>();
+  private markers = new THREE.Group();
+  private markerTex = makeGlowTexture();
+  private lastForagingLevel = 0;
   dev = new DevSettings();
 
   target: Target | null = null;
@@ -104,6 +112,10 @@ export class Game {
     world.terrain.buildMeshes();
     this.scene.add(world.terrain.group);
     this.view = new WorldView(world);
+    this.knowledge.load(undefined);
+    this.view.forageVisible = (o) => this.canSee(o);
+    if (![...world.objects.values()].some((o) => o.kind === 'forage')) populateForage(world);
+    this.scene.add(this.markers);
     this.scene.add(this.view.group);
     this.scene.add(this.player.model);
     this.sky = new Sky(this.scene, world.terrain.size);
@@ -310,19 +322,138 @@ export class Game {
     const f = itemDef(it.type).food;
     if (!f) return;
     const p = this.player;
-    if (f.nutrition > 0 && p.food >= 99 && !f.water) return this.msg('You are too full to eat.', 'fail');
+    const known = isIdentified(it.type);
+    const harmful = f.effect === 'nausea' || f.effect === 'poison' || f.effect === 'severe_poison';
+    if (known && harmful) return this.msg(`You know better than to eat ${itemDef(it.type).name.toLowerCase()}.`, 'fail');
+    if (f.nutrition > 0 && p.food >= 99 && !f.water && !f.effect) return this.msg('You are too full to eat.', 'fail');
+    const name = itemName(it).toLowerCase();
     const qm = 0.6 + it.ql / 125;
     p.food = Math.min(100, p.food + f.nutrition * qm);
     p.water = Math.min(100, p.water + (f.water ?? 0) * (f.nutrition ? qm : 1));
-    if (it.type === 'jar_of_water') {
-      it.type = 'clay_jar';
-      this.msg('You drink from the jar.', 'info');
+    if (f.returns) {
+      it.type = f.returns;
+      this.msg(`You ${f.nutrition ? 'eat' : 'drink'} the ${name}.`, 'info');
     } else {
       this.inv.remove(uid);
-      this.msg(`You eat the ${itemName(it).toLowerCase()}.${it.type === 'raw_meat' || it.type === 'mushroom' ? ' It is not very appetising raw.' : ''}`, 'info');
+      const verb = f.verb ? f.verb.toLowerCase() : 'eat';
+      this.msg(`You ${verb} the ${name}.${it.type === 'raw_meat' || it.type === 'mushroom' ? ' It is not very appetising raw.' : ''}`, 'info');
       if (it.type === 'raw_meat' && Math.random() < 0.3) { p.health -= 8; this.msg('Your stomach cramps.', 'fail'); }
     }
+    if (f.effect) this.applyEffect(f.effect, it.type);
+    // Eating something teaches you what it was, one way or another.
+    if (!known) {
+      learnSpecies(it.type);
+      this.msg(harmful ? `That was ${itemDef(it.type).name.toLowerCase()}. You won't forget it.` : `It was ${itemDef(it.type).name.toLowerCase()}. Now you know.`, harmful ? 'warn' : 'skill');
+    }
     this.inventoryChanged();
+  }
+
+  private applyEffect(effect: string, type: string) {
+    const p = this.player;
+    const fx = p.effects;
+    switch (effect) {
+      case 'nausea':
+        p.food = Math.max(0, p.food - 15);
+        p.stamina = 0;
+        p.health -= 5;
+        fx.nauseous = { t: 45, rate: 0 };
+        this.msg('Your stomach heaves. You are violently sick.', 'warn');
+        break;
+      case 'poison':
+        fx.poisoned = { t: 30, rate: 0.6 };
+        this.msg('A cold sweat breaks out. You have been poisoned!', 'warn');
+        break;
+      case 'severe_poison':
+        fx.poisoned = { t: 45, rate: 1.1 };
+        this.msg('Your limbs go numb and your heart races. This is deadly poison — treat it now!', 'warn');
+        break;
+      case 'heal':
+        p.health = Math.min(100, p.health + 30);
+        if (fx.poisoned) { delete fx.poisoned; this.msg('The poultice draws out the poison.', 'good'); }
+        else this.msg('The poultice soothes your wounds.', 'good');
+        break;
+      case 'soothe':
+        p.health = Math.min(100, p.health + 6);
+        if (fx.poisoned) fx.poisoned.t = Math.max(0, fx.poisoned.t - 10);
+        this.msg('The bitter leaves settle you a little.', 'info');
+        break;
+      case 'refresh': {
+        const tea = type !== 'mint';
+        p.stamina = Math.min(100, p.stamina + (tea ? 100 : 30));
+        fx.refreshed = { t: tea ? 180 : 40, rate: 0 };
+        delete fx.nauseous;
+        this.msg(tea ? 'The tea clears your head. You feel tireless.' : 'The fresh taste perks you up.', 'good');
+        break;
+      }
+    }
+  }
+
+  // ---------- foraging
+  /** Can the player see this find? Rarer ones need skill, or a survey. */
+  canSee(o: ForageObj): boolean {
+    return noticeOf(o) <= this.skills.get('foraging') || (this.revealed.get(o.id) ?? 0) > this.elapsed;
+  }
+
+  /** Look around carefully and mark what's growing nearby. */
+  survey(success: boolean) {
+    const p = this.player.pos;
+    const skill = this.skills.get('foraging');
+    const radius = (success ? 14 : 7) + skill * 0.25;
+    const counts: Partial<Record<ForageCategory, number>> = {};
+    let hidden = 0;
+    this.markers.clear();
+    const until = this.elapsed + 12;
+    for (const o of this.world.near(p.x, p.z, radius)) {
+      if (o.kind !== 'forage' || Math.hypot(o.x - p.x, o.z - p.z) > radius) continue;
+      const sp = FORAGE[o.species];
+      if (sp.notice > skill + 15) continue;
+      if (sp.notice > skill) { hidden++; this.revealed.set(o.id, until); this.world.changed(o); }
+      counts[sp.category] = (counts[sp.category] ?? 0) + 1;
+      const colour = sp.notice > skill ? 0xffd54a : MARKER_COLOURS[sp.category];
+      const top = o.y + forageHeight(o.species) * forageScale(sp.category) + 0.35;
+      const glow = (sx: number, sy: number, y: number, bob: boolean) => {
+        const m = new THREE.Sprite(new THREE.SpriteMaterial({
+          map: this.markerTex, color: colour, transparent: true, depthTest: false, depthWrite: false, blending: THREE.AdditiveBlending,
+        }));
+        m.position.set(o.x, y, o.z);
+        m.scale.set(sx, sy, 1);
+        m.userData = { until, baseY: y, id: o.id, bob };
+        m.renderOrder = 6;
+        this.markers.add(m);
+      };
+      glow(0.7, 0.7, top, true);
+      glow(0.12, 2.2, top + 0.9, false); // a soft beam so it reads from a distance
+    }
+    const parts = (Object.entries(counts) as [ForageCategory, number][])
+      .map(([c, n]) => `${n} ${CATEGORY_WORDS[c][n === 1 ? 0 : 1]}`);
+    if (!parts.length) return this.msg(success ? 'You look around carefully. Nothing worth picking nearby.' : 'You look around, but nothing catches your eye.', 'info');
+    this.msg(`You spot ${parts.join(', ')} within ${Math.round(radius)} m.${hidden ? ` ${hidden} of them you would normally have missed.` : ''}`, 'good');
+  }
+
+  private updateMarkers() {
+    for (const m of [...this.markers.children] as THREE.Sprite[]) {
+      const left = m.userData.until - this.elapsed;
+      if (left <= 0 || !this.world.objects.has(m.userData.id)) { this.markers.remove(m); m.material.dispose(); continue; }
+      m.material.opacity = Math.min(1, left / 3) * (m.userData.bob ? 0.9 : 0.3);
+      if (m.userData.bob) m.position.y = m.userData.baseY + Math.sin(this.elapsed * 3 + m.userData.id) * 0.08;
+    }
+    // Revealed finds hide again when the survey wears off; a skill-up may show new ones.
+    let changed = false;
+    for (const [id, until] of this.revealed) {
+      if (until > this.elapsed) continue;
+      this.revealed.delete(id);
+      const o = this.world.objects.get(id);
+      if (o) this.world.changed(o);
+      changed = true;
+    }
+    const lvl = Math.floor(this.skills.get('foraging'));
+    if (lvl !== this.lastForagingLevel) { this.lastForagingLevel = lvl; changed = true; this.view.refreshForage(); }
+    return changed;
+  }
+
+  /** Can an identifiable item be used in recipes? Only once you know what it is. */
+  usableCount(type: string): number {
+    return isIdentified(type) ? this.inv.count(type) : 0;
   }
 
   stationNear(kind: StationKind): boolean {
@@ -637,6 +768,12 @@ export class Game {
       }
       case 'pile':
         return dx * dx + dz * dz + (p.y - o.y - 0.3) ** 2 < 0.3;
+      case 'forage': {
+        if (!this.canSee(o)) return false;
+        const y = p.y - o.y;
+        const sc = forageScale(FORAGE[o.species]?.category ?? 'material');
+        return dx * dx + dz * dz < 0.18 * sc && y > -0.15 && y < forageHeight(o.species) * sc + 0.15;
+      }
       case 'structure':
         return pointInPiece(o, p.x, p.y, p.z, 0.04);
     }
@@ -836,6 +973,8 @@ export class Game {
     if (inp.hit('KeyK')) this.ui.toggle('skills');
     if (inp.hit('KeyB')) this.ui.toggle('build');
     if (inp.hit('KeyH') || inp.hit('F1')) this.ui.toggle('help');
+    if (inp.hit('KeyJ')) this.ui.toggle('journal');
+    if (inp.hit('KeyG') && !this.placing) this.request(ACTION_MAP.survey, { g: this, t: { kind: 'none' } });
     if (inp.hit('KeyR')) this.repeatLast();
     if (inp.hit('KeyX')) { if (this.action) this.cancelAction('You stop what you are doing.'); }
     if (inp.hit('Escape')) this.stopPlacing();
@@ -898,13 +1037,24 @@ export class Game {
     const busy = !!this.action || p.sprinting;
     p.food = Math.max(0, p.food - dt * 0.05);
     p.water = Math.max(0, p.water - dt * 0.08);
+    const fx = p.effects;
     if (!busy) {
-      const regen = p.food > 5 && p.water > 5 ? 9 : 2.5;
+      let regen = p.food > 5 && p.water > 5 ? 9 : 2.5;
+      if (fx.nauseous) regen *= 0.3;
+      if (fx.refreshed) regen *= 2;
       p.stamina = Math.min(100, p.stamina + dt * regen);
+    }
+    if (fx.poisoned) p.health -= dt * fx.poisoned.rate;
+    for (const [k, e] of Object.entries(fx)) {
+      e.t -= dt;
+      if (e.t <= 0) {
+        delete fx[k];
+        this.msg(k === 'poisoned' ? 'The poison has run its course.' : k === 'nauseous' ? 'Your stomach settles.' : 'The tea wears off.', 'info');
+      }
     }
     if (p.food <= 0 || p.water <= 0) {
       p.health -= dt * 0.5;
-    } else if (p.food > 30 && p.water > 30) {
+    } else if (p.food > 30 && p.water > 30 && !fx.poisoned) {
       p.health = Math.min(100, p.health + dt * 0.3);
     }
     if (this.dev.on('noNeeds')) { p.food = 100; p.water = 100; p.stamina = 100; }
@@ -913,6 +1063,8 @@ export class Game {
 
     // --- world
     this.world.tick(dt * this.dev.timeScale);
+    this.growth.update(this.world, p.pos.x, p.pos.z, dt * this.dev.timeScale);
+    this.updateMarkers();
     this.updateAnimals(dt);
     this.world.terrain.update(p.pos.x, p.pos.z, 6);
 
@@ -935,6 +1087,7 @@ export class Game {
     this.setActive(null);
     this.cancelAction();
     p.health = 100; p.food = 60; p.water = 60; p.stamina = 100;
+    p.effects = {};
     const s = this.world.spawn;
     p.pos.set(s.x, this.world.terrain.heightAt(s.x, s.z) + 0.3, s.z);
     p.vel.set(0, 0, 0);
@@ -958,7 +1111,8 @@ export class Game {
       const data = {
         version: 2,
         earth: this.earth,
-        forage: this.forage.serialize(),
+        knowledge: this.knowledge.serialize(),
+        effects: this.player.effects,
         world: this.world.serialize(),
         player: {
           pos: [p.pos.x, p.pos.y, p.pos.z], yaw: p.yaw, pitch: p.pitch, cam: p.cameraMode,
@@ -1022,7 +1176,8 @@ export class Game {
       Object.assign(g.skills.levels, data.skills);
       g.hotbar = data.hotbar;
       g.earth = data.earth ?? {};
-      g.forage.load(data.forage);
+      g.knowledge.load(data.knowledge);
+      g.player.effects = data.effects ?? {};
       g.activeUid = data.active;
       g.setActive(data.active);
       return g;
@@ -1035,4 +1190,33 @@ export class Game {
 
 export function skillName(id: SkillId): string {
   return SKILLS[id];
+}
+
+const MARKER_COLOURS: Record<ForageCategory, number> = {
+  material: 0xffffff, food: 0x9fdc7c, mushroom: 0xffa860, herb: 0x8fc8ff,
+};
+
+const CATEGORY_WORDS: Record<ForageCategory, [string, string]> = {
+  material: ['useful material', 'useful materials'],
+  food: ['wild food', 'wild foods'],
+  mushroom: ['mushroom', 'mushrooms'],
+  herb: ['herb', 'herbs'],
+};
+
+/** Soft round glow for survey markers. */
+function makeGlowTexture(): THREE.Texture {
+  const S = 64;
+  const c = document.createElement('canvas');
+  c.width = c.height = S;
+  const ctx = c.getContext('2d')!;
+  const g = ctx.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
+  g.addColorStop(0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.25, 'rgba(255,255,255,0.85)');
+  g.addColorStop(0.6, 'rgba(255,255,255,0.25)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, S, S);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
 }

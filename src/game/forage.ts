@@ -1,59 +1,23 @@
-import { Mat, WATER_LEVEL } from '../world/terrain';
-import type { World } from '../world/world';
+import { FORAGE, FORAGE_SPECIES, LEARN_BY_HANDLING, type Biome } from '../data/forage';
+import { isIdentified, knownSpecies, learnSpecies, setKnownSpecies } from '../data/items';
+import { mulberry32 } from '../world/noise';
+import { Mat, WATER_LEVEL, WORLD_SIZE } from '../world/terrain';
+import type { ForageObj, World } from '../world/world';
 
-// Foraging reads the land: what you find depends on where you are, and each
-// patch of ground only holds a few finds before it needs time to recover.
+// Foraging reads the land: plants, fungi, branches and pebbles lie on the ground
+// where they would really grow. Picking one removes it; new ones sprout over
+// time in places you aren't looking.
 
-export type Biome = 'meadow' | 'forest' | 'shore' | 'wetland' | 'rocky' | 'bare';
+export type { Biome };
 
-export interface BiomeInfo {
-  name: string;
-  /** Finds an area holds when fully recovered. */
-  pool: number;
-  /** Weighted finds; weights may grow with foraging skill. */
-  finds: (skill: number) => [string, number][];
-  hint: string;
-}
-
-export const BIOMES: Record<Biome, BiomeInfo> = {
-  meadow: {
-    name: 'Meadow', pool: 2,
-    finds: (s) => [['plant_fiber', 60], ['wheat_seeds', 6 + s * 0.15], ['branch', 5], ['mushroom', 3], ['rock_shard', 4]],
-    hint: 'Open grassland: mostly plant fiber, sometimes wild wheat seeds.',
-  },
-  forest: {
-    name: 'Forest floor', pool: 3,
-    finds: (s) => [['branch', 42], ['mushroom', 16 + s * 0.2], ['plant_fiber', 18], ['sprout', 3 + s * 0.05]],
-    hint: 'Under the trees: fallen branches, mushrooms and the odd seedling.',
-  },
-  shore: {
-    name: 'Shore', pool: 2,
-    finds: () => [['rock_shard', 40], ['branch', 22], ['plant_fiber', 18]],
-    hint: 'Beaches: smooth pebbles, driftwood and dune grass.',
-  },
-  wetland: {
-    name: 'Wetland', pool: 2,
-    finds: (s) => [['plant_fiber', 55], ['mushroom', 8 + s * 0.1], ['branch', 8]],
-    hint: 'Muddy banks: reeds for fiber, and mushrooms in the damp.',
-  },
-  rocky: {
-    name: 'Rocky ground', pool: 3,
-    finds: () => [['rock_shard', 100]],
-    hint: 'Bare rock: loose stones to gather by hand. A pickaxe gets much more.',
-  },
-  bare: {
-    name: 'Bare soil', pool: 0,
-    finds: () => [],
-    hint: 'Turned earth. Nothing grows here to forage.',
-  },
+export const BIOMES: Record<Biome, { name: string; hint: string }> = {
+  meadow: { name: 'Meadow', hint: 'Open grassland: fiber grass, wild wheat and meadow herbs.' },
+  forest: { name: 'Forest floor', hint: 'Under the trees: fallen branches and mushrooms of every kind.' },
+  shore: { name: 'Shore', hint: 'Beaches: pebbles, driftwood and dune grass.' },
+  wetland: { name: 'Wetland', hint: 'Damp banks: reeds, mint and things that like wet feet.' },
+  rocky: { name: 'Rocky ground', hint: 'Bare rock: loose pebbles. A pickaxe gets much more.' },
+  bare: { name: 'Bare soil', hint: 'Turned earth. Nothing grows here.' },
 };
-
-/** Size of a forage area in metres. */
-export const AREA = 12;
-/** World seconds for an area to regrow one find. */
-export const REGROW = 240;
-
-const areaKey = (x: number, z: number) => Math.floor(z / AREA) * 1000 + Math.floor(x / AREA);
 
 /** What kind of place this is, judged from the ground material and surroundings. */
 export function biomeAt(world: World, x: number, y: number, z: number, mat: Mat): Biome {
@@ -82,53 +46,112 @@ export function biomeAt(world: World, x: number, y: number, z: number, mat: Mat)
   }
 }
 
-/** Depletable forage pools per area. Areas start full and regrow over world time. */
-export class ForageState {
-  /** Finds taken (fractional, recovering) and when that was last updated. */
-  private taken = new Map<number, { used: number; at: number }>();
+/** How often each biome has something lying about, per 4 m² sample. */
+const DENSITY: Record<Biome, number> = { meadow: 0.16, forest: 0.24, shore: 0.14, wetland: 0.2, rocky: 0.06, bare: 0 };
+/** Most finds that crowd within 6 m of each other. */
+const LOCAL_CAP = 3;
 
-  /** Finds left in the area at a point. */
-  left(x: number, z: number, biome: Biome, now: number): number {
-    const max = BIOMES[biome].pool;
-    const e = this.taken.get(areaKey(x, z));
-    if (!e) return max;
-    const used = Math.max(0, e.used - (now - e.at) / REGROW);
-    return Math.max(0, max - used);
+function pickSpecies(biome: Biome, r: number): string | undefined {
+  let total = 0;
+  for (const s of FORAGE_SPECIES) total += s.biomes[biome] ?? 0;
+  if (!total) return undefined;
+  let x = r * total;
+  for (const s of FORAGE_SPECIES) {
+    x -= s.biomes[biome] ?? 0;
+    if (x <= 0) return s.id;
+  }
+  return undefined;
+}
+
+/** Try to grow one find at a spot. Returns it, or undefined if the spot isn't suitable. */
+function trySpawn(world: World, x: number, z: number, rnd: () => number): ForageObj | undefined {
+  const t = world.terrain;
+  if (x < 2 || z < 2 || x > WORLD_SIZE - 2 || z > WORLD_SIZE - 2) return undefined;
+  const y = t.heightAt(x, z);
+  if (y < WATER_LEVEL + 0.15) return undefined;
+  const n = t.normalAt(x, y - 0.05, z);
+  if (n.y < 0.7) return undefined; // nothing settles on a cliff face
+  const mat = t.materialAt(x, y - 0.05, z);
+  const biome = biomeAt(world, x, y, z, mat);
+  if (rnd() > DENSITY[biome] * 4) return undefined;
+  const species = pickSpecies(biome, rnd());
+  if (!species) return undefined;
+  let crowd = 0;
+  for (const o of world.near(x, z, 6)) {
+    if (o.kind === 'forage' && Math.hypot(o.x - x, o.z - z) < 6) crowd++;
+    if (o.kind === 'structure' && Math.hypot(o.x - x, o.z - z) < 3) return undefined;
+    if ((o.kind === 'tree' || o.kind === 'bush') && Math.hypot(o.x - x, o.z - z) < 0.8) return undefined;
+  }
+  if (crowd >= LOCAL_CAP) return undefined;
+  return world.add<ForageObj>({ kind: 'forage', species, x, y, z, rot: rnd() * Math.PI * 2 });
+}
+
+/** Scatter finds across a fresh world. */
+export function populateForage(world: World) {
+  const rnd = mulberry32(world.terrain.seed + 77);
+  for (let z = 4; z < WORLD_SIZE - 4; z += 4) {
+    for (let x = 4; x < WORLD_SIZE - 4; x += 4) {
+      // DENSITY is per sample; trySpawn scales by 4, so sample with a quarter chance.
+      if (rnd() < 0.25) trySpawn(world, x + rnd() * 4, z + rnd() * 4, rnd);
+    }
+  }
+}
+
+/** World seconds between regrowth attempts near the player. */
+const REGROW_EVERY = 10;
+/** Stop regrowing once the land around you is this full again. */
+const NEARBY_CAP = 100;
+
+/**
+ * Regrowth: every few seconds something new may sprout somewhere around you,
+ * but never right under your nose (8–50 m away).
+ */
+export class ForageGrowth {
+  private timer = 0;
+
+  update(world: World, px: number, pz: number, dt: number) {
+    this.timer += dt;
+    while (this.timer >= REGROW_EVERY) {
+      this.timer -= REGROW_EVERY;
+      let nearby = 0;
+      for (const o of world.near(px, pz, 50)) if (o.kind === 'forage' && Math.hypot(o.x - px, o.z - pz) < 50) nearby++;
+      if (nearby >= NEARBY_CAP) continue;
+      for (let tries = 0; tries < 4; tries++) {
+        const a = Math.random() * Math.PI * 2, r = 8 + Math.random() * 42;
+        if (trySpawn(world, px + Math.cos(a) * r, pz + Math.sin(a) * r, Math.random)) break;
+      }
+    }
+  }
+}
+
+/** What the player has found and learned about wild species. */
+export class Knowledge {
+  /** Times each identifiable item type has been handled, and where it was found. */
+  seen: Record<string, { count: number; biomes: Biome[] }> = {};
+
+  /** Record a find. Returns true if handling it enough times just taught you the species. */
+  handled(type: string, biome: Biome, n: number): boolean {
+    const e = (this.seen[type] ??= { count: 0, biomes: [] });
+    e.count += n;
+    if (!e.biomes.includes(biome)) e.biomes.push(biome);
+    if (!isIdentified(type) && e.count >= LEARN_BY_HANDLING) {
+      learnSpecies(type);
+      return true;
+    }
+    return false;
   }
 
-  /** Seconds until at least one find has regrown. */
-  untilNext(x: number, z: number, biome: Biome, now: number): number {
-    const left = this.left(x, z, biome, now);
-    return left >= 1 ? 0 : (1 - left) * REGROW;
+  serialize() {
+    return { known: knownSpecies(), seen: this.seen };
   }
 
-  take(x: number, z: number, now: number) {
-    const k = areaKey(x, z);
-    const e = this.taken.get(k);
-    const used = e ? Math.max(0, e.used - (now - e.at) / REGROW) : 0;
-    this.taken.set(k, { used: used + 1, at: now });
+  load(data: { known?: string[]; seen?: Knowledge['seen'] } | undefined) {
+    setKnownSpecies(data?.known ?? []);
+    this.seen = data?.seen ?? {};
   }
+}
 
-  /** Describe how much is left, for Examine. */
-  describe(x: number, z: number, biome: Biome, now: number): string {
-    const max = BIOMES[biome].pool;
-    if (!max) return 'nothing to forage';
-    const left = Math.floor(this.left(x, z, biome, now));
-    if (left >= max) return 'untouched';
-    if (left === 0) return 'picked clean';
-    return left === 1 ? 'nearly picked clean' : 'partly picked over';
-  }
-
-  reset() {
-    this.taken.clear();
-  }
-
-  serialize(): [number, number, number][] {
-    return [...this.taken.entries()].map(([k, e]) => [k, e.used, e.at]);
-  }
-
-  load(data: [number, number, number][] | undefined) {
-    this.taken.clear();
-    for (const [k, used, at] of data ?? []) this.taken.set(k, { used, at });
-  }
+/** Skill needed to see a find without surveying. */
+export function noticeOf(o: ForageObj): number {
+  return FORAGE[o.species]?.notice ?? 0;
 }

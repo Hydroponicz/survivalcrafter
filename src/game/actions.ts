@@ -1,12 +1,13 @@
 import * as THREE from 'three';
-import { itemDef, itemName, makeItem, type Item, type ToolKind } from '../data/items';
+import { isIdentified, itemDef, itemName, learnSpecies, makeItem, typeDesc, typeName, type Item, type ToolKind } from '../data/items';
 import { STATION_NAMES, type Recipe } from '../data/recipes';
 import { STRUCTURES, totalMaterials, type StructureDef } from '../data/structures';
 import type { SkillId } from '../data/skills';
 import { isSoft, Mat, MAT_NAMES, WATER_LEVEL, Y_MIN } from '../world/terrain';
 import {
-  ANIMALS, CROP_STAGES, cropKey, type AnimalObj, type BushObj, type Crop, type PileObj, type StructureObj, type TreeObj, type WorldObj,
+  ANIMALS, CROP_STAGES, cropKey, type AnimalObj, type BushObj, type Crop, type ForageObj, type PileObj, type StructureObj, type TreeObj, type WorldObj,
 } from '../world/world';
+import { FORAGE, IDENTIFY } from '../data/forage';
 import { BIOMES, biomeAt, type Biome } from './forage';
 import type { Game } from './game';
 
@@ -21,6 +22,8 @@ export interface Ctx {
   g: Game;
   t: Target;
   tool?: Item;
+  /** The inventory item an action is about (e.g. studying a herb). */
+  item?: Item;
   recipe?: Recipe;
 }
 
@@ -68,28 +71,23 @@ function biome(c: Ctx): Biome | undefined {
   return biomeAt(c.g.world, p.x, p.y, p.z, c.t.mat);
 }
 
-/** Refuse foraging an area that has been picked clean, saying when it recovers. */
-function forageProblem(c: Ctx, b: Biome | undefined): string | null {
-  if (!isGround(c) || !b) return 'Nothing to forage.';
-  const info = BIOMES[b];
-  if (!info.pool) return `${info.name}: nothing grows here to forage.`;
-  const p = c.t.point, now = c.g.world.time;
-  if (c.g.forage.left(p.x, p.z, b, now) >= 1) return null;
-  const mins = Math.ceil(c.g.forage.untilNext(p.x, p.z, b, now) / 60);
-  return `This area has been picked clean. It recovers in about ${mins} min — try further afield.`;
+/** Name of a forage find as the player knows it: the species once identified, else what it looks like. */
+export function forageName(o: ForageObj): string {
+  const sp = FORAGE[o.species];
+  // Common finds keep their own name; wild species show as their item once identified.
+  if (IDENTIFY[sp.item] === undefined) return sp.name;
+  return isIdentified(sp.item) ? itemDef(sp.item).name : sp.name;
 }
 
-/** Nearest grown tree, for labelling seedlings found on the forest floor. */
-function nearestSpecies(c: Ctx): string {
-  if (!isGround(c)) return 'oak';
-  const p = c.t.point;
-  let best: TreeObj | undefined, bd = Infinity;
-  for (const o of c.g.world.near(p.x, p.z, 6)) {
-    if (o.kind !== 'tree') continue;
-    const d = Math.hypot(o.x - p.x, o.z - p.z);
-    if (d < bd) { bd = d; best = o; }
-  }
-  return best?.species ?? 'oak';
+/** Try to recognise a wild species (herbalism). Returns true if newly learned. */
+function tryIdentify(g: Game, type: string, bonus = 0): boolean {
+  const diff = IDENTIFY[type];
+  if (diff === undefined || isIdentified(type)) return false;
+  const chance = g.skills.successChance('herbalism', diff + 4 - bonus);
+  g.skills.gain('herbalism', diff, false, 2);
+  if (Math.random() >= chance && !g.dev.on('alwaysSucceed')) return false;
+  learnSpecies(type);
+  return true;
 }
 
 /** Bigger, faster earthworks with skill and a good tool. */
@@ -100,6 +98,7 @@ function earthBudget(c: Ctx, base: number, skill: SkillId) {
 
 function afterEdit(c: Ctx, x: number, z: number, r: number) {
   c.g.world.disturbCrops(x, z, r);
+  c.g.world.settleForage(x, z, r);
   c.g.view.refreshNear(x, z, r + 1);
 }
 
@@ -128,7 +127,7 @@ export const ACTIONS: ActionDef[] = [
       const under = c.g.world.terrain.heightAt(p.x, p.z) - p.y > 1.5 ? ' You are under the surface.' : '';
       c.g.msg(`${MAT_NAMES[mat]} at ${p.y.toFixed(1)} m (${p.y >= 0 ? 'above' : 'below'} sea level), ${slope}° slope.${under}`, 'info');
       const b = biome(c)!;
-      if (BIOMES[b].pool) c.g.msg(`${BIOMES[b].name}: ${BIOMES[b].hint} This area is ${c.g.forage.describe(p.x, p.z, b, c.g.world.time)}.`, 'info');
+      c.g.msg(`${BIOMES[b].name}: ${BIOMES[b].hint}`, 'info');
       const { crop } = cropAt(c);
       if (crop) {
         const st = c.g.world.cropStage(crop);
@@ -136,55 +135,61 @@ export const ACTIONS: ActionDef[] = [
       }
     },
   },
+  // ===== forage finds lying on the ground
   {
-    id: 'forage', label: (c) => `Forage (${BIOMES[biome(c) ?? 'bare'].name.toLowerCase()})`,
-    show: (c) => !c.tool && isGround(c) && ['meadow', 'forest', 'shore', 'wetland'].includes(biome(c)!),
-    check: (c) => forageProblem(c, biome(c)),
-    time: 6, skill: 'foraging', difficulty: (c) => (biome(c) === 'forest' ? 5 : 3), stamina: 3,
+    id: 'pick_forage', label: (c) => `Pick ${forageName(obj(c, 'forage')!).toLowerCase()}`,
+    show: (c) => !!obj(c, 'forage'),
+    time: (c) => 2 + FORAGE[obj(c, 'forage')!.species].difficulty * 0.25,
+    skill: 'foraging', difficulty: (c) => FORAGE[obj(c, 'forage')!.species].difficulty, stamina: 1,
     run: (c, o) => {
-      if (!isGround(c)) return;
-      const g = c.g, p = c.t.point, b = biome(c)!;
-      // A failed search finds nothing but doesn't use the area up.
-      if (!o.success) return g.msg('You search around but find nothing of use.', 'fail');
-      g.forage.take(p.x, p.z, g.world.time);
-      const s = g.skills.get('foraging');
-      const table = BIOMES[b].finds(s);
-      // Skilled foragers sometimes turn up a second find from the same search.
-      const rolls = 1 + (Math.random() < s / 100 ? 1 : 0);
-      const found: string[] = [];
-      for (let i = 0; i < rolls; i++) {
-        const type = weighted(table);
-        const count = type === 'plant_fiber' ? 2 + Math.floor(Math.random() * 2) : 1;
-        if (type === 'sprout') {
-          const sp = nearestSpecies(c);
-          g.inv.add(makeItem('sprout', o.ql, `${sp} sprout`));
-          g.inventoryChanged();
-          found.push(`a ${sp} seedling`);
-        } else {
-          g.give(type, o.ql, count);
-          found.push(`${count > 1 ? count + ' ' : ''}${itemDef(type).name.toLowerCase()}`);
+      const node = obj(c, 'forage')!;
+      const g = c.g, sp = FORAGE[node.species];
+      if (!o.success) {
+        // Fumbling can spoil the find, but usually you just have to try again.
+        if (Math.random() < 0.25) {
+          g.world.remove(node);
+          return g.msg(`You fumble and ruin the ${forageName(node).toLowerCase()}.`, 'fail');
         }
+        return g.msg(`You can't quite work the ${forageName(node).toLowerCase()} loose. Try again.`, 'fail');
       }
-      const left = Math.floor(g.forage.left(p.x, p.z, b, g.world.time));
-      const note = left === 0 ? ' The area is picked clean now.' : left === 1 ? ' There is little left around here.' : '';
-      g.msg(`You forage and find ${found.join(' and ')}.${note}`, 'good');
+      g.world.remove(node);
+      const n = sp.count[0] + Math.floor(Math.random() * (sp.count[1] - sp.count[0] + 1)) + (Math.random() < g.skills.get('foraging') / 150 ? 1 : 0);
+      const biome = biomeAt(g.world, node.x, node.y, node.z, g.world.terrain.materialAt(node.x, node.y - 0.05, node.z));
+      const wasKnown = isIdentified(sp.item);
+      const recognised = tryIdentify(g, sp.item);
+      const handledEnough = g.knowledge.handled(sp.item, biome, n);
+      g.give(sp.item, o.ql, n);
+      g.msg(`You pick ${n > 1 ? n + ' × ' : ''}${typeName(sp.item).toLowerCase()}.`, 'good');
+      if (!wasKnown && (recognised || handledEnough)) {
+        g.msg(`${recognised ? 'You recognise it' : "You've handled enough of these to know them"}: ${itemDef(sp.item).name}. ${itemDef(sp.item).desc}`, 'skill');
+        g.inventoryChanged();
+      }
     },
   },
   {
-    id: 'gather_stones', label: 'Gather loose stones',
-    show: (c) => biome(c) === 'rocky' && !toolIs(c, 'pickaxe'),
-    check: (c) => {
-      const problem = forageProblem(c, biome(c));
-      return problem && problem.startsWith('This area') ? 'No loose stones left around here. Try elsewhere, or use a pickaxe.' : problem;
+    id: 'examine_forage', label: 'Examine',
+    show: (c) => !!obj(c, 'forage'), time: 0,
+    run: (c) => {
+      const node = obj(c, 'forage')!;
+      const sp = FORAGE[node.species];
+      c.g.msg(`${forageName(node)}. ${typeDesc(sp.item)}`, 'info');
     },
-    time: 5, skill: 'mining', difficulty: 2, stamina: 4,
+  },
+  {
+    id: 'survey', label: 'Survey the area', show: () => false,
+    time: 2, fixedTime: true, skill: 'foraging', difficulty: 6, stamina: 2,
+    run: (c, o) => c.g.survey(o.success),
+  },
+  {
+    id: 'study', label: (c) => `Study ${c.item ? itemName(c.item).toLowerCase() : ''}`, show: () => false,
+    check: (c) => (!c.item || !c.g.inv.find(c.item.uid) ? 'You no longer have it.' : isIdentified(c.item.type) ? 'You already know what that is.' : null),
+    time: 5, skill: 'herbalism', difficulty: (c) => IDENTIFY[c.item!.type] ?? 5, stamina: 1,
     run: (c, o) => {
-      if (!isGround(c)) return;
-      if (!o.success) return c.g.msg('The stones here are all stuck fast.', 'fail');
-      c.g.forage.take(c.t.point.x, c.t.point.z, c.g.world.time);
-      const n = 1 + (Math.random() < 0.3 ? 1 : 0);
-      c.g.give('rock_shard', o.ql * 0.8, n);
-      c.g.msg(`You pry loose ${n} rock shard${n > 1 ? 's' : ''}.`, 'good');
+      const it = c.item!;
+      if (!o.success) return c.g.msg(`You turn the ${itemName(it).toLowerCase()} over in your hands, but still can't place it.`, 'fail');
+      learnSpecies(it.type);
+      c.g.inventoryChanged();
+      c.g.msg(`You work it out: it's ${itemDef(it.type).name.toLowerCase()}. ${itemDef(it.type).desc}`, 'skill');
     },
   },
   {
@@ -755,12 +760,6 @@ export const ACTIONS: ActionDef[] = [
 
 export const ACTION_MAP: Record<string, ActionDef> = Object.fromEntries(ACTIONS.map((a) => [a.id, a]));
 
-function weighted(table: [string, number][]): string {
-  const total = table.reduce((s, [, w]) => s + w, 0);
-  let r = Math.random() * total;
-  for (const [k, w] of table) { r -= w; if (r <= 0) return k; }
-  return table[0][0];
-}
 
 export function nextMaterial(def: StructureDef, s: StructureObj): string | undefined {
   for (const m of def.materials) if ((s.consumed[m.item] ?? 0) < m.count) return m.item;
@@ -783,7 +782,7 @@ export function craftProblem(g: Game, r: Recipe, tool?: Item): string | null {
   if (g.dev.on('freeCraft')) return null;
   if (r.tool && (!tool || !g.inv.find(tool.uid) || itemDef(tool.type).tool !== r.tool)) return `You need a ${r.tool}.`;
   for (const inp of r.inputs) {
-    if (g.inv.count(inp.item) < inp.count) return `Need ${inp.count} ${itemDef(inp.item).name.toLowerCase()}.`;
+    if (g.usableCount(inp.item) < inp.count) return `Need ${inp.count} ${itemDef(inp.item).name.toLowerCase()}.`;
   }
   for (const st of r.stations ?? []) {
     if (!g.stationNear(st)) return `Must be near ${STATION_NAMES[st]}.`;

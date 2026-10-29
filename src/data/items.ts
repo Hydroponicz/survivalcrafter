@@ -1,6 +1,8 @@
 // Item definitions. Every item instance carries its own quality (QL 1-100)
 // and damage, like Wurm Online, rather than being an anonymous stack.
 
+export type FoodEffect = 'nausea' | 'poison' | 'severe_poison' | 'heal' | 'refresh' | 'soothe';
+
 export type ToolKind =
   | 'knife' | 'hatchet' | 'pickaxe' | 'shovel' | 'hammer' | 'saw' | 'scythe' | 'weapon';
 
@@ -15,7 +17,21 @@ export interface ItemDef {
   toolPower?: number;
   /** Melee damage when used as a weapon (also applies to tools). */
   damage?: number;
-  food?: { nutrition: number; water?: number };
+  food?: {
+    nutrition: number;
+    water?: number;
+    /** Something that happens to you when you eat or use it. */
+    effect?: FoodEffect;
+    /** Button label instead of Eat/Drink (e.g. Apply). */
+    verb?: string;
+    /** Item left over afterwards (e.g. the empty jar). */
+    returns?: string;
+  };
+  /**
+   * Wild plants and fungi you have to learn. Until you identify the species it
+   * goes by this description of how it looks.
+   */
+  unknownName?: string;
   fuel?: number; // seconds of burn time
   /** Items that cannot be carried (only exist on the ground). */
   noPickup?: boolean;
@@ -61,11 +77,32 @@ const defs: ItemDef[] = [
   // --- pottery & containers
   { id: 'clay_jar_unfired', name: 'Unfired clay jar', icon: '⚱️', weight: 2, desc: 'Needs to be fired in a lit fire.' },
   { id: 'clay_jar', name: 'Clay jar', icon: '🏺', weight: 1.5, desc: 'Fill it at the water\'s edge.' },
-  { id: 'jar_of_water', name: 'Jar of water', icon: '💧', weight: 3.5, food: { nutrition: 0, water: 35 }, desc: 'Fresh water. Drink it or cook with it.' },
+  { id: 'jar_of_water', name: 'Jar of water', icon: '💧', weight: 3.5, food: { nutrition: 0, water: 35, returns: 'clay_jar' }, desc: 'Fresh water. Drink it or cook with it.' },
 
   // --- food
   { id: 'berries', name: 'Berries', icon: '🫐', weight: 0.1, food: { nutrition: 4, water: 2 }, desc: 'A handful of wild berries.' },
-  { id: 'mushroom', name: 'Mushroom', icon: '🍄', weight: 0.1, food: { nutrition: 3 }, desc: 'Edible... probably.' },
+  { id: 'mushroom', name: 'Penny bun', icon: '🍄', weight: 0.1, food: { nutrition: 4 }, unknownName: 'Brown-capped mushroom',
+    desc: 'A plump mushroom with a brown cap and a thick pale stem. Good eating, better roasted.' },
+  { id: 'chanterelle', name: 'Chanterelle', icon: '🍄', weight: 0.1, food: { nutrition: 12 }, unknownName: 'Golden funnel mushroom',
+    desc: 'A golden-orange mushroom shaped like a little funnel, with ridges under the cap. A prized find.' },
+  { id: 'red_cap', name: 'Fly agaric', icon: '🍄', weight: 0.1, food: { nutrition: 1, effect: 'nausea' }, unknownName: 'Red spotted mushroom',
+    desc: 'A striking red mushroom speckled with white spots. Makes you violently sick.' },
+  { id: 'pale_cap', name: 'Death cap', icon: '🍄', weight: 0.1, food: { nutrition: 1, effect: 'poison' }, unknownName: 'Pale skirted mushroom',
+    desc: 'A smooth, pale greenish-white mushroom with a skirt on its stem. Poisonous.' },
+  { id: 'yarrow', name: 'Yarrow', icon: '🌿', weight: 0.05, food: { nutrition: 1, effect: 'soothe' }, unknownName: 'Feathery white-flowered herb',
+    desc: 'Feathery leaves and flat clusters of tiny white flowers. Pounded into a poultice it stops bleeding and draws out poison.' },
+  { id: 'hemlock', name: 'Hemlock', icon: '🌿', weight: 0.05, food: { nutrition: 0, effect: 'severe_poison' }, unknownName: 'Tall white-flowered herb',
+    desc: 'A tall herb with lacy white flower umbrellas and a purple-blotched stem. Deadly — easily mistaken for yarrow.' },
+  { id: 'mint', name: 'Wild mint', icon: '🌱', weight: 0.05, food: { nutrition: 1, effect: 'refresh' }, unknownName: 'Toothed-leaf herb',
+    desc: 'A low herb with toothed leaves and a fresh smell. Chew it or brew it into tea to shake off tiredness.' },
+  { id: 'wild_onion', name: 'Wild onion', icon: '🧅', weight: 0.1, food: { nutrition: 6 }, unknownName: 'Purple-flowered herb',
+    desc: 'Grassy leaves and a ball of purple flowers, with a sharp smell. Edible, and makes a stew hearty.' },
+  { id: 'poultice', name: 'Yarrow poultice', icon: '🩹', weight: 0.2, food: { nutrition: 0, effect: 'heal', verb: 'Apply' },
+    desc: 'Heals wounds and draws out poison.' },
+  { id: 'mint_tea', name: 'Mint tea', icon: '🍵', weight: 3.5, food: { nutrition: 0, water: 30, effect: 'refresh', returns: 'clay_jar' },
+    desc: 'A jar of fragrant tea. Restores stamina and keeps you going for a while.' },
+  { id: 'hearty_stew', name: 'Hearty stew', icon: '🍲', weight: 3.5, food: { nutrition: 45, water: 15, returns: 'clay_jar' },
+    desc: 'Meat and wild onion simmered in a jar. The most filling meal there is.' },
   { id: 'roast_mushroom', name: 'Roasted mushroom', icon: '🍄', weight: 0.1, food: { nutrition: 8 }, desc: 'Smoky and filling.' },
   { id: 'raw_meat', name: 'Raw meat', icon: '🥩', weight: 0.6, food: { nutrition: 3 }, desc: 'You should really cook this.' },
   { id: 'cooked_meat', name: 'Cooked meat', icon: '🍖', weight: 0.5, food: { nutrition: 22 }, desc: 'A hearty meal.' },
@@ -103,6 +140,39 @@ export function makeItem(type: string, ql: number, label?: string): Item {
   return { uid: nextUid++, type, ql: Math.max(1, Math.min(100, ql)), dmg: 0, label };
 }
 
+// ---------- species knowledge
+// Which wild species the player has identified. Unidentified ones are called by
+// what they look like everywhere in the UI.
+let known = new Set<string>();
+
+export function setKnownSpecies(types: Iterable<string>) {
+  known = new Set(types);
+}
+
+export function learnSpecies(type: string) {
+  known.add(type);
+}
+
+export function isIdentified(type: string): boolean {
+  return !ITEMS[type]?.unknownName || known.has(type);
+}
+
+export function knownSpecies(): string[] {
+  return [...known];
+}
+
+/** Name of an item type as the player currently knows it. */
+export function typeName(type: string): string {
+  const d = itemDef(type);
+  return isIdentified(type) ? d.name : `${d.unknownName} (unidentified)`;
+}
+
 export function itemName(it: Item): string {
-  return it.label ?? itemDef(it.type).name;
+  return it.label ?? typeName(it.type);
+}
+
+/** Description as the player currently knows it. */
+export function typeDesc(type: string): string {
+  const d = itemDef(type);
+  return isIdentified(type) ? d.desc : 'You are not sure what this is. Study it, or find more, to learn it.';
 }

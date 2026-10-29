@@ -28,6 +28,8 @@ export class Player {
   wheelCaptured = false;
   sprinting = false;
 
+  /** Timed conditions: poisoned, nauseous, refreshed. `rate` is damage per second where relevant. */
+  effects: Record<string, { t: number; rate: number }> = {};
   health = 100;
   food = 80;
   water = 80;

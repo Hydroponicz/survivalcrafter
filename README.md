@@ -36,6 +36,7 @@ chunks you changed are stored; the rest regenerates from the seed).
 | 1-9 / 0 | Activate hotbar item / bare hands (drag items from the inventory onto the hotbar to bind them) |
 | R / X | Repeat last action / stop current action |
 | I or Tab, C, B, K, H | Inventory, Crafting, Build, Skills, Help |
+| G / J | Survey for forage / field journal |
 | ` or F2 | Dev console (cheats) |
 
 ## Dev console
@@ -64,9 +65,14 @@ Toggles are remembered per browser; a purple **DEV** badge shows while any cheat
   snapping floors to floors, walls to floor edges and wall tops, roofs onto walls; rotate with the mouse
   wheel or Q/E and keep placing. Each placed plan must then be built with "Continue building", spending
   one material per step with the right tool and skill — so quality and failure still matter.
-- **Foraging that reads the land.** Meadows, forest floor, shores and wetlands each give different finds
-  (fiber and wild seeds; branches, mushrooms and seedlings; pebbles and driftwood; reeds). Every 12 m area
-  holds only two or three finds and regrows one every four minutes, so you forage by roaming, not by spamming.
+- **Foraging you can see.** Fiber grass, wild wheat, fallen branches, driftwood, pebbles, reeds,
+  mushrooms and herbs grow on the ground where they belong (meadow, forest floor, shore, wetland) and
+  regrow over time away from where you're looking. Rare finds only catch your eye once your Foraging is
+  high enough — or press **G** to survey: nearby finds glow, gold for ones you'd normally miss.
+- **Learning what you pick.** Wild mushrooms and herbs start unidentified, known only by their look
+  ("red spotted mushroom"). Recognise them as you pick (Herbalism), **Study** them, or learn by handling
+  enough. Some are poisonous — eating an unknown one is a gamble; a yarrow poultice draws out poison.
+  Mint tea and hearty stew reward knowing your plants. The field journal (**J**) records it all.
 - **Production chains.** Fiber → cordage → stone tools → logs → planks/shafts → shovel → clay → forge +
   anvil → iron ore → lumps → iron tools. Fields → wheat → quern → flour + jar of water → dough → bread.
 - **Survival.** Food, water, stamina and health. Fires need fuel and kindling. Boars fight back. Death

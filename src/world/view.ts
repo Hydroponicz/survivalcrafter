@@ -1,9 +1,11 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { STRUCTURES, totalMaterials } from '../data/structures';
+import { FORAGE, FORAGE_SPECIES } from '../data/forage';
+import { forageGeometry, forageScale } from './forageProps';
 import { hash2 } from './noise';
 import {
-  CROP_STAGES, cropPos, type AnimalObj, type BushObj, type PileObj, type Species, type StructureObj,
+  CROP_STAGES, cropPos, type AnimalObj, type BushObj, type ForageObj, type PileObj, type Species, type StructureObj,
   type TreeObj, type World, type WorldListener, type WorldObj,
 } from './world';
 
@@ -94,6 +96,9 @@ export class WorldView implements WorldListener {
   private m4 = new THREE.Matrix4();
   private q = new THREE.Quaternion();
   private up = new THREE.Vector3(0, 1, 0);
+  private foragePools = new Map<string, InstancePool>();
+  /** Whether the player can currently see a forage find (skill-gated). */
+  forageVisible: (o: ForageObj) => boolean = () => true;
   private cropGeo: THREE.BufferGeometry;
   private cropMats: THREE.MeshStandardMaterial[];
 
@@ -129,6 +134,13 @@ export class WorldView implements WorldListener {
     this.cropGeo = mergeGeometries(stalks)!;
     this.cropMats = [0x6aa84f, 0x7fb348, 0x9cba45, 0xc2b04a, 0xd9b44a].map((c) => mat(c));
 
+    const forageMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, flatShading: true });
+    for (const sp of FORAGE_SPECIES) {
+      const pool = new InstancePool(forageGeometry(sp.id), forageMat, 3000, false);
+      this.foragePools.set(sp.id, pool);
+      this.group.add(pool.mesh);
+    }
+
     for (let i = 0; i < 4; i++) {
       const l = new THREE.PointLight(0xff9a40, 0, 16, 1.6);
       this.fireLights.push(l);
@@ -152,6 +164,11 @@ export class WorldView implements WorldListener {
       this.berryPool.alloc();
       this.slots.set(o.id, slot);
       this.updateBush(o);
+    } else if (o.kind === 'forage') {
+      const pool = this.foragePools.get(o.species);
+      if (!pool) return;
+      this.slots.set(o.id, pool.alloc());
+      this.updateForage(o);
     } else {
       this.rebuildMesh(o);
     }
@@ -168,6 +185,10 @@ export class WorldView implements WorldListener {
       this.bushPool.release(s);
       this.berryPool.release(s);
       this.slots.delete(o.id);
+    } else if (o.kind === 'forage') {
+      const s = this.slots.get(o.id);
+      if (s !== undefined) this.foragePools.get(o.species)?.release(s);
+      this.slots.delete(o.id);
     } else {
       const m = this.meshes.get(o.id);
       if (m) { this.disposeMesh(m); this.meshes.delete(o.id); }
@@ -177,6 +198,7 @@ export class WorldView implements WorldListener {
   changed(o: WorldObj) {
     if (o.kind === 'tree') this.updateTree(o);
     else if (o.kind === 'bush') this.updateBush(o);
+    else if (o.kind === 'forage') this.updateForage(o);
     else this.rebuildMesh(o);
   }
 
@@ -218,6 +240,22 @@ export class WorldView implements WorldListener {
     this.bushPool.set(slot, this.m4);
     if (o.ripe) this.berryPool.set(slot, this.m4);
     else this.berryPool.hide(slot);
+  }
+
+  private updateForage(o: ForageObj) {
+    const slot = this.slots.get(o.id);
+    const pool = this.foragePools.get(o.species);
+    if (slot === undefined || !pool) return;
+    if (!this.forageVisible(o)) { pool.hide(slot); return; }
+    const s = (0.85 + hash2(o.id, 5) * 0.35) * forageScale(FORAGE[o.species]?.category ?? 'material');
+    this.q.setFromAxisAngle(this.up, o.rot);
+    this.m4.compose(new THREE.Vector3(o.x, o.y - 0.02, o.z), this.q, new THREE.Vector3(s, s, s));
+    pool.set(slot, this.m4);
+  }
+
+  /** Re-check which forage finds the player can see (after a skill gain or a survey). */
+  refreshForage() {
+    for (const o of this.world.objects.values()) if (o.kind === 'forage') this.updateForage(o);
   }
 
   /** Re-sync heights of everything after terrain changes near a point. */

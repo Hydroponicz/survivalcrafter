@@ -97,7 +97,14 @@ export const RECIPES: Recipe[] = [
     output: { item: 'iron_sword', count: 1 } },
 
   // --- cooking
-  { id: 'roast_mushroom', name: 'Roasted mushroom', category: 'Cooking', skill: 'cooking', difficulty: 2, time: 5,
+  { id: 'poultice', name: 'Yarrow poultice', category: 'Cooking', skill: 'herbalism', difficulty: 8, time: 6,
+    inputs: [{ item: 'yarrow', count: 2 }, { item: 'plant_fiber', count: 1 }], output: { item: 'poultice', count: 1 } },
+  { id: 'mint_tea', name: 'Mint tea', category: 'Cooking', skill: 'herbalism', difficulty: 6, time: 8,
+    stations: ['fire'], inputs: [{ item: 'mint', count: 2 }, { item: 'jar_of_water', count: 1 }], output: { item: 'mint_tea', count: 1 } },
+  { id: 'hearty_stew', name: 'Hearty stew', category: 'Cooking', skill: 'cooking', difficulty: 18, time: 16,
+    stations: ['fire'], inputs: [{ item: 'cooked_meat', count: 1 }, { item: 'wild_onion', count: 2 }, { item: 'jar_of_water', count: 1 }],
+    output: { item: 'hearty_stew', count: 1 } },
+  { id: 'roast_mushroom', name: 'Roasted penny bun', category: 'Cooking', skill: 'cooking', difficulty: 2, time: 5,
     stations: ['fire'], inputs: [{ item: 'mushroom', count: 1 }], output: { item: 'roast_mushroom', count: 1 } },
   { id: 'cooked_meat', name: 'Cooked meat', category: 'Cooking', skill: 'cooking', difficulty: 6, time: 10,
     stations: ['fire'], inputs: [{ item: 'raw_meat', count: 1 }], output: { item: 'cooked_meat', count: 1 } },

@@ -1,5 +1,7 @@
 import './style.css';
+import { itemName, typeName } from './data/items';
 import { RECIPES } from './data/recipes';
+import { ACTION_MAP } from './game/actions';
 import { STRUCTURES } from './data/structures';
 import { Game, OLD_SAVE_KEY } from './game/game';
 import { UI } from './ui/ui';
@@ -43,7 +45,7 @@ function launch(make: () => Game | null) {
     });
     game.input.lock();
     // Handy for debugging from the browser console.
-    Object.assign(window, { game, __recipes: RECIPES, __data: { STRUCTURES }, __World: World });
+    Object.assign(window, { game, __recipes: RECIPES, __data: { STRUCTURES }, __World: World, __ACTIONS: ACTION_MAP, __typeName: typeName, __itemName: itemName });
   }, 30);
 }
 

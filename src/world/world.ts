@@ -30,6 +30,9 @@ export interface StructureObj {
   items?: Item[];
 }
 
+/** Something growing or lying on the ground that you can pick up (see data/forage). */
+export interface ForageObj { kind: 'forage'; id: number; species: string; x: number; y: number; z: number; rot: number }
+
 export interface PileObj { kind: 'pile'; id: number; x: number; y: number; z: number; items: Item[] }
 
 export interface AnimalObj {
@@ -44,7 +47,7 @@ export interface AnimalObj {
 /** Crops grow on 1 m cells of tilled ground. */
 export interface Crop { planted: number; ql: number; tended: number }
 
-export type WorldObj = TreeObj | BushObj | StructureObj | PileObj;
+export type WorldObj = TreeObj | BushObj | StructureObj | PileObj | ForageObj;
 
 export interface WorldListener {
   added(o: WorldObj): void;
@@ -250,6 +253,16 @@ export class World {
   cropStage(c: Crop): number {
     const stageTime = CROP_STAGE_TIME / (1 + c.tended * 0.15);
     return Math.min(CROP_STAGES - 1, Math.floor((this.time - c.planted) / stageTime));
+  }
+
+  /** Forage finds on ground that was dug away or buried are lost; the rest settle to the new surface. */
+  settleForage(x: number, z: number, r: number) {
+    for (const o of this.near(x, z, r + 1)) {
+      if (o.kind !== 'forage') continue;
+      const h = this.terrain.heightAt(o.x, o.z);
+      if (Math.abs(h - o.y) > 0.25) this.remove(o);
+      else { o.y = h; this.changed(o); }
+    }
   }
 
   /** Remove crops whose tilled soil was disturbed near a point. */
