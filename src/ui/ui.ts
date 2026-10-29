@@ -45,6 +45,9 @@ export class UI {
   private craftCategory = 'Primitive';
   private expanded = new Set<string>();
   private refreshTimer = 0;
+  private lastHtml = new Map<WindowName, string>();
+  private pressedWindow: WindowName | null = null;
+  private pendingRender = new Set<WindowName>();
   private lastRefreshKey = '';
   private devGive = { type: 'log', count: 10, ql: 50 };
   private devSkill = 50;
@@ -82,7 +85,10 @@ export class UI {
     for (const name of ['inventory', 'crafting', 'skills', 'build', 'help', 'container', 'dev'] as WindowName[]) {
       const w = el('div', `window window-${name}`);
       w.style.display = 'none';
-      w.addEventListener('mousedown', (e) => e.stopPropagation());
+      w.addEventListener('mousedown', (e) => {
+        e.stopPropagation();
+        this.pressedWindow = name;
+      });
       this.root.appendChild(w);
       this.windows.set(name, w);
     }
@@ -121,6 +127,13 @@ export class UI {
     this.root.appendChild(this.damageEl);
 
     window.addEventListener('keydown', (e) => this.onKey(e));
+    window.addEventListener('mouseup', () => {
+      const name = this.pressedWindow;
+      if (!name) return;
+      this.pressedWindow = null;
+      // Let the click event fire on the old DOM first, then catch up.
+      if (this.pendingRender.delete(name)) setTimeout(() => { if (this.open.has(name)) this.render(name); }, 0);
+    });
     document.addEventListener('mousedown', (e) => {
       if (this.menuOpen && !this.menuEl.contains(e.target as Node)) this.closeMenu();
     });
@@ -149,6 +162,8 @@ export class UI {
   close(name: WindowName) {
     this.open.delete(name);
     this.windows.get(name)!.style.display = 'none';
+    this.lastHtml.delete(name);
+    this.pendingRender.delete(name);
     if (name === 'container') this.container = null;
     if (name === 'inventory') this.hoveredItem = null;
     if (!this.anyWindowOpen()) this.wantsRelock = true;
@@ -342,15 +357,26 @@ export class UI {
 
   private frame(name: WindowName, title: string, body: HTMLElement | string) {
     const w = this.windows.get(name)!;
+    // Swapping the DOM between mousedown and mouseup swallows the click, so
+    // hold off while a button is pressed in this window and redraw afterwards.
+    if (this.pressedWindow === name) {
+      this.pendingRender.add(name);
+      return;
+    }
+    const b = el('div', 'window-body');
+    if (typeof body === 'string') b.innerHTML = body;
+    else b.appendChild(body);
+    // Skip identical redraws: no flicker, and hover/focus survive. Rows carry
+    // their item uids in data attributes, so equal HTML means equal targets.
+    const html = title + b.innerHTML;
+    if (this.lastHtml.get(name) === html && w.firstChild) return;
+    this.lastHtml.set(name, html);
     const scroll = w.querySelector('.window-body')?.scrollTop ?? 0;
     w.innerHTML = '';
     const head = el('div', 'window-head', `<span>${title}</span>`);
     const x = el('button', 'close', '✕');
     x.addEventListener('click', () => this.close(name));
     head.appendChild(x);
-    const b = el('div', 'window-body');
-    if (typeof body === 'string') b.innerHTML = body;
-    else b.appendChild(body);
     w.append(head, b);
     b.scrollTop = scroll;
   }
@@ -372,6 +398,7 @@ export class UI {
     const best = items[0];
     const def = itemDef(best.type);
     const row = el('div', `item-row${g.activeUid !== null && items.some((i) => i.uid === g.activeUid) ? ' active' : ''}`);
+    row.dataset.uids = items.map((i) => i.uid).join(',');
     const weight = items.length * def.weight;
     const ql = items.length > 1 ? `QL ${items.at(-1)!.ql.toFixed(0)}–${best.ql.toFixed(0)}` : `QL ${best.ql.toFixed(1)}`;
     row.innerHTML = `<span class="icon">${def.icon}</span>
@@ -431,6 +458,7 @@ export class UI {
         for (const it of grp.items) {
           const sub = el('div', `item-sub${it.uid === g.activeUid ? ' active' : ''}`,
             `QL ${it.ql.toFixed(1)}${it.dmg > 0 ? ` · dmg ${it.dmg.toFixed(1)}` : ''}`);
+          sub.dataset.uid = String(it.uid);
           const u = el('button', '', it.uid === g.activeUid ? 'Unuse' : 'Use');
           u.addEventListener('click', () => g.setActive(it.uid === g.activeUid ? null : it.uid));
           const d = el('button', '', 'Drop');
