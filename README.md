@@ -56,6 +56,9 @@ Toggles are remembered per browser; a purple **DEV** badge shows while any cheat
   tool QL and material QL. Tools wear out and eventually break.
 - **The active item decides your options.** Activate a shovel and the action menu offers Dig, Flatten,
   Cultivate; a pickaxe offers Mine; bare hands forage.
+- **Weathered, eroded landscapes.** Each world is shaped by simulated rain: ~90,000 droplets run
+  downhill, carving gullies into the mountains and laying sediment along valley floors. Soil is thick
+  where sediment settled and thin where water stripped it; clay lines the well-watered valley bottoms.
 - **Voxel terrain you can reshape anywhere.** The world is a smooth voxel landscape (Surface Nets on a
   1 m grid, like Enshrouded). With a shovel you **dig**, **raise**, **smooth** and **level ground to your
   feet** (Valheim-style); a pickaxe mines rock in any direction, so you can tunnel into hills, find caves
@@ -107,7 +110,7 @@ Toggles are remembered per browser; a purple **DEV** badge shows while any cheat
 ```
 src/
   data/       items, skills, recipes, structures (pure data — easy to extend)
-  world/      voxel terrain (generation, meshing, sculpting), world entities, noise, rendering
+  world/      voxel terrain (generation, erosion, meshing, sculpting), world entities, noise, rendering
   game/       game loop, player/camera, actions, inventory, input, sky
   game/minigames/  the hands-on crafting and building minigames
   ui/         HUD, windows, context menu

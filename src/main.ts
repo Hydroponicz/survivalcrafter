@@ -4,7 +4,7 @@ import { RECIPES } from './data/recipes';
 import { ACTION_MAP } from './game/actions';
 import { createMinigame } from './game/minigames';
 import { STRUCTURES } from './data/structures';
-import { Game, OLD_SAVE_KEY } from './game/game';
+import { Game, OLD_SAVES } from './game/game';
 import { UI } from './ui/ui';
 import { World } from './world/world';
 
@@ -17,9 +17,10 @@ const seedInput = document.getElementById('seed') as HTMLInputElement;
 
 if (Game.hasSave()) cont.style.display = '';
 try {
-  if (localStorage.getItem(OLD_SAVE_KEY)) {
-    status.textContent = 'The world is now made of voxels, so worlds from the old tile terrain can no longer be loaded. Start a new world to play.';
-    localStorage.removeItem(OLD_SAVE_KEY);
+  for (const [key, why] of OLD_SAVES) {
+    if (!localStorage.getItem(key)) continue;
+    status.textContent = why;
+    localStorage.removeItem(key);
   }
 } catch { /* storage unavailable */ }
 

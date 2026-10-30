@@ -32,8 +32,12 @@ const REACH = 4.5;
 /** Skill above a task's difficulty needed to do it the quick way. */
 export const QUICK_MARGIN = 10;
 const BUILD_REACH = 8;
-const SAVE_KEY = 'survivalcrafter.save.v2';
-export const OLD_SAVE_KEY = 'survivalcrafter.save.v1';
+const SAVE_KEY = 'survivalcrafter.save.v3';
+/** Saves from older world generators, which can't be loaded into the current one, and why. */
+export const OLD_SAVES: [string, string][] = [
+  ['survivalcrafter.save.v2', 'Worlds are now shaped by erosion, so worlds from before the change can no longer be loaded. Start a new world to play.'],
+  ['survivalcrafter.save.v1', 'The world is now made of voxels, so worlds from the old tile terrain can no longer be loaded. Start a new world to play.'],
+];
 
 /** What digging each material gives you. */
 const EARTH_ITEMS: Partial<Record<Mat, string>> = {

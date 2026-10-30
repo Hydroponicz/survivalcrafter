@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { hash2, Simplex } from './noise';
+import { erode } from './erosion';
 
 // Voxel terrain. Density lives on a 1 m grid of points (0..255, solid at >= 128)
 // and is meshed with Surface Nets, so the ground is smooth like Enshrouded but
@@ -41,6 +42,9 @@ const SRGB: Record<Mat, [number, number, number]> = {
 };
 const LIN = Object.fromEntries(Object.entries(SRGB).map(([k, c]) => [k, c.map((v) => Math.pow(v, 2.2))])) as unknown as Record<Mat, number[]>;
 
+/** Drainage (log of water through a column) above which valley floors are clay. */
+const CLAY_FLOW = 4.4;
+
 export type Volumes = Partial<Record<Mat, number>>;
 
 export class Terrain {
@@ -50,6 +54,8 @@ export class Terrain {
   /** Top surface height per grid column, for fast height queries. */
   private heights = new Float32Array(PX * PZ);
   seed: number;
+  /** Water that drained through each column during erosion (for rivers and reading the land). */
+  flow: Float32Array = new Float32Array(PX * PZ);
 
   group = new THREE.Group();
   private meshes = new Map<number, THREE.Mesh>();
@@ -218,18 +224,31 @@ export class Terrain {
         H[z * PX + x] = Math.max(Y_MIN + 3, base + mount - fall * 26);
       }
     }
+    // Weather it: rain carves gullies and valleys and lays down sediment.
+    const { deposit, flow } = erode(H, PX, this.seed, WATER_LEVEL);
+    this.flow = flow;
     const hAt = (x: number, z: number) => H[Math.max(0, Math.min(PZ - 1, z)) * PX + Math.max(0, Math.min(PX - 1, x))];
     for (let z = 0; z < PZ; z++) {
       for (let x = 0; x < PX; x++) {
         const h = hAt(x, z);
+        const i2 = z * PX + x;
         const slope = Math.max(Math.abs(hAt(x + 1, z) - hAt(x - 1, z)), Math.abs(hAt(x, z + 1) - hAt(x, z - 1))) / 2;
-        let soil = 2 + (n3.fbm(x * 0.03, z * 0.03, 2) + 1) * 1.5;
+        const dep = deposit[i2];
+        // How much water drains through here (log scale): gullies, then streams, then valley floors.
+        const wet = Math.log1p(flow[i2]);
+        // Soil is thick where sediment settled and thin where water stripped it.
+        let soil = 1.5 + (n3.fbm(x * 0.03, z * 0.03, 2) + 1) * 1.2 + Math.max(0, dep) * 1.6 + Math.min(0, dep) * 0.8;
         if (h > 18) soil *= Math.max(0, 1 - (h - 18) / 6);
         if (slope > 1.1) soil = 0;
+        else if (slope > 0.75) soil *= (1.1 - slope) / 0.35;
         let top: Mat = Mat.Grass;
         if (soil < 0.4) top = Mat.Rock;
         else if (h < 1.2) top = n2.noise(x * 0.06, z * 0.06) > 0.35 && h > -2 ? Mat.Clay : Mat.Sand;
-        else if (h < 3.5 && n3.noise(x * 0.05 + 40, z * 0.05) > 0.6) top = Mat.Clay;
+        // Fine silt settles along well-watered valley floors: that's where clay is.
+        else if (h < 8 && wet > CLAY_FLOW && dep > 0.15 && slope < 0.4) top = Mat.Clay;
+        // Coarse sediment fans out where streams leave the hills.
+        else if (h < 2.5 && dep > 2) top = Mat.Sand;
+        else if (h < 3.5 && n3.noise(x * 0.05 + 40, z * 0.05) > 0.7) top = Mat.Clay;
         const under = top === Mat.Sand || top === Mat.Clay ? top : Mat.Dirt;
         for (let yi = 0; yi < PY; yi++) {
           const y = Y_MIN + yi;
