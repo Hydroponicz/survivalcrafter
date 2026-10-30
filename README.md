@@ -83,6 +83,10 @@ Toggles are remembered per browser; a purple **DEV** badge shows while any cheat
 - **Weathered, eroded landscapes.** Each world is shaped by simulated rain: ~170,000 droplets run
   downhill, carving gullies into the mountains and laying sediment along valley floors. Soil is thick
   where sediment settled and thin where water stripped it; clay lines the well-watered valley bottoms.
+- **Mountains that look like mountains.** Ranges rise from broad massifs with long foothill slopes;
+  their ridges curve and branch into spurs with rounded crests, and over-steep crags slump to a natural
+  angle with scree gathered below. Above the trees the crests are bare, banded rock; snow lies on the
+  gentle ground and drifts into gullies, while the wind scours the ridges and steep faces show through.
 - **Climate and vegetation zones.** A prevailing wind brings rain in off the sea; it falls on windward
   slopes and leaves a dry rain shadow behind the ranges, and the air cools with height. Together they
   decide what grows: broadleaf woods on the wet lowlands, grassland, pine forest higher up, dry heath in

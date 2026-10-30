@@ -1,4 +1,4 @@
-import { erode } from './erosion';
+import { erode, slump } from './erosion';
 import { drainage } from './hydrology';
 import { climate, SNOW_TEMP, tempAt, zoneOf, type Zone } from './climate';
 import { hash2, Simplex } from './noise';
@@ -67,12 +67,38 @@ export class BaseLand {
 
   height(x: number, z: number): number {
     const land = this.land(x, z);
+    const inland = smooth(0.3, 0.9, land);
+    // Mountain belts. Where a range rises the ground first swells broadly (a
+    // massif, with long foothill slopes), and the ridges stand on top of that,
+    // so peaks grow from wide bases instead of shooting up from the plain.
     const range = smooth(-0.05, 0.45, this.range.fbm(x / 2400 + 3.1, z / 2400, 2));
-    const ridge = Math.pow(1 - Math.abs(this.ridge.fbm(x / 800, z / 800, 5)), 2.4);
-    const mount = ridge * range * 430 * smooth(0.3, 0.9, land);
-    const hills = (this.hill.fbm(x / 380, z / 380, 4) * 0.5 + 0.5) * (25 + 40 * range);
+    // Bend the ridge lines so they curve and branch like real ranges.
+    const wx = x + this.warp.fbm(x / 900 + 21, z / 900, 2) * 280, wz = z + this.warp.fbm(x / 900, z / 900 + 21, 2) * 280;
+    const mount = (range * range * 150 + this.ridges(wx, wz) * range * 330) * inland;
+    const hills = (this.hill.fbm(x / 380, z / 380, 4) * 0.5 + 0.5) * (25 + 30 * range);
     const plains = 5 + this.low.fbm(x / 1500, z / 1500, 2) * 6;
     return land * (plains + hills + mount) + (1 - land) * -45;
+  }
+
+  /**
+   * Ridged noise (0..1) shaped like eroded mountains: crests are rounded
+   * rather than knife-edged, and each finer set of ridges grows mainly where
+   * the coarser ones are already high, so spurs branch off the main ridges
+   * and the valleys between stay smooth.
+   */
+  private ridges(x: number, z: number): number {
+    let sum = 0, norm = 0, amp = 1, f = 1 / 1500, weight = 1;
+    for (let o = 0; o < 4; o++) {
+      const n = this.ridge.noise(x * f + o * 17.3, z * f - o * 9.1);
+      let r = 1 - Math.sqrt(n * n + 0.012);
+      r = r * r * weight;
+      weight = clamp01(r * 1.5);
+      sum += r * amp;
+      norm += amp;
+      amp *= 0.42;
+      f *= 2.1;
+    }
+    return clamp01(sum / norm / 0.8);
   }
 }
 
@@ -87,6 +113,16 @@ export function buildTile(seed: number, tx: number, tz: number, base = new BaseL
     drops: 26000, maxSteps: 90, inertia: 0.05, capacity: 6, minCapacity: 0.01, erodeRate: 0.32,
     depositRate: 0.28, evaporation: 0.012, gravity: 4, radius: 2, maxDig: 3,
   });
+  // Let over-steep crags and gully walls fall back to a natural angle (about 40°).
+  slump(H, TN, CELL * 0.85, 80, er.deposit, 0.9);
+  // Settle the ripples the slides leave.
+  const sm = H.slice();
+  for (let z = 1; z < TN - 1; z++) {
+    for (let x = 1; x < TN - 1; x++) {
+      const i = z * TN + x;
+      H[i] = sm[i] * 0.5 + (sm[i - 1] + sm[i + 1] + sm[i - TN] + sm[i + TN]) * 0.125;
+    }
+  }
   const clim = climate(H, TN, seed, SEA, ox, oz, CELL);
   const dr = drainage(H, TN, SEA, clim.rain, { cell: CELL, streamAt: STREAM_AT, minLake: 8, lakeDepth: 12 });
   for (let i = 0; i < n; i++) if (dr.kind[i]) clim.moist[i] = Math.min(1, clim.moist[i] + 0.25);
@@ -353,7 +389,7 @@ export class WorldGen {
     const ch = this.channel(x, z, mapH);
     // Rugged where the land is steep, gentle in the lowlands, calm by water
     // (so banks don't dip below the waterline).
-    const amp = 0.5 + 4.5 * smooth(0.15, 0.9, slope);
+    const amp = 0.5 + 2.5 * smooth(0.15, 0.9, slope);
     let calm = Number.isNaN(this.lakeSurface(x, z)) ? 1 : 0.25;
     if (ch) calm *= 0.15 + 0.85 * smooth(ch.r, ch.r + 8, ch.d);
     h += (this.detail.fbm(x / 26, z / 26, 4) * amp + this.detail2.fbm(x / 7, z / 7, 2) * amp * 0.25) * calm;
@@ -443,8 +479,20 @@ export const tileOf = (v: number) => Math.floor(v / TILE);
 
 // ---------- distant land colours (pure, so a worker can make them)
 const lin3 = (c: [number, number, number]) => c.map((v) => Math.pow(v, 2.2));
+const snowEdge = new Simplex(9137);
+/**
+ * How much snow lies (0..1) at a point of this temperature and steepness
+ * (rise over run). Its lower edge wanders with the lie of the land rather
+ * than following a contour, it holds on gentle ground and thins out on steep
+ * faces, so crags and buttresses stand dark through the white.
+ */
+export function snowCover(x: number, z: number, temp: number, slope: number): number {
+  const edge = SNOW_TEMP + snowEdge.fbm(x / 170, z / 170, 3) * 0.07;
+  return clamp01((edge - temp) / 0.05) * clamp01((0.95 - slope) / 0.4);
+}
+
 const LOD = {
-  sand: lin3([0.8, 0.72, 0.5]), rock: lin3([0.52, 0.51, 0.49]), grass: lin3([0.33, 0.52, 0.2]),
+  sand: lin3([0.8, 0.72, 0.5]), rock: lin3([0.42, 0.405, 0.385]), grass: lin3([0.33, 0.52, 0.2]),
   snow: lin3([0.93, 0.95, 0.98]), forest: lin3([0.12, 0.24, 0.1]), pines: lin3([0.09, 0.19, 0.11]),
   dry: lin3([0.6, 0.55, 0.27]), lush: lin3([0.22, 0.47, 0.16]), cold: lin3([0.27, 0.4, 0.27]),
 };
@@ -466,9 +514,15 @@ export function tileLodColors(d: TileData): Float32Array {
       const hx = (d.H[i + 1] - d.H[i - 1]) / (2 * CELL), hz = (d.H[i + TN] - d.H[i - TN]) / (2 * CELL);
       const slope = Math.hypot(hx, hz);
       const temp = tempAt(d.climBase[i], h), moist = d.moist[i];
+      // Ridges and spurs stand out from the gullies between them: compare with
+      // the ground around (positive on crests), over a wide and a tight ring.
+      let ring = 0, near = 0;
+      for (const j of [i - 2, i + 2, i - 2 * TN, i + 2 * TN, i - 2 * TN - 2, i - 2 * TN + 2, i + 2 * TN - 2, i + 2 * TN + 2]) ring += d.H[j];
+      for (const j of [i - 1, i + 1, i - TN, i + TN]) near += d.H[j];
+      const crest = Math.max(-1, Math.min(1, (h - ring / 8) / 6 + (h - near / 4) / 4));
+      const x = d.tx * TILE + lx * CELL, z = d.tz * TILE + lz * CELL;
       let c: number[];
       if (h < SEA + 1.4) c = LOD.sand;
-      else if (slope > 1.25) c = LOD.rock;
       else {
         c = LOD.grass;
         c = mix(c, LOD.dry, ((0.42 - moist) / 0.3) * 0.85);
@@ -479,9 +533,18 @@ export function tileLodColors(d: TileData): Float32Array {
         const zone = zoneOf(temp, moist, h, SEA, wet, slope);
         if (zone === 'broadleaf') c = mix(c, LOD.forest, 0.65);
         else if (zone === 'conifer') c = mix(c, LOD.pines, 0.75);
-        c = mix(c, LOD.rock, (slope - 0.75) / 0.5);
+        // Bare rock on steep ground, and above the trees on exposed crests too.
+        const high = clamp01((0.32 - temp) / 0.12);
+        // Rock itself varies: beds of paler and darker stone, and weathered patches.
+        const tone = 0.82 + 0.12 * Math.sin(h / 9 + snowEdge.noise(x / 300, z / 300) * 3) + 0.14 * snowEdge.noise(x / 90 + 40, z / 90);
+        const rock = [LOD.rock[0] * tone, LOD.rock[1] * tone, LOD.rock[2] * tone];
+        c = mix(c, rock, (slope - 0.7) / 0.45 + high * (crest * 1.5 + (slope - 0.45) / 0.4));
       }
-      c = mix(c, LOD.snow, ((SNOW_TEMP + 0.04 - temp) / 0.06) * clamp01((1.6 - slope) / 0.5));
+      // Wind scours snow off the crests and it drifts deep in the gullies.
+      c = mix(c, LOD.snow, snowCover(x, z, temp + crest * 0.03, slope - Math.min(0, crest) * 0.4));
+      // A touch of light on the crests and shadow in the gullies, as at a distance.
+      const shade = 1 + crest * 0.18;
+      c = [c[0] * shade, c[1] * shade, c[2] * shade];
       const k = (lz * LOD_N + lx) * 3;
       out[k] = c[0]; out[k + 1] = c[1]; out[k + 2] = c[2];
     }

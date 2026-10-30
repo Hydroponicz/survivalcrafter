@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import { hash2, Simplex } from './noise';
-import { SNOW_TEMP, type Zone } from './climate';
+import { type Zone } from './climate';
 import { Rock, Strata } from './geology';
-import { SEA, WorldGen, type SoilTop } from './worldgen';
+import { SEA, snowCover, WorldGen, type SoilTop } from './worldgen';
 
 // Voxel terrain, streamed. Density lives on a 1 m grid of points (0..255,
 // solid at >= 128) and is meshed with Surface Nets, so the ground is smooth
@@ -348,7 +348,7 @@ export class Terrain {
       mix(GRASS_LUSH, clamp01((mo - 0.55) / 0.3) * 0.7);
       mix(GRASS_COLD, clamp01((0.45 - temp) / 0.2) * 0.8);
     }
-    mix(SNOW, clamp01((SNOW_TEMP + 0.03 - temp) / 0.05) * clamp01((ny - 0.45) / 0.25));
+    mix(SNOW, snowCover(x, z, temp, Math.sqrt(Math.max(0, 1 - ny * ny)) / Math.max(0.05, ny)));
     out[0] = r; out[1] = g; out[2] = b;
     return out;
   }

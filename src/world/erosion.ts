@@ -139,3 +139,40 @@ export function erode(H: Float32Array, w: number, seed: number, seaLevel: number
   }
   return { deposit, flow };
 }
+
+/**
+ * Rockfall and soil creep: wherever ground stands steeper than `talus`
+ * (height per cell), some of it slides down to the lowest neighbour, so
+ * slopes settle at a natural angle with scree gathered at their feet
+ * instead of standing as sheer walls and needle peaks. Moved material is
+ * added to `deposit` where it lands.
+ */
+export function slump(H: Float32Array, w: number, talus: number, iters: number, deposit?: Float32Array, rate = 0.45) {
+  const delta = new Float32Array(w * w);
+  const nb = [-1, 1, -w, w, -w - 1, -w + 1, w - 1, w + 1];
+  const dist = [1, 1, 1, 1, Math.SQRT2, Math.SQRT2, Math.SQRT2, Math.SQRT2];
+  for (let it = 0; it < iters; it++) {
+    delta.fill(0);
+    let moved = 0;
+    for (let z = 1; z < w - 1; z++) {
+      for (let x = 1; x < w - 1; x++) {
+        const i = z * w + x;
+        let best = -1, over = 0;
+        for (let k = 0; k < 8; k++) {
+          const e = (H[i] - H[i + nb[k]]) - talus * dist[k];
+          if (e > over) { over = e; best = k; }
+        }
+        if (best < 0) continue;
+        const amt = over * 0.5 * rate;
+        if (amt > moved) moved = amt;
+        delta[i] -= amt;
+        delta[i + nb[best]] += amt;
+      }
+    }
+    for (let i = 0; i < w * w; i++) {
+      H[i] += delta[i];
+      if (deposit && delta[i] > 0) deposit[i] += delta[i];
+    }
+    if (moved < 0.02) break; // settled
+  }
+}
