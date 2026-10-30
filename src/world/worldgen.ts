@@ -24,7 +24,7 @@ export const PAD = 256;
 /** Grid points along one side of a tile's (padded) map. */
 export const TN = (TILE + 2 * PAD) / CELL + 1;
 /** Within this distance of a tile edge, the tiles on either side are blended. */
-const BLEND = 128;
+export const BLEND = 128;
 export const SEA = 0;
 
 /** Catchment (map cells of average rain) where a stream starts. */
