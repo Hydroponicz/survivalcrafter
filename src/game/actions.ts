@@ -3,7 +3,7 @@ import { isIdentified, itemDef, itemName, learnSpecies, makeItem, TOOL_NAMES, ty
 import { RECIPES, STATION_NAMES, type Recipe } from '../data/recipes';
 import { STRUCTURES, totalMaterials, type StructureDef } from '../data/structures';
 import type { SkillId } from '../data/skills';
-import { isSoft, Mat, MAT_NAMES, WATER_LEVEL, Y_MIN } from '../world/terrain';
+import { isSoft, Mat, MAT_NAMES, Y_MIN } from '../world/terrain';
 import {
   ANIMALS, CROP_STAGES, cropKey, type AnimalObj, type BushObj, type Crop, type ForageObj, type PileObj, type StructureObj, type TreeObj, type WorldObj,
 } from '../world/world';
@@ -325,7 +325,7 @@ export const ACTIONS: ActionDef[] = [
     check: (c) => {
       if (!isGround(c)) return '';
       if (c.t.normal.y < 0.85) return 'The ground is too steep to farm. Level it first.';
-      if (c.t.point.y < WATER_LEVEL + 0.1) return 'Too wet to farm.';
+      if (c.t.point.y < c.g.world.terrain.waterAt(c.t.point.x, c.t.point.z) + 0.1) return 'Too wet to farm.';
       if (c.g.world.near(c.t.point.x, c.t.point.z, 1.5).some((o) => o.kind === 'tree' && Math.hypot(o.x - c.t.point.x, o.z - c.t.point.z) < 1.2)) return 'Tree roots are in the way.';
       return null;
     },

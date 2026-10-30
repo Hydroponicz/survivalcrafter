@@ -12,7 +12,7 @@ export class Sky {
   hemi = new THREE.HemisphereLight(0xc8dcff, 0x5a4a32, 1.0);
   private sunDisc: THREE.Mesh;
   private stars: THREE.Points;
-  private water: THREE.Mesh;
+  readonly water: THREE.Mesh;
   private waterTex: THREE.Texture;
   private bg = new THREE.Color();
 

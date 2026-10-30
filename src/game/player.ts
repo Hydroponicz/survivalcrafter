@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { ToolKind } from '../data/items';
 import { pieceBoxes, STRUCTURES } from '../data/structures';
 import { buildToolMesh, swingPose, type SwingKind } from './tools';
-import { WATER_LEVEL, Y_MIN, type Terrain } from '../world/terrain';
+import { Y_MIN, type Terrain } from '../world/terrain';
 import { toLocal, type World } from '../world/world';
 import type { Input } from './input';
 
@@ -27,6 +27,8 @@ export class Player {
   pitch = -0.1;
   onGround = false;
   swimming = false;
+  /** Feet in water but not deep enough to swim. */
+  wading = false;
   cameraMode: CameraMode = 'first';
   camDist = 4.5;
   moving = false;
@@ -206,7 +208,7 @@ export class Player {
         const x = this.pos.x + Math.cos(a) * r, z = this.pos.z + Math.sin(a) * r;
         if (x < 1 || z < 1 || x > t.size - 1 || z > t.size - 1) continue;
         const y = t.heightAt(x, z);
-        if (y < WATER_LEVEL) continue;
+        if (y < t.waterAt(x, z)) continue;
         if (this.penetration(world, x, y + 0.05, z) === 0) return new THREE.Vector3(x, y + 0.05, z);
       }
     }
@@ -235,6 +237,7 @@ export class Player {
     this.moving = len > 0;
     this.sprinting = this.moving && k.has('ShiftLeft') && this.stamina > 5 && !this.swimming;
     let speed = this.swimming ? 2.2 : this.sprinting ? 6.5 : 3.6;
+    if (this.wading) speed *= 0.6;
     if (overweight > 0) speed *= Math.max(0.15, 1 - overweight / 40);
     if (this.stamina <= 0) speed *= 0.6;
     if (busy) speed *= 0.5;
@@ -328,7 +331,10 @@ export class Player {
     // Vertical
     let ground = this.groundAt(world, this.pos.x, this.pos.y, this.pos.z).y;
     if (!Number.isFinite(ground)) ground = Y_MIN;
-    const swimLevel = WATER_LEVEL - 1.25;
+    const surface = world.terrain.waterAt(this.pos.x, this.pos.z);
+    const swimLevel = surface - 1.25;
+    // Wading through a stream or the shallows is slow going.
+    this.wading = !this.swimming && this.pos.y < surface - 0.25;
     this.swimming = ground < swimLevel && this.pos.y <= swimLevel + 0.05;
     if (this.swimming) {
       this.vel.y = 0;

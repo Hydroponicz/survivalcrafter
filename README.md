@@ -59,6 +59,10 @@ Toggles are remembered per browser; a purple **DEV** badge shows while any cheat
 - **Weathered, eroded landscapes.** Each world is shaped by simulated rain: ~90,000 droplets run
   downhill, carving gullies into the mountains and laying sediment along valley floors. Soil is thick
   where sediment settled and thin where water stripped it; clay lines the well-watered valley bottoms.
+- **Rivers and lakes.** Drainage is worked out for the whole island: streams start where enough rain
+  gathers, join into rivers that carve their channels down to the sea, and basins fill into lakes deep
+  enough to swim in. River beds are sand and grit, lake beds silty clay, and the banks are where you dig
+  clay. Drink from any of them; wading through a stream slows you down.
 - **Voxel terrain you can reshape anywhere.** The world is a smooth voxel landscape (Surface Nets on a
   1 m grid, like Enshrouded). With a shovel you **dig**, **raise**, **smooth** and **level ground to your
   feet** (Valheim-style); a pickaxe mines rock in any direction, so you can tunnel into hills, find caves

@@ -1,7 +1,7 @@
 import { type Item } from '../data/items';
 import { pieceBoxes, STRUCTURES, type V3 } from '../data/structures';
 import { mulberry32, Simplex } from './noise';
-import { Mat, Terrain, WATER_LEVEL, WORLD_SIZE } from './terrain';
+import { Mat, Terrain, WORLD_SIZE } from './terrain';
 
 export type Species = 'oak' | 'birch' | 'pine';
 export type AnimalSpecies = 'deer' | 'boar';
@@ -187,7 +187,7 @@ export class World {
       for (let x = 4; x < WORLD_SIZE - 4; x += 2) {
         const px = x + rng() * 2, pz = z + rng() * 2;
         const h = t.heightAt(px, pz);
-        if (h < WATER_LEVEL + 0.5) continue;
+        if (h < t.waterAt(px, pz) + 0.5) continue;
         if (t.surfaceMaterial(px, pz) !== Mat.Grass) continue;
         const f = forest.fbm(px * 0.02, pz * 0.02, 3);
         const density = f > 0.15 ? 0.3 : f > -0.1 ? 0.055 : 0.011;

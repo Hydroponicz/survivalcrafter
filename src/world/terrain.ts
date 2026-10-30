@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { hash2, Simplex } from './noise';
 import { erode } from './erosion';
+import { hydrology } from './hydrology';
 
 // Voxel terrain. Density lives on a 1 m grid of points (0..255, solid at >= 128)
 // and is meshed with Surface Nets, so the ground is smooth like Enshrouded but
@@ -56,6 +57,10 @@ export class Terrain {
   seed: number;
   /** Water that drained through each column during erosion (for rivers and reading the land). */
   flow: Float32Array = new Float32Array(PX * PZ);
+  /** Fresh water surface per column (NaN where dry): rivers and lakes. */
+  water: Float32Array = new Float32Array(PX * PZ).fill(NaN);
+  /** 1 where a column is part of a lake (vs. a river). */
+  lake: Uint8Array = new Uint8Array(PX * PZ);
 
   group = new THREE.Group();
   private meshes = new Map<number, THREE.Mesh>();
@@ -139,6 +144,76 @@ export class Terrain {
   }
 
   /** Material of the top surface at a column. */
+  /** Height of the water surface at a point: a river or lake if there is one, else the sea. */
+  waterAt(x: number, z: number): number {
+    const ix = Math.max(0, Math.min(PX - 1, Math.round(x))), iz = Math.max(0, Math.min(PZ - 1, Math.round(z)));
+    const w = this.water[iz * PX + ix];
+    return Number.isNaN(w) ? WATER_LEVEL : Math.max(WATER_LEVEL, w);
+  }
+
+  /** Is there fresh (river or lake) water at this column? */
+  freshWaterAt(x: number, z: number): boolean {
+    const ix = Math.max(0, Math.min(PX - 1, Math.round(x))), iz = Math.max(0, Math.min(PZ - 1, Math.round(z)));
+    return !Number.isNaN(this.water[iz * PX + ix]);
+  }
+
+  /**
+   * A mesh of the river and lake surfaces. Each grid vertex takes its own
+   * water height, or its wet neighbours' where it's on the bank, so the
+   * surface tucks under the banks; steep reaches become little rapids.
+   */
+  waterMesh(material: THREE.Material): THREE.Mesh {
+    // Spread the surface two cells out under the banks; the ground hides
+    // what's beneath it and draws a clean shoreline where it dips below.
+    let V = this.water.slice();
+    for (let ring = 0; ring < 2; ring++) {
+      const next = V.slice();
+      for (let z = 0; z < PZ; z++) {
+        for (let x = 0; x < PX; x++) {
+          const i = z * PX + x;
+          if (!Number.isNaN(V[i])) continue;
+          let sum = 0, cnt = 0;
+          for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+            const nx = x + dx, nz = z + dz;
+            if (nx < 0 || nz < 0 || nx >= PX || nz >= PZ) continue;
+            const w = V[nz * PX + nx];
+            if (!Number.isNaN(w)) { sum += w; cnt++; }
+          }
+          // Dip under the bank so water and ground cross steeply (a crisp edge).
+          if (cnt) next[i] = sum / cnt - 0.25;
+        }
+      }
+      V = next;
+    }
+    const pos: number[] = [], uv: number[] = [], idx: number[] = [];
+    const vid = new Int32Array(PX * PZ).fill(-1);
+    const vert = (x: number, z: number) => {
+      const i = z * PX + x;
+      if (vid[i] < 0) {
+        vid[i] = pos.length / 3;
+        pos.push(x, V[i] - 0.04, z);
+        uv.push(x / (WORLD_SIZE * 3), z / (WORLD_SIZE * 3));
+      }
+      return vid[i];
+    };
+    for (let z = 0; z < PZ - 1; z++) {
+      for (let x = 0; x < PX - 1; x++) {
+        const i = z * PX + x;
+        if (Number.isNaN(V[i]) || Number.isNaN(V[i + 1]) || Number.isNaN(V[i + PX]) || Number.isNaN(V[i + PX + 1])) continue;
+        const a = vert(x, z), b = vert(x + 1, z), c = vert(x, z + 1), d = vert(x + 1, z + 1);
+        idx.push(a, c, b, b, c, d);
+      }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    geo.setIndex(idx);
+    geo.computeVertexNormals();
+    const mesh = new THREE.Mesh(geo, material);
+    mesh.receiveShadow = true;
+    return mesh;
+  }
+
   surfaceMaterial(x: number, z: number): Mat {
     return this.materialAt(x, this.heightAt(x, z) - 0.3, z);
   }
@@ -227,6 +302,10 @@ export class Terrain {
     // Weather it: rain carves gullies and valleys and lays down sediment.
     const { deposit, flow } = erode(H, PX, this.seed, WATER_LEVEL);
     this.flow = flow;
+    // Rivers and lakes: drainage carves channels and fills basins.
+    const hyd = hydrology(H, PX, WATER_LEVEL);
+    this.water = hyd.water;
+    for (let i = 0; i < hyd.kind.length; i++) this.lake[i] = hyd.kind[i] === 2 ? 1 : 0;
     const hAt = (x: number, z: number) => H[Math.max(0, Math.min(PZ - 1, z)) * PX + Math.max(0, Math.min(PX - 1, x))];
     for (let z = 0; z < PZ; z++) {
       for (let x = 0; x < PX; x++) {
@@ -242,7 +321,16 @@ export class Terrain {
         if (slope > 1.1) soil = 0;
         else if (slope > 0.75) soil *= (1.1 - slope) / 0.35;
         let top: Mat = Mat.Grass;
-        if (soil < 0.4) top = Mat.Rock;
+        const wl = hyd.water[i2];
+        if (!Number.isNaN(wl) && h < wl) {
+          // Lake beds are silty clay; river beds are washed sand and grit.
+          top = this.lake[i2] ? Mat.Clay : Mat.Sand;
+          soil = Math.max(soil, 1.2);
+        } else if (hyd.bank[i2] && slope < 0.9 && n2.noise(x * 0.15, z * 0.15) > 0.05) {
+          // Clay along the banks: where you dig for pottery.
+          top = Mat.Clay;
+          soil = Math.max(soil, 1.2);
+        } else if (soil < 0.4) top = Mat.Rock;
         else if (h < 1.2) top = n2.noise(x * 0.06, z * 0.06) > 0.35 && h > -2 ? Mat.Clay : Mat.Sand;
         // Fine silt settles along well-watered valley floors: that's where clay is.
         else if (h < 8 && wet > CLAY_FLOW && dep > 0.15 && slope < 0.4) top = Mat.Clay;
@@ -437,7 +525,7 @@ export class Terrain {
   randomTick() {
     const x = 1 + Math.floor(Math.random() * (PX - 2)), z = 1 + Math.floor(Math.random() * (PZ - 2));
     const h = this.heights[z * PX + x];
-    if (h < WATER_LEVEL + 0.3) return;
+    if (h < this.waterAt(x, z) + 0.3) return;
     const y = Math.floor(h);
     const i = this.idx(x, y - Y_MIN, z);
     if (this.mat[i] !== Mat.Dirt) return;
@@ -558,7 +646,7 @@ export class Terrain {
           const wx = gx + fx, wy = gy + fy, wz = gz + fz;
           const col3 = LIN[m] ?? LIN[Mat.Dirt];
           const j = 0.88 + hash2(Math.floor(wx * 3), Math.floor(wz * 3) + Math.floor(wy * 7), 3) * 0.24;
-          const wet = wy < WATER_LEVEL + 0.25 ? 0.72 : 1;
+          const wet = wy < this.waterAt(wx, wz) + 0.25 ? 0.72 : 1;
           pos.push(wx, wy, wz);
           nor.push(nx, ny, nz);
           col.push(col3[0] * j * wet, col3[1] * j * wet, col3[2] * j * wet);

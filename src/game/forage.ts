@@ -1,7 +1,7 @@
 import { FORAGE, FORAGE_SPECIES, LEARN_BY_HANDLING, type Biome } from '../data/forage';
 import { isIdentified, knownSpecies, learnSpecies, setKnownSpecies } from '../data/items';
 import { mulberry32 } from '../world/noise';
-import { Mat, WATER_LEVEL, WORLD_SIZE } from '../world/terrain';
+import { Mat, WORLD_SIZE } from '../world/terrain';
 import type { ForageObj, World } from '../world/world';
 
 // Foraging reads the land: plants, fungi, branches and pebbles lie on the ground
@@ -38,7 +38,7 @@ export function biomeAt(world: World, x: number, y: number, z: number, mat: Mat)
         if (o.kind === 'tree' && o.age > 0.4 && Math.hypot(o.x - x, o.z - z) < 6) trees++;
       }
       if (trees >= 2) return 'forest';
-      if (y < WATER_LEVEL + 1.2) return 'wetland';
+      if (y < world.terrain.waterAt(x, z) + 1.2) return 'wetland';
       return 'meadow';
     }
     default:
@@ -68,7 +68,7 @@ function trySpawn(world: World, x: number, z: number, rnd: () => number): Forage
   const t = world.terrain;
   if (x < 2 || z < 2 || x > WORLD_SIZE - 2 || z > WORLD_SIZE - 2) return undefined;
   const y = t.heightAt(x, z);
-  if (y < WATER_LEVEL + 0.15) return undefined;
+  if (y < t.waterAt(x, z) + 0.15) return undefined;
   const n = t.normalAt(x, y - 0.05, z);
   if (n.y < 0.7) return undefined; // nothing settles on a cliff face
   const mat = t.materialAt(x, y - 0.05, z);

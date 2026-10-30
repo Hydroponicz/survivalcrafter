@@ -4,7 +4,7 @@ import type { Recipe, StationKind } from '../data/recipes';
 import { SKILLS, Skills, type SkillId } from '../data/skills';
 import { pieceBoxes, STRUCTURES, type StructureDef, type V3 } from '../data/structures';
 import { anvilGrade } from './smithy';
-import { Mat, WATER_LEVEL, type Volumes } from '../world/terrain';
+import { Mat, type Volumes } from '../world/terrain';
 import { forageHeight, forageScale } from '../world/forageProps';
 import { buildPieceMesh, WorldView } from '../world/view';
 import {
@@ -157,6 +157,8 @@ export class Game {
     this.scene.add(this.view.group);
     this.scene.add(this.player.model);
     this.sky = new Sky(this.scene, world.terrain.size);
+    // Rivers and lakes share the sea's water material (and its ripples).
+    this.scene.add(world.terrain.waterMesh(this.sky.water.material as THREE.Material));
 
     const ring = (opacity: number) => new THREE.LineLoop(
       new THREE.BufferGeometry().setFromPoints(Array.from({ length: 48 }, () => new THREE.Vector3())),
@@ -918,7 +920,7 @@ export class Game {
         const nx = a.x + a.dirX * a.speed * dt;
         const nz = a.z + a.dirZ * a.speed * dt;
         const h = t.heightAt(nx, nz);
-        if (h < WATER_LEVEL + 0.2 || nx < 2 || nz < 2 || nx > maxXZ || nz > maxXZ || w.blockedAt(nx, h + 0.6, nz) ||
+        if (h < w.terrain.waterAt(nx, nz) + 0.2 || nx < 2 || nz < 2 || nx > maxXZ || nz > maxXZ || w.blockedAt(nx, h + 0.6, nz) ||
           Math.abs(h - t.heightAt(a.x, a.z)) > a.speed * dt * 1.5) {
           // turn away from water or walls
           const ang = Math.atan2(a.dirZ, a.dirX) + Math.PI * (0.5 + Math.random());
@@ -981,7 +983,7 @@ export class Game {
         if (tooFar) return null;
         return { kind: 'terrain', point: p.clone(), normal: t.normalAt(p.x, p.y, p.z), mat: t.materialAt(p.x, p.y, p.z) };
       }
-      if (!tooFar && p.y < WATER_LEVEL) return { kind: 'water', point: p.clone() };
+      if (!tooFar && p.y < t.waterAt(p.x, p.z)) return { kind: 'water', point: p.clone() };
     }
     return null;
   }
@@ -1124,7 +1126,7 @@ export class Game {
       if (o.kind === 'tree' && o.age > 0.2 && pointInPiece(probe, o.x, this.world.terrain.heightAt(o.x, o.z) + 0.5, o.z, 0.3)) { valid = false; reason = 'A tree is in the way.'; }
       if (o.kind === 'structure' && o.type === def.id && Math.hypot(o.x - x, o.y - y, o.z - z) < 0.15) { valid = false; reason = 'There is already one there.'; }
     }
-    if (!def.snap && y < WATER_LEVEL - 0.3) { valid = false; reason = 'That spot is under water.'; }
+    if (!def.snap && y < this.world.terrain.waterAt(x, z) - 0.3) { valid = false; reason = 'That spot is under water.'; }
 
     const g = this.ghost!;
     g.visible = true;
