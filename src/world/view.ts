@@ -338,7 +338,7 @@ export class WorldView implements WorldListener {
 
   private structureMesh(o: StructureObj): THREE.Object3D {
     const def = STRUCTURES[o.type];
-    const g = buildPieceMesh(o.type, { lit: o.lit, open: o.open });
+    const g = buildPieceMesh(o.type, { lit: o.lit, open: o.open, water: o.water });
     g.position.set(o.x, o.y, o.z);
     g.rotation.y = o.yaw;
     g.traverse((c) => { if (c instanceof THREE.Mesh && c.userData.flame) this.flames.add(c); });
@@ -450,7 +450,7 @@ const WOOD = 0x8a6440, DARK_WOOD = 0x6e4e30, STONE = 0x8a8782;
  * Meshes for a building piece in its local frame (origin at bottom centre).
  * Shared by placed pieces and the placement ghost.
  */
-export function buildPieceMesh(type: string, state: { lit?: boolean; open?: boolean } = {}): THREE.Group {
+export function buildPieceMesh(type: string, state: { lit?: boolean; open?: boolean; water?: number } = {}): THREE.Group {
   const g = new THREE.Group();
   const add = (geo: THREE.BufferGeometry, color: number, x = 0, y = 0, z = 0, extra?: THREE.MeshStandardMaterialParameters, parent: THREE.Object3D = g) => {
     const m = new THREE.Mesh(geo, mat(color, extra));
@@ -558,6 +558,46 @@ export function buildPieceMesh(type: string, state: { lit?: boolean; open?: bool
       add(new THREE.BoxGeometry(0.6, 0.55, 0.5), STONE, 0, 0.27, 0, { flatShading: true });
       add(new THREE.BoxGeometry(1.0, 0.25, 0.45), 0x77746f, 0, 0.67, 0, { flatShading: true });
       break;
+    case 'iron_anvil': {
+      const IRON = 0x4a4d52;
+      const metal = { metalness: 0.6, roughness: 0.45 };
+      add(new THREE.CylinderGeometry(0.28, 0.34, 0.45, 8), DARK_WOOD, 0, 0.22, 0); // stump base
+      add(new THREE.BoxGeometry(0.34, 0.14, 0.26), IRON, 0, 0.52, 0, metal);
+      add(new THREE.BoxGeometry(0.6, 0.12, 0.3), IRON, -0.04, 0.65, 0, metal);
+      const horn = add(new THREE.ConeGeometry(0.075, 0.32, 10), IRON, 0.41, 0.66, 0, metal);
+      horn.rotation.z = -Math.PI / 2;
+      add(new THREE.BoxGeometry(0.58, 0.01, 0.28), 0x8d9096, -0.04, 0.715, 0, { metalness: 0.8, roughness: 0.25 }); // worn face
+      break;
+    }
+    case 'bellows': {
+      // Nozzle points along +Z, into the forge it's set against.
+      for (const x of [-0.22, 0.22]) add(new THREE.BoxGeometry(0.06, 0.32, 0.06), DARK_WOOD, x, 0.16, -0.1);
+      add(new THREE.BoxGeometry(0.5, 0.05, 0.1), DARK_WOOD, 0, 0.3, -0.1);
+      const body = new THREE.Group();
+      body.position.set(0, 0.42, -0.05);
+      body.rotation.x = -0.25;
+      g.add(body);
+      add(new THREE.BoxGeometry(0.46, 0.035, 0.7), WOOD, 0, 0, 0, undefined, body);
+      add(new THREE.BoxGeometry(0.44, 0.035, 0.68), WOOD, 0, 0.17, -0.02, undefined, body);
+      const leather = add(new THREE.CylinderGeometry(0.2, 0.24, 0.62, 10, 1, true), 0x5a3a24, 0, 0.085, -0.03, { side: THREE.DoubleSide }, body);
+      leather.rotation.x = Math.PI / 2;
+      leather.scale.set(1, 1, 0.42);
+      const nozzle = add(new THREE.CylinderGeometry(0.03, 0.05, 0.3, 8), 0x3a3a3c, 0, 0.06, 0.48, { metalness: 0.5 }, body);
+      nozzle.rotation.x = Math.PI / 2;
+      add(new THREE.CylinderGeometry(0.02, 0.02, 0.36, 6), DARK_WOOD, 0, 0.2, -0.45, undefined, body).rotation.z = Math.PI / 2;
+      break;
+    }
+    case 'quench_trough': {
+      add(new THREE.BoxGeometry(1.2, 0.06, 0.6), DARK_WOOD, 0, 0.05, 0);
+      for (const z of [-0.27, 0.27]) add(new THREE.BoxGeometry(1.2, 0.45, 0.06), WOOD, 0, 0.27, z);
+      for (const x of [-0.57, 0.57]) add(new THREE.BoxGeometry(0.06, 0.45, 0.6), 0x80603e, x, 0.27, 0);
+      const level = Math.min(1, (state.water ?? 0) / 4);
+      if (level > 0) {
+        const w = add(new THREE.BoxGeometry(1.08, 0.36 * level, 0.48), 0x3f6f8a, 0, 0.08 + 0.18 * level, 0, { transparent: true, opacity: 0.8, roughness: 0.15 });
+        w.castShadow = false;
+      }
+      break;
+    }
     case 'quern':
       add(new THREE.CylinderGeometry(0.55, 0.6, 0.3, 12), STONE, 0, 0.15, 0);
       add(new THREE.CylinderGeometry(0.5, 0.5, 0.25, 12), 0x9a9792, 0, 0.42, 0);

@@ -4,7 +4,13 @@
 export type FoodEffect = 'nausea' | 'poison' | 'severe_poison' | 'heal' | 'refresh' | 'soothe';
 
 export type ToolKind =
-  | 'knife' | 'hatchet' | 'pickaxe' | 'shovel' | 'hammer' | 'saw' | 'scythe' | 'weapon';
+  | 'knife' | 'hatchet' | 'pickaxe' | 'shovel' | 'hammer' | 'saw' | 'scythe' | 'weapon' | 'tongs' | 'crucible';
+
+/** What each tool kind is called in requirement messages. */
+export const TOOL_NAMES: Record<ToolKind, string> = {
+  knife: 'knife', hatchet: 'hatchet', pickaxe: 'pickaxe', shovel: 'shovel', hammer: 'hammer', saw: 'saw',
+  scythe: 'scythe', weapon: 'weapon', tongs: 'pair of tongs', crucible: 'crucible',
+};
 
 export interface ItemDef {
   id: string;
@@ -35,6 +41,8 @@ export interface ItemDef {
   fuel?: number; // seconds of burn time
   /** Items that cannot be carried (only exist on the ground). */
   noPickup?: boolean;
+  /** Heavy equipment you set down in the world as this structure (and can pick back up). */
+  places?: string;
 }
 
 const defs: ItemDef[] = [
@@ -72,11 +80,17 @@ const defs: ItemDef[] = [
   { id: 'iron_shovel', name: 'Iron shovel', icon: '🪏', weight: 2, tool: 'shovel', toolPower: 1.0, damage: 7, desc: 'Moves earth quickly.' },
   { id: 'saw', name: 'Saw', icon: '🪚', weight: 1.5, tool: 'saw', toolPower: 1.0, damage: 5, desc: 'Cuts logs into many planks.' },
   { id: 'scythe', name: 'Scythe', icon: '🌙', weight: 2.5, tool: 'scythe', toolPower: 1.0, damage: 10, desc: 'Harvests crops with a better yield.' },
+  { id: 'wooden_tongs', name: 'Green-wood tongs', icon: '🥢', weight: 0.5, tool: 'tongs', toolPower: 0.45,
+    desc: 'Two green sticks lashed at one end. They hold hot metal — for a while, before they char through.' },
+  { id: 'iron_tongs', name: 'Iron tongs', icon: '✂️', weight: 1, tool: 'tongs', toolPower: 1.0, desc: 'Proper smith\'s tongs for gripping hot iron and crucibles.' },
   { id: 'iron_sword', name: 'Iron sword', icon: '⚔️', weight: 2.5, tool: 'weapon', toolPower: 1.0, damage: 22, desc: 'A real weapon.' },
 
   // --- pottery & containers
   { id: 'clay_jar_unfired', name: 'Unfired clay jar', icon: '⚱️', weight: 2, desc: 'Needs to be fired in a lit fire.' },
   { id: 'clay_jar', name: 'Clay jar', icon: '🏺', weight: 1.5, desc: 'Fill it at the water\'s edge.' },
+  { id: 'crucible_unfired', name: 'Unfired crucible', icon: '⚱️', weight: 1.5, desc: 'A thick clay cup. Fire it in a lit fire before use.' },
+  { id: 'crucible', name: 'Crucible', icon: '🫙', weight: 1.2, tool: 'crucible', toolPower: 1.0,
+    desc: 'A fired clay cup that holds ore in the forge while it melts. Cracks a little with every melt.' },
   { id: 'jar_of_water', name: 'Jar of water', icon: '💧', weight: 3.5, food: { nutrition: 0, water: 35, returns: 'clay_jar' }, desc: 'Fresh water. Drink it or cook with it.' },
 
   // --- food
@@ -110,6 +124,16 @@ const defs: ItemDef[] = [
   { id: 'dough', name: 'Dough', icon: '🫓', weight: 0.8, food: { nutrition: 2 }, desc: 'Bake it over a fire.' },
   { id: 'bread', name: 'Bread', icon: '🍞', weight: 0.6, food: { nutrition: 30 }, desc: 'Fresh bread. The best food around.' },
 
+  // --- smithy equipment (crafted, carried, then placed)
+  { id: 'bellows', name: 'Bellows', icon: '🪗', weight: 8, places: 'bellows',
+    desc: 'Leather bellows on a wooden frame. Place it against a forge\'s side so the forge can get hot enough to smelt and smith. Better bellows heat faster and hold the heat steadier.' },
+  { id: 'stone_anvil', name: 'Stone anvil', icon: '🪨', weight: 30, places: 'anvil',
+    desc: 'A dressed block of hard stone to hammer metal on. Crude, but it works. Place it near your forge.' },
+  { id: 'iron_anvil', name: 'Iron anvil', icon: '⚒️', weight: 45, places: 'iron_anvil',
+    desc: 'A cast iron anvil with a flat face and a horn. Far more forgiving to work on than stone, and it lets your work reach higher quality.' },
+  { id: 'quench_trough', name: 'Quench trough', icon: '🛁', weight: 15, places: 'quench_trough',
+    desc: 'A clay-sealed plank trough. Fill it with water and quench freshly forged tools in it to harden them.' },
+
   // --- ground-only
   { id: 'corpse', name: 'Corpse', icon: '💀', weight: 80, noPickup: true, desc: 'Butcher it with a knife.' },
 ];
@@ -129,6 +153,10 @@ export interface Item {
   dmg: number; // 0..100, item breaks at 100
   /** Optional custom label, e.g. "deer corpse". */
   label?: string;
+  /** Freshly forged and still glowing: seconds until it has cooled in the air. */
+  hot?: number;
+  /** Hardened in a quench trough: wears more slowly. */
+  quenched?: boolean;
 }
 
 let nextUid = 1;
@@ -168,7 +196,8 @@ export function typeName(type: string): string {
 }
 
 export function itemName(it: Item): string {
-  return it.label ?? typeName(it.type);
+  const name = it.label ?? typeName(it.type);
+  return it.hot ? `Glowing ${name.toLowerCase()}` : name;
 }
 
 /** Description as the player currently knows it. */

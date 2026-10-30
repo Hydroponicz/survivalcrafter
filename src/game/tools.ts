@@ -96,6 +96,14 @@ export function buildToolMesh(kind: ToolKind | undefined, itemType?: string): TH
         add(new THREE.BoxGeometry(0.012, 0.62, 0.045), head, 0, 0.4, 0);
       }
       break;
+    case 'tongs': {
+      const m = itemType === 'wooden_tongs' ? wood : mat(0x3a3a3c, { metalness: 0.6, roughness: 0.5 });
+      for (const sx of [-1, 1]) add(new THREE.BoxGeometry(0.014, 0.5, 0.014), m, sx * 0.012, 0.18, 0, 0, 0, sx * 0.03);
+      break;
+    }
+    case 'crucible':
+      add(new THREE.CylinderGeometry(0.07, 0.055, 0.12, 10), mat(0x55504a), 0, 0.05, 0);
+      break;
   }
   return g;
 }

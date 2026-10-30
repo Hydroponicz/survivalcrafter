@@ -35,6 +35,10 @@ export interface StructureObj {
   fuel: number; lit: boolean;
   open?: boolean;
   items?: Item[];
+  /** Placed equipment remembers its wear for when it's picked back up. */
+  dmg?: number;
+  /** Jars of water in a trough. */
+  water?: number;
 }
 
 /** Something growing or lying on the ground that you can pick up (see data/forage). */
@@ -334,7 +338,11 @@ export class World {
     const w = new World(data.terrain.seed);
     w.terrain.generate();
     w.terrain.load(data.terrain);
-    for (const o of data.objects) w.add(o);
+    for (const o of data.objects) {
+      // Old saves planned anvils as buildings; they're placed equipment now.
+      if (o.kind === 'structure' && STRUCTURES[o.type]?.item && !o.built) { o.built = true; o.ql = Math.max(o.ql, 10); }
+      w.add(o);
+    }
     for (const [k, c] of data.crops as [number, Crop][]) w.crops.set(k, c);
     for (const a of data.animals) {
       const an = w.spawnAnimal(a.species, a.x, a.z);

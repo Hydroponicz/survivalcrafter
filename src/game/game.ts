@@ -2,12 +2,13 @@ import * as THREE from 'three';
 import { getNextUid, isIdentified, itemDef, itemName, learnSpecies, makeItem, setNextUid, type Item } from '../data/items';
 import type { Recipe, StationKind } from '../data/recipes';
 import { SKILLS, Skills, type SkillId } from '../data/skills';
-import { pieceBoxes, STRUCTURES, type StructureDef } from '../data/structures';
+import { pieceBoxes, STRUCTURES, type StructureDef, type V3 } from '../data/structures';
+import { anvilGrade } from './smithy';
 import { Mat, WATER_LEVEL, type Volumes } from '../world/terrain';
 import { forageHeight, forageScale } from '../world/forageProps';
 import { buildPieceMesh, WorldView } from '../world/view';
 import {
-  ANIMALS, pointInPiece, toWorld, World, type AnimalObj, type ForageObj, type PileObj, type StructureObj, type TreeObj, type WorldObj,
+  ANIMALS, pointInPiece, toLocal, toWorld, World, type AnimalObj, type ForageObj, type PileObj, type StructureObj, type TreeObj, type WorldObj,
 } from '../world/world';
 import {
   ACTION_MAP, ACTIONS, craftProblem, DIG_RADIUS, EARTH_PER_ITEM, LEVEL_RADIUS, type ActionDef, type Ctx, type Target,
@@ -58,6 +59,9 @@ interface PendingDrop { left: number; done: boolean; at: { x: number; z: number 
 
 export type MsgKind = 'info' | 'good' | 'fail' | 'warn' | 'skill';
 
+/** The smithy around you: a lit forge, the bellows set against it, your best anvil, a trough. */
+export interface Smithy { forge?: StructureObj; bellows?: StructureObj; anvil?: StructureObj; trough?: StructureObj }
+
 export interface Placement { def: StructureDef; valid: boolean; reason: string; x: number; y: number; z: number; yaw: number; snapped: boolean }
 
 export class Game {
@@ -88,6 +92,8 @@ export class Game {
   activeUid: number | null = null;
   hotbar: (string | null)[] = Array(9).fill(null);
   placing: StructureDef | null = null;
+  /** The equipment item being set down, when placing one rather than planning a building. */
+  placingItem: Item | null = null;
   placement: Placement | null = null;
   paused = false;
   private abandoned = false;
@@ -258,6 +264,7 @@ export class Game {
 
   /** Drop items in a pile on the ground below a point, merging with a pile already there. */
   dropToGround(items: Item[], x: number, y: number, z: number) {
+    for (const it of items) if (it.hot) { delete it.hot; this.msg(`The ${itemName(it).toLowerCase()} hisses and cools on the ground.`, 'info'); }
     const existing = this.world.near(x, z, 1.5).find((o) => o.kind === 'pile' && Math.hypot(o.x - x, o.z - z) < 1.2 && Math.abs(o.y - y) < 1.5) as PileObj | undefined;
     if (existing) {
       existing.items.push(...items);
@@ -338,6 +345,7 @@ export class Game {
       if (!it) continue;
       if (w + itemDef(it.type).weight > cap) { this.msg('The chest is full.', 'fail'); break; }
       this.inv.remove(u);
+      delete it.hot;
       s.items.push(it);
       w += itemDef(it.type).weight;
     }
@@ -485,24 +493,58 @@ export class Game {
   }
 
   stationNear(kind: StationKind): boolean {
+    // A forge only gets hot enough for metal with bellows blowing into it.
+    if (kind === 'forge') return !!this.smithy().bellows;
+    if (kind === 'anvil') return !!this.smithy().anvil;
     const p = this.player.pos;
     for (const o of this.world.near(p.x, p.z, 4)) {
       if (o.kind !== 'structure' || !o.built) continue;
       if (Math.hypot(o.x - p.x, o.z - p.z) > 4) continue;
       const st = STRUCTURES[o.type].station;
       if (kind === 'fire' && (st === 'fire' || st === 'forge') && o.lit) return true;
-      if (kind === 'forge' && st === 'forge' && o.lit) return true;
-      if (kind === st && kind !== 'fire' && kind !== 'forge') return true;
+      if (kind === st && kind !== 'fire') return true;
     }
     return false;
+  }
+
+  /** Bellows set against a forge's side. */
+  bellowsOf(forge: StructureObj): StructureObj | undefined {
+    return this.world.near(forge.x, forge.z, 2).find((o): o is StructureObj =>
+      o.kind === 'structure' && o.type === 'bellows' && Math.hypot(o.x - forge.x, o.z - forge.z) < 1.6 && Math.abs(o.y - forge.y) < 0.6);
+  }
+
+  smithy(): Smithy {
+    const p = this.player.pos;
+    const out: Smithy = {};
+    let anvilScore = -1;
+    for (const o of this.world.near(p.x, p.z, 4)) {
+      if (o.kind !== 'structure' || !o.built || Math.hypot(o.x - p.x, o.z - p.z) > 4) continue;
+      if (o.type === 'forge' && o.lit) {
+        const b = this.bellowsOf(o);
+        // Prefer a forge that has bellows.
+        if (!out.forge || (b && !out.bellows)) { out.forge = o; out.bellows = b; }
+      } else if (STRUCTURES[o.type].station === 'anvil') {
+        const score = anvilGrade(o);
+        if (score > anvilScore) { anvilScore = score; out.anvil = o; }
+      } else if (o.type === 'quench_trough' && (!out.trough || o.ql > out.trough.ql)) {
+        out.trough = o;
+      }
+    }
+    return out;
+  }
+
+  /** Is a forge lit nearby but missing its bellows? (For a helpful message.) */
+  forgeWithoutBellows(): boolean {
+    const s = this.smithy();
+    return !!s.forge && !s.bellows;
   }
 
   /** Best tool of a kind: the active item if it qualifies, else the best in the pack. */
   toolFor(kind: string | undefined): Item | undefined {
     if (!kind) return undefined;
     const a = this.activeItem();
-    if (a && itemDef(a.type).tool === kind) return a;
-    return this.inv.items.filter((i) => itemDef(i.type).tool === kind).sort((x, y) => y.ql - x.ql)[0];
+    if (a && !a.hot && itemDef(a.type).tool === kind) return a;
+    return this.inv.items.filter((i) => !i.hot && itemDef(i.type).tool === kind).sort((x, y) => y.ql - x.ql)[0];
   }
 
   // ---------- actions
@@ -543,6 +585,7 @@ export class Game {
   }
 
   private begin(def: ActionDef, ctx: Ctx): boolean {
+    if (ctx.tool?.hot && def.toolWear) { this.msg(`The ${itemName(ctx.tool).toLowerCase()} is too hot to work with. Quench it or let it cool.`, 'fail'); return false; }
     const problem = def.check?.(ctx) ?? null;
     if (problem) { this.msg(problem, 'fail'); return false; }
     const stamina = def.stamina ?? 0;
@@ -591,6 +634,7 @@ export class Game {
     const key = tutorialKey(spec);
     const runs = this.tutorials.count(key);
     const ease = Math.max(0.15, Math.min(1, 0.32 + (lvl - diff) / 50 + (power - 0.7) * 0.3 + (tool?.ql ?? 0) / 400 + (runs === 0 ? 0.3 : 0)));
+    // (Equipment like bellows and anvils helps through the spec's own `gear`.)
     if (!this.working && !this.reopen.length) this.reopen = this.ui.closeAllWindows();
     const label = typeof def.label === 'function' ? def.label(ctx) : def.label;
     const session = new MinigameSession(spec, ease, this.ui.root, (perf, secs) => this.endWork(perf, secs), label,
@@ -674,18 +718,26 @@ export class Game {
       }
     }
     this.player.stamina = Math.max(0, this.player.stamina - (def.stamina ?? 0));
-    if (tool && def.toolWear && !this.dev.on('noToolWear') && this.inv.find(tool.uid)) {
-      tool.dmg += def.toolWear * (1.5 - tool.ql / 100) * (0.5 + Math.random());
-      if (tool.dmg >= 100) {
-        this.inv.remove(tool.uid);
-        this.msg(`Your ${itemName(tool).toLowerCase()} breaks!`, 'warn');
-        this.inventoryChanged();
-      }
-    }
+    if (tool && def.toolWear) this.wear(tool, def.toolWear);
+    // Crude equipment limits how good the work can get.
+    const cap = def.qualityCap?.(ctx);
+    if (cap !== undefined) ql = Math.min(ql, cap);
     if (!atImpact) this.action = null;
-    def.run(ctx, { success, ql, toolQl });
+    def.run(ctx, { success, ql, toolQl, perf, cap });
     this.ui?.refresh();
     if (!atImpact) this.afterAction(def, ctx);
+  }
+
+  /** Wear a tool down (quenched tools resist); it breaks at 100 damage. */
+  wear(tool: Item, amount: number) {
+    if (this.dev.on('noToolWear') || !this.inv.find(tool.uid)) return;
+    const power = itemDef(tool.type).toolPower ?? 1;
+    tool.dmg += (amount * (1.5 - tool.ql / 100) * (0.5 + Math.random()) * (tool.quenched ? 0.6 : 1)) / Math.max(0.4, power);
+    if (tool.dmg >= 100) {
+      this.inv.remove(tool.uid);
+      this.msg(`Your ${itemName(tool).toLowerCase()} breaks!`, 'warn');
+      this.inventoryChanged();
+    }
   }
 
   /** After an action: start the next queued one, else repeat it while it still makes sense. */
@@ -984,12 +1036,29 @@ export class Game {
   // ---------- building placement (Valheim-style planning)
   startPlacing(def: StructureDef) {
     this.placing = def;
+    this.placingItem = null;
     this.player.wheelCaptured = true;
     this.msg(`Planning ${def.name.toLowerCase()}: left-click to place, mouse wheel or Q/E to rotate, right-click to stop.`, 'info');
   }
 
+  /** Set down a piece of equipment from your pack (bellows, anvil, trough…). */
+  startPlacingItem(it: Item) {
+    const type = itemDef(it.type).places;
+    if (!type) return;
+    if (this.working || this.action) return this.msg('Finish what you are doing first.', 'fail');
+    const def = STRUCTURES[type];
+    this.placing = def;
+    this.placingItem = it;
+    this.player.wheelCaptured = true;
+    this.ui.closeAllWindows();
+    this.msg(def.attach === 'forge'
+      ? 'Placing bellows: aim at the side of a forge to set them against it. Left-click to place, right-click to stop.'
+      : `Placing ${def.name.toLowerCase()}: left-click to set it down, mouse wheel or Q/E to rotate, right-click to stop.`, 'info');
+  }
+
   stopPlacing() {
     this.placing = null;
+    this.placingItem = null;
     this.placement = null;
     this.player.wheelCaptured = false;
     if (this.ghost) { this.scene.remove(this.ghost); this.ghost = null; this.ghostType = ''; }
@@ -1030,6 +1099,11 @@ export class Game {
       const snap = this.findSnap(def, pt, yaw);
       if (snap) ({ x, y, z, yaw } = snap), snapped = true;
     }
+    if (def.attach) {
+      const fit = this.attachSpot(def, pt);
+      if (fit) ({ x, y, z, yaw } = fit), snapped = true;
+      else { valid = false; reason = 'Bellows have to go against the side of a forge. Aim at a forge.'; }
+    }
     if (!snapped && hit.kind === 'terrain' && !def.snap && hit.normal.y < 0.75) { valid = false; reason = 'The ground is too steep here. Level it with a shovel.'; }
     if (!snapped && hit.kind === 'water') { valid = false; reason = 'You cannot build on water.'; }
     if (!snapped && hit.kind === 'object' && hit.obj.kind !== 'structure') { valid = false; reason = 'Something is in the way.'; }
@@ -1040,6 +1114,7 @@ export class Game {
       if (pointInPiece(probe, pp.x, pp.y + h, pp.z, 0.25)) { valid = false; reason = 'You are standing in the way.'; }
     }
     for (const o of this.world.near(x, z, 2)) {
+      if (def.attach && o.kind === 'structure' && o.type === def.id && Math.hypot(o.x - x, o.z - z) < 0.5) { valid = false; reason = 'There are already bellows on that side.'; }
       if (o.kind === 'tree' && o.age > 0.2 && pointInPiece(probe, o.x, this.world.terrain.heightAt(o.x, o.z) + 0.5, o.z, 0.3)) { valid = false; reason = 'A tree is in the way.'; }
       if (o.kind === 'structure' && o.type === def.id && Math.hypot(o.x - x, o.y - y, o.z - z) < 0.15) { valid = false; reason = 'There is already one there.'; }
     }
@@ -1052,6 +1127,31 @@ export class Game {
     const m = valid ? this.ghostMats.ok : this.ghostMats.bad;
     g.traverse((c) => { if (c instanceof THREE.Mesh) c.material = m; });
     this.placement = { def, valid, reason, x, y, z, yaw, snapped };
+  }
+
+  /**
+   * Where bellows would sit against the nearest forge: flush with whichever
+   * side faces where you're aiming, nozzle pointing in.
+   */
+  private attachSpot(def: StructureDef, aim: THREE.Vector3) {
+    let forge: StructureObj | undefined;
+    let best = 3;
+    for (const o of this.world.near(aim.x, aim.z, 3)) {
+      if (o.kind !== 'structure' || o.type !== def.attach || !o.built) continue;
+      const d = Math.hypot(o.x - aim.x, o.z - aim.z);
+      if (d < best) { best = d; forge = o; }
+    }
+    if (!forge) return null;
+    const fb = STRUCTURES[forge.type].boxes[0].h;
+    const depth = def.boxes[0].h[2];
+    const [lx, , lz] = toLocal(forge, aim.x, aim.y, aim.z);
+    // Pick the side by where the aim sits relative to the forge's footprint.
+    const side: V3 = Math.abs(lx) / fb[0] > Math.abs(lz) / fb[2] ? [Math.sign(lx) || 1, 0, 0] : [0, 0, Math.sign(lz) || 1];
+    const off = side[0] ? fb[0] + depth + 0.02 : fb[2] + depth + 0.02;
+    const [x, , z] = toWorld(forge, [side[0] * off, 0, side[2] * off]);
+    // Local +Z (the nozzle) points back into the forge.
+    const yaw = Math.atan2(forge.x - x, forge.z - z);
+    return { x, y: forge.y, z, yaw };
   }
 
   /** Top of whichever box of a piece contains a point. */
@@ -1116,6 +1216,27 @@ export class Game {
     const p = this.placement;
     if (!p) return;
     if (!p.valid) return this.msg(p.reason, 'fail');
+    const item = this.placingItem;
+    if (item) {
+      if (!this.inv.find(item.uid)) { this.stopPlacing(); return this.msg('You no longer have it.', 'fail'); }
+      this.inv.remove(item.uid);
+      if (this.activeUid === item.uid) this.activeUid = null;
+      this.inventoryChanged();
+      const placed = this.world.add<StructureObj>({
+        kind: 'structure', type: p.def.id, x: p.x, y: p.y, z: p.z, yaw: p.yaw,
+        consumed: {}, built: true, ql: item.ql, dmg: item.dmg, fuel: 0, lit: false,
+      });
+      if (p.def.water) placed.water = 0;
+      this.stopPlacing();
+      this.sound.glance(0.6);
+      const name = p.def.name.toLowerCase();
+      const forgeNear = this.world.near(p.x, p.z, 4).some((o) => o.kind === 'structure' && o.type === 'forge' && Math.hypot(o.x - p.x, o.z - p.z) < 4);
+      if (!p.def.attach && !forgeNear) this.msg('Tip: smithing needs the forge, anvil and trough all within reach of where you stand. Keep them close together.', 'info');
+      this.msg(p.def.attach ? `You set the bellows against the forge (QL ${placed.ql.toFixed(1)}). Now it can get hot enough for metal.`
+        : p.def.water ? `You set down the ${name}. Fill it with jars of water before quenching.`
+          : `You set down the ${name} (QL ${placed.ql.toFixed(1)}).`, 'good');
+      return;
+    }
     const s = this.world.add<StructureObj>({
       kind: 'structure', type: p.def.id, x: p.x, y: p.y, z: p.z, yaw: p.yaw,
       consumed: {}, built: false, ql: 0, fuel: 0, lit: false,
@@ -1289,6 +1410,18 @@ export class Game {
       p.health -= dt * 0.5;
     } else if (p.food > 30 && p.water > 30 && !fx.poisoned) {
       p.health = Math.min(100, p.health + dt * 0.3);
+    }
+    // Fresh forgings cool off unless you quench them (not while you're at work).
+    if (!this.working) {
+      for (const it of this.inv.items) {
+        if (it.hot === undefined) continue;
+        it.hot -= dt;
+        if (it.hot <= 0) {
+          delete it.hot;
+          this.msg(`Your ${itemName(it).toLowerCase()} has cooled in the air without being quenched.`, 'info');
+          this.inventoryChanged();
+        }
+      }
     }
     if (this.dev.on('noNeeds')) { p.food = 100; p.water = 100; p.stamina = 100; }
     if (this.dev.on('godMode')) p.health = 100;

@@ -5,7 +5,7 @@ export type StationKind = 'fire' | 'forge' | 'anvil' | 'workbench' | 'quern';
 
 export const STATION_NAMES: Record<StationKind, string> = {
   fire: 'a lit fire',
-  forge: 'a lit forge',
+  forge: 'a lit forge with bellows',
   anvil: 'an anvil',
   workbench: 'a workbench',
   quern: 'a quern',
@@ -22,6 +22,8 @@ export interface Recipe {
   stations?: StationKind[];
   inputs: { item: string; count: number }[];
   output: { item: string; count: number };
+  /** Tools that must be in your pack (not held), e.g. tongs and a crucible. */
+  needs?: ToolKind[];
   /** Items handed back after crafting (e.g. the empty jar). */
   returns?: { item: string; count: number }[];
 }
@@ -69,32 +71,53 @@ export const RECIPES: Recipe[] = [
 
   // --- metal
   { id: 'smelt_iron', name: 'Smelt iron ore', category: 'Smithing', skill: 'smithing', difficulty: 10, time: 15,
-    stations: ['forge'], inputs: [{ item: 'iron_ore', count: 1 }], output: { item: 'iron_lump', count: 1 } },
+    stations: ['forge'], needs: ['crucible', 'tongs'], inputs: [{ item: 'iron_ore', count: 1 }], output: { item: 'iron_lump', count: 1 } },
   { id: 'iron_knife', name: 'Carving knife', category: 'Smithing', skill: 'smithing', difficulty: 15, time: 15,
-    tool: 'hammer', stations: ['forge', 'anvil'],
+    tool: 'hammer', stations: ['forge', 'anvil'], needs: ['tongs'],
     inputs: [{ item: 'iron_lump', count: 1 }, { item: 'shaft', count: 1 }], output: { item: 'iron_knife', count: 1 } },
   { id: 'iron_hatchet', name: 'Iron hatchet', category: 'Smithing', skill: 'smithing', difficulty: 18, time: 18,
-    tool: 'hammer', stations: ['forge', 'anvil'],
+    tool: 'hammer', stations: ['forge', 'anvil'], needs: ['tongs'],
     inputs: [{ item: 'iron_lump', count: 2 }, { item: 'shaft', count: 1 }], output: { item: 'iron_hatchet', count: 1 } },
   { id: 'iron_pickaxe', name: 'Iron pickaxe', category: 'Smithing', skill: 'smithing', difficulty: 22, time: 20,
-    tool: 'hammer', stations: ['forge', 'anvil'],
+    tool: 'hammer', stations: ['forge', 'anvil'], needs: ['tongs'],
     inputs: [{ item: 'iron_lump', count: 3 }, { item: 'shaft', count: 1 }], output: { item: 'iron_pickaxe', count: 1 } },
   { id: 'iron_hammer', name: 'Iron hammer', category: 'Smithing', skill: 'smithing', difficulty: 14, time: 15,
-    tool: 'hammer', stations: ['forge', 'anvil'],
+    tool: 'hammer', stations: ['forge', 'anvil'], needs: ['tongs'],
     inputs: [{ item: 'iron_lump', count: 1 }, { item: 'shaft', count: 1 }], output: { item: 'iron_hammer', count: 1 } },
   { id: 'iron_shovel', name: 'Iron shovel', category: 'Smithing', skill: 'smithing', difficulty: 18, time: 18,
-    tool: 'hammer', stations: ['forge', 'anvil'],
+    tool: 'hammer', stations: ['forge', 'anvil'], needs: ['tongs'],
     inputs: [{ item: 'iron_lump', count: 2 }, { item: 'shaft', count: 1 }], output: { item: 'iron_shovel', count: 1 } },
   { id: 'saw', name: 'Saw', category: 'Smithing', skill: 'smithing', difficulty: 25, time: 20,
-    tool: 'hammer', stations: ['forge', 'anvil'],
+    tool: 'hammer', stations: ['forge', 'anvil'], needs: ['tongs'],
     inputs: [{ item: 'iron_lump', count: 2 }, { item: 'plank', count: 1 }], output: { item: 'saw', count: 1 } },
   { id: 'scythe', name: 'Scythe', category: 'Smithing', skill: 'smithing', difficulty: 25, time: 20,
-    tool: 'hammer', stations: ['forge', 'anvil'],
+    tool: 'hammer', stations: ['forge', 'anvil'], needs: ['tongs'],
     inputs: [{ item: 'iron_lump', count: 2 }, { item: 'shaft', count: 2 }], output: { item: 'scythe', count: 1 } },
   { id: 'iron_sword', name: 'Iron sword', category: 'Smithing', skill: 'smithing', difficulty: 30, time: 25,
-    tool: 'hammer', stations: ['forge', 'anvil'],
+    tool: 'hammer', stations: ['forge', 'anvil'], needs: ['tongs'],
     inputs: [{ item: 'iron_lump', count: 3 }, { item: 'plank', count: 1 }, { item: 'cordage', count: 1 }],
     output: { item: 'iron_sword', count: 1 } },
+
+  // --- smithy equipment
+  { id: 'wooden_tongs', name: 'Green-wood tongs', category: 'Smithy', skill: 'carpentry', difficulty: 4, time: 8,
+    tool: 'knife', inputs: [{ item: 'shaft', count: 2 }, { item: 'cordage', count: 1 }], output: { item: 'wooden_tongs', count: 1 } },
+  { id: 'crucible', name: 'Unfired crucible', category: 'Smithy', skill: 'pottery', difficulty: 7, time: 8,
+    inputs: [{ item: 'clay', count: 2 }, { item: 'sand', count: 1 }], output: { item: 'crucible_unfired', count: 1 } },
+  { id: 'fire_crucible', name: 'Fire crucible', category: 'Smithy', skill: 'pottery', difficulty: 9, time: 15,
+    stations: ['fire'], inputs: [{ item: 'crucible_unfired', count: 1 }], output: { item: 'crucible', count: 1 } },
+  { id: 'bellows', name: 'Bellows', category: 'Smithy', skill: 'carpentry', difficulty: 8, time: 14,
+    tool: 'hammer', inputs: [{ item: 'hide', count: 2 }, { item: 'plank', count: 2 }, { item: 'cordage', count: 2 }],
+    output: { item: 'bellows', count: 1 } },
+  { id: 'stone_anvil', name: 'Stone anvil', category: 'Smithy', skill: 'masonry', difficulty: 8, time: 14,
+    tool: 'hammer', inputs: [{ item: 'rock_shard', count: 12 }], output: { item: 'stone_anvil', count: 1 } },
+  { id: 'quench_trough', name: 'Quench trough', category: 'Smithy', skill: 'carpentry', difficulty: 8, time: 12,
+    tool: 'hammer', inputs: [{ item: 'plank', count: 5 }, { item: 'clay', count: 2 }], output: { item: 'quench_trough', count: 1 } },
+  { id: 'iron_tongs', name: 'Iron tongs', category: 'Smithy', skill: 'smithing', difficulty: 12, time: 14,
+    tool: 'hammer', stations: ['forge', 'anvil'], needs: ['tongs'],
+    inputs: [{ item: 'iron_lump', count: 1 }], output: { item: 'iron_tongs', count: 1 } },
+  { id: 'iron_anvil', name: 'Cast an iron anvil', category: 'Smithy', skill: 'smithing', difficulty: 20, time: 30,
+    stations: ['forge'], needs: ['crucible', 'tongs'],
+    inputs: [{ item: 'iron_lump', count: 8 }, { item: 'sand', count: 4 }], output: { item: 'iron_anvil', count: 1 } },
 
   // --- cooking
   { id: 'poultice', name: 'Yarrow poultice', category: 'Cooking', skill: 'herbalism', difficulty: 8, time: 6,

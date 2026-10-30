@@ -5,15 +5,18 @@ import { CrankGame, type CrankVariant } from './crank';
 import { CarveGame, CenterGame, HeatGame, PlaceGame, type HeatVariant, type PlaceVariant } from './shape';
 import { StrikeGame, type StrikeVariant } from './strike';
 import { BellowsGame, BowDrillGame, SawGame } from './stroke';
+import { PourGame, QuenchGame } from './smithy';
 import type { Input } from '../input';
 import { gestureHtml, tutorialFor, type Tutorial } from './tutorials';
 
 export type MinigameSpec =
   | { kind: 'saw'; cuts: number }
   | { kind: 'bowdrill' }
-  | { kind: 'bellows' }
+  | { kind: 'bellows'; gear?: number }
+  | { kind: 'pour'; gear?: number }
+  | { kind: 'quench'; gear?: number }
   | { kind: 'crank'; variant: CrankVariant; turns: number }
-  | { kind: 'strike'; variant: StrikeVariant; hits: number }
+  | { kind: 'strike'; variant: StrikeVariant; hits: number; gear?: number; heat?: number; iron?: boolean }
   | { kind: 'carve'; passes: number; wide?: boolean }
   | { kind: 'heat'; variant: HeatVariant }
   | { kind: 'place'; variant: PlaceVariant; count: number }
@@ -24,9 +27,11 @@ export function createMinigame(spec: MinigameSpec, ease: number): Minigame {
   switch (spec.kind) {
     case 'saw': return new SawGame(ease, spec.cuts);
     case 'bowdrill': return new BowDrillGame(ease);
-    case 'bellows': return new BellowsGame(ease);
+    case 'bellows': return new BellowsGame(ease, spec.gear);
+    case 'pour': return new PourGame(ease, spec.gear ?? 0.5);
+    case 'quench': return new QuenchGame(ease, spec.gear ?? 0.5);
     case 'crank': return new CrankGame(ease, spec.variant, spec.turns);
-    case 'strike': return new StrikeGame(ease, spec.variant, spec.hits);
+    case 'strike': return new StrikeGame(ease, spec.variant, spec.hits, { anvil: spec.gear, heat: spec.heat, iron: spec.iron });
     case 'carve': return new CarveGame(ease, spec.passes, spec.wide);
     case 'heat': return new HeatGame(ease, spec.variant);
     case 'place': return new PlaceGame(ease, spec.variant, spec.count);
@@ -61,6 +66,14 @@ export const RECIPE_MINIGAMES: Record<string, MinigameSpec> = {
   saw: { kind: 'strike', variant: 'forge', hits: 6 },
   scythe: { kind: 'strike', variant: 'forge', hits: 6 },
   iron_sword: { kind: 'strike', variant: 'forge', hits: 7 },
+  wooden_tongs: { kind: 'carve', passes: 2 },
+  crucible: { kind: 'center' },
+  fire_crucible: { kind: 'heat', variant: 'fire' },
+  bellows: { kind: 'strike', variant: 'nail', hits: 4 },
+  stone_anvil: { kind: 'strike', variant: 'knap', hits: 6 },
+  quench_trough: { kind: 'strike', variant: 'nail', hits: 4 },
+  iron_tongs: { kind: 'strike', variant: 'forge', hits: 4 },
+  iron_anvil: { kind: 'pour' },
   roast_mushroom: { kind: 'heat', variant: 'roast' },
   cooked_meat: { kind: 'heat', variant: 'roast' },
   bread: { kind: 'heat', variant: 'bake' },
@@ -90,6 +103,8 @@ export function minigameVerb(spec: MinigameSpec): string {
     case 'saw': return 'saw';
     case 'bowdrill': return 'bow drill';
     case 'bellows': return 'bellows';
+    case 'pour': return 'pour';
+    case 'quench': return 'quench';
     case 'crank': return { grind: 'grind', stir: 'stir', pound: 'pound' }[spec.variant];
     case 'cord': return 'twist and wrap';
     case 'strike': return { split: 'split', knap: 'knap', forge: 'hammer', nail: 'nail' }[spec.variant];

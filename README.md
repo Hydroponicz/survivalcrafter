@@ -90,8 +90,15 @@ Toggles are remembered per browser; a purple **DEV** badge shows while any cheat
   nail planks, lay stones and stack logs, and start fires with a bow drill. Performance sets most of the
   quality; skill makes the work more forgiving and caps the quality. At skill 10 above a task's difficulty
   you can Quick craft/build to skip the minigame at a quality cost. Right-click stops working.
+- **A smithy you set up yourself.** Bellows, anvils and a quench trough are crafted (hands-on) as heavy
+  items with their own quality, carried, and placed from your pack with a ghost preview; pick them back up
+  to move them. Bellows must sit against a forge's side or the forge can't get hot enough for metal.
+  Smelting needs a fired clay crucible and tongs; smithing needs an anvil in reach. Better bellows heat
+  faster and hold the band more easily, a better anvil widens the strike timing, and both cap the quality
+  you can reach (an iron anvil, cast from eight lumps, beats any stone one). Fresh forgings come out
+  glowing: quench them in the trough before they cool (dip, lift before the steel cracks) to harden them.
 - **Production chains.** Fiber → cordage → stone tools → logs → planks/shafts → shovel → clay → forge +
-  anvil → iron ore → lumps → iron tools. Fields → wheat → quern → flour + jar of water → dough → bread.
+  bellows + anvil + crucible + tongs → iron ore → lumps → iron tools → quench. Fields → wheat → quern → flour + jar of water → dough → bread.
 - **Survival.** Food, water, stamina and health. Fires need fuel and kindling. Boars fight back. Death
   drops your belongings where you fell; build a bed to set your home.
 

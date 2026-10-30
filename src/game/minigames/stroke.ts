@@ -211,10 +211,15 @@ export class BellowsGame extends Minigame {
   private crucible: THREE.Mesh;
   private fire = fireMesh();
   private band: [number, number];
+  /** How hard each pump blows, and how slowly the heat falls away (from the bellows' quality). */
+  private blow: number;
+  private loss: number;
 
-  constructor(ease: number) {
+  constructor(ease: number, gear = 0.5) {
     super(ease);
-    this.band = [0.58 - 0.1 * ease, 0.8 + 0.06 * ease];
+    this.band = [0.58 - 0.1 * ease - 0.05 * gear, 0.8 + 0.06 * ease + 0.04 * gear];
+    this.blow = 0.32 + 0.22 * gear;
+    this.loss = 0.13 - 0.04 * gear;
     const hearth = box(1.0, 0.5, 0.8, 0x6f665e, { flatShading: true });
     hearth.position.y = -0.25;
     this.scene.add(hearth);
@@ -249,11 +254,11 @@ export class BellowsGame extends Minigame {
   }
 
   update(dt: number, i: MgInput) {
-    this.heat = Math.max(0, this.heat - dt * 0.11);
+    this.heat = Math.max(0, this.heat - dt * this.loss);
     if (i.down && i.dy > 0) {
       const before = this.squeeze;
       this.squeeze = Math.min(1, this.squeeze + i.dy * 0.006);
-      this.heat += (this.squeeze - before) * 0.42;
+      this.heat += (this.squeeze - before) * this.blow;
     } else if (i.dy < 0 || !i.down) {
       this.squeeze = Math.max(0, this.squeeze + Math.min(0, i.dy) * 0.006 - (i.down ? 0 : dt * 1.5));
     }

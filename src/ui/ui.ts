@@ -1,7 +1,7 @@
-import { isIdentified, ITEMS, itemDef, itemName, typeDesc, type Item } from '../data/items';
+import { isIdentified, ITEMS, itemDef, itemName, TOOL_NAMES, typeDesc, type Item } from '../data/items';
 import { RECIPES, STATION_NAMES, type Recipe } from '../data/recipes';
 import { SKILLS, type SkillId } from '../data/skills';
-import { STRUCTURE_LIST, STRUCTURES, totalMaterials } from '../data/structures';
+import { BUILDABLE, STRUCTURES, totalMaterials } from '../data/structures';
 import { ACTION_MAP, craftProblem, forageName, type ActionDef, type Ctx, type Target } from '../game/actions';
 import { DEV_FLAGS, devCommands, type DevFlag } from '../game/dev';
 import { BIOME_NAMES, IDENTIFY } from '../data/forage';
@@ -335,7 +335,7 @@ export class UI {
     if (p.effects.poisoned) status.push(`<span class="bad">Poisoned ${Math.ceil(p.effects.poisoned.t)}s</span>`);
     if (p.effects.nauseous) status.push('<span class="warn">Nauseous</span>');
     if (p.effects.refreshed) status.push('<span class="good-text">Refreshed</span>');
-    if (g.placing) status.push(`Planning: ${g.placing.name} — LMB place · wheel or Q/E rotate · RMB stop${g.placement?.snapped ? ' · snapped' : ''}`);
+    if (g.placing) status.push(`${g.placingItem ? 'Placing' : 'Planning'}: ${g.placing.name} — LMB place · ${g.placing.attach ? 'aim at a forge side' : 'wheel or Q/E rotate'} · RMB stop${g.placement?.snapped ? ' · snapped' : ''}`);
     if (g.placement && !g.placement.valid) status.push(`<span class="warn">${esc(g.placement.reason)}</span>`);
     this.statusEl.innerHTML = status.join(' · ');
 
@@ -493,7 +493,7 @@ export class UI {
     const ql = items.length > 1 ? `QL ${items.at(-1)!.ql.toFixed(0)}–${best.ql.toFixed(0)}` : `QL ${best.ql.toFixed(1)}`;
     row.innerHTML = `<span class="icon">${def.icon}</span>
       <span class="name">${esc(itemName(best))}${items.length > 1 ? ` <b>×${items.length}</b>` : ''}
-        <small>${ql}${def.tool && best.dmg > 0 ? ` · dmg ${best.dmg.toFixed(1)}` : ''} · ${weight.toFixed(1)} kg</small></span>`;
+        <small>${ql}${def.tool && best.dmg > 0 ? ` · dmg ${best.dmg.toFixed(1)}` : ''}${best.quenched ? ' · hardened' : ''}${best.hot ? ` · <span class="warn">glowing, ${Math.ceil(best.hot)}s to quench</span>` : ''} · ${weight.toFixed(1)} kg</small></span>`;
     row.title = typeDesc(best.type);
     const btns = el('span', 'btns');
     for (const a of actions) {
@@ -531,6 +531,7 @@ export class UI {
       const isActive = grp.items.some((i) => i.uid === g.activeUid);
       actions.push({ label: isActive ? 'Unuse' : 'Use', fn: (it) => g.setActive(isActive ? null : it.uid) });
       if (def.food) actions.push({ label: def.food.verb ?? (def.food.nutrition || def.food.effect ? 'Eat' : 'Drink'), fn: (it) => g.eat(it.uid) });
+      if (def.places) actions.push({ label: 'Place', fn: (it) => g.startPlacingItem(it) });
       if (!isIdentified(grp.type)) actions.push({ label: 'Study', fn: (it) => g.request(ACTION_MAP.study, { g, t: { kind: 'none' }, item: it }) });
       if (chest) {
         actions.push({ label: 'Store', fn: (it) => g.putIntoContainer(chest, [it.uid]) });
@@ -615,6 +616,10 @@ export class UI {
     const reqs: string[] = [];
     if (r.tool) reqs.push(`<span class="${tool ? 'ok' : 'no'}">tool: ${r.tool}${tool ? ` (${esc(itemName(tool))})` : ''}</span>`);
     for (const s of r.stations ?? []) reqs.push(`<span class="${g.stationNear(s) ? 'ok' : 'no'}">near ${STATION_NAMES[s]}</span>`);
+    for (const k of r.needs ?? []) {
+      const t = g.toolFor(k);
+      reqs.push(`<span class="${t ? 'ok' : 'no'}">in pack: ${TOOL_NAMES[k]}${t ? ` (${esc(itemName(t))})` : ''}</span>`);
+    }
     const lvl = g.skills.get(r.skill);
     const chance = Math.round(g.skills.successChance(r.skill, r.difficulty, tool?.ql ?? 0) * 100);
     row.innerHTML = `
@@ -677,10 +682,10 @@ export class UI {
     const g = this.g;
     const body = el('div');
     body.appendChild(el('div', 'hint', 'Pick a piece to plan it: a ghost follows your aim and snaps to nearby walls, floors and roofs. Left-click to place plans (you can keep placing), wheel or Q/E rotates, right-click stops. Then build each plan with <b>Continue building</b> — it takes the listed materials, tool and skill.'));
-    const cats = [...new Set(STRUCTURE_LIST.map((d) => d.category))];
+    const cats = [...new Set(BUILDABLE.map((d) => d.category))];
     for (const cat of cats) {
       body.appendChild(el('h3', '', cat));
-      for (const def of STRUCTURE_LIST.filter((d) => d.category === cat)) {
+      for (const def of BUILDABLE.filter((d) => d.category === cat)) {
         const row = el('div', 'recipe');
         const mats = def.materials.map((m) => {
           const have = g.inv.count(m.item);
@@ -867,7 +872,7 @@ export class UI {
         <li>Craft <b>cordage</b> from fiber, then a <b>stone hatchet</b>, <b>stone pickaxe</b> and <b>stone hammer</b>.</li>
         <li>Fell trees for <b>logs</b> (heavy — they drop on the ground). Split them into <b>planks</b>; carve branches into <b>shafts</b>; make a <b>wooden shovel</b>.</li>
         <li>Plan a <b>campfire</b> (B), build it, add fuel, and light it with <b>kindling</b>. Cook mushrooms and meat; fire clay jars.</li>
-        <li>Dig <b>clay</b> by the water, build a <b>forge</b> and <b>stone anvil</b>, mine <b>iron ore</b>, smelt it, and smith iron tools.</li>
+        <li>Set up a <b>smithy</b>. Dig <b>clay</b> by the water and build a <b>forge</b> (B). Then craft its equipment (Crafting → Smithy) and <b>Place</b> it from your pack: <b>bellows</b> against the forge's side (without them it can't get hot enough for metal), a <b>stone anvil</b> nearby, and a <b>quench trough</b> filled with jars of water. You also need a fired <b>crucible</b> to smelt ore in and <b>tongs</b> to handle hot metal. Mine <b>iron ore</b>, smelt it, smith iron tools, and quench them while they're still glowing to harden them. Later, cast an <b>iron anvil</b>. Better equipment makes the work easier and raises the best quality you can reach. Equipment can be picked up and moved.</li>
         <li><b>Cultivate</b> fields with a shovel, <b>sow</b> wheat seeds, tend them, harvest, grind flour at a <b>quern</b>, and bake <b>bread</b>.</li>
         <li>Hunt deer and boar (careful — boars fight back), <b>butcher</b> them with a knife for meat and hides, and build a <b>bed</b> to set your home.</li>
       </ol>

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import { isIdentified, itemDef, itemName, learnSpecies, makeItem, typeDesc, typeName, type Item, type ToolKind } from '../data/items';
-import { STATION_NAMES, type Recipe } from '../data/recipes';
+import { isIdentified, itemDef, itemName, learnSpecies, makeItem, TOOL_NAMES, typeDesc, typeName, type Item, type ToolKind } from '../data/items';
+import { RECIPES, STATION_NAMES, type Recipe } from '../data/recipes';
 import { STRUCTURES, totalMaterials, type StructureDef } from '../data/structures';
 import type { SkillId } from '../data/skills';
 import { isSoft, Mat, MAT_NAMES, WATER_LEVEL, Y_MIN } from '../world/terrain';
@@ -12,6 +12,8 @@ import { BIOMES, biomeAt, type Biome } from './forage';
 import type { Game } from './game';
 import type { SwingKind } from './tools';
 import { buildStepMinigame, RECIPE_MINIGAMES, type MinigameSpec } from './minigames';
+import { CARRY_CAPACITY } from './inventory';
+import { anvilGrade, bellowsGrade, HOT_TIME, smithyCap } from './smithy';
 
 export type Target =
   | { kind: 'terrain'; point: THREE.Vector3; normal: THREE.Vector3; mat: Mat }
@@ -31,7 +33,13 @@ export interface Ctx {
   recipe?: Recipe;
 }
 
-export interface Outcome { success: boolean; ql: number; toolQl: number }
+export interface Outcome {
+  success: boolean; ql: number; toolQl: number;
+  /** How well the hands-on work went (0..1), if there was any. */
+  perf?: number;
+  /** The equipment's quality limit, if one applied. */
+  cap?: number;
+}
 
 export interface ActionDef {
   id: string;
@@ -56,6 +64,8 @@ export interface ActionDef {
   minigame?: (c: Ctx) => MinigameSpec | undefined;
   /** Always the quick, timed version (no minigame). */
   quick?: boolean;
+  /** Highest quality the work can reach with the equipment at hand. */
+  qualityCap?: (c: Ctx) => number | undefined;
   /** Re-queue automatically after completing, while still valid. */
   repeat?: boolean | ((c: Ctx) => boolean);
   run(c: Ctx, o: Outcome): void;
@@ -404,6 +414,13 @@ export const ACTIONS: ActionDef[] = [
     },
   },
 
+  {
+    id: 'place_item', label: (c) => `Place ${itemName(c.tool!).toLowerCase()} here`,
+    show: (c) => isGround(c) && !!c.tool && !!itemDef(c.tool.type).places,
+    time: 0,
+    run: (c) => c.g.startPlacingItem(c.tool!),
+  },
+
   // ===== water
   {
     id: 'drink', label: 'Drink',
@@ -585,7 +602,7 @@ export const ACTIONS: ActionDef[] = [
   },
   {
     id: 'demolish', label: 'Demolish',
-    show: (c) => { const s = obj(c, 'structure'); return !!s && s.built && (toolIs(c, 'hammer') || toolIs(c, 'hatchet')); },
+    show: (c) => { const s = obj(c, 'structure'); return !!s && s.built && !STRUCTURES[s.type].item && (toolIs(c, 'hammer') || toolIs(c, 'hatchet')); },
     time: 12, skill: 'carpentry', difficulty: 5, stamina: 15, toolWear: 0.2,
     run: (c) => {
       const s = obj(c, 'structure')!;
@@ -612,6 +629,12 @@ export const ACTIONS: ActionDef[] = [
       let extra = '';
       if (def.burns) extra = s.lit ? ` It is burning (${Math.ceil(s.fuel)}s of fuel left).` : ` It is cold. Fuel: ${Math.ceil(s.fuel)}s.`;
       if (def.container) extra = ` It holds ${(s.items ?? []).length} items.`;
+      if (def.water) extra = ` It holds ${(s.water ?? 0).toFixed(1)} of ${def.water} jars of water.`;
+      if (def.attach) {
+        const forge = c.g.world.near(s.x, s.z, 2).find((o) => o.kind === 'structure' && o.type === 'forge' && c.g.bellowsOf(o) === s);
+        extra = forge ? ' It is set against a forge.' : ' It is not against a forge, so it does nothing here.';
+      }
+      if (def.station === 'anvil') extra = ` Working on it: ${Math.round(anvilGrade(s) * 100)}% as forgiving as the finest iron anvil.`;
       c.g.msg(`${def.name}, QL ${s.ql.toFixed(1)}. ${def.desc}${extra}`, 'info');
     },
   },
@@ -667,6 +690,82 @@ export const ACTIONS: ActionDef[] = [
       const s = obj(c, 'structure')!;
       s.open = !s.open;
       c.g.world.changed(s);
+    },
+  },
+  {
+    id: 'pick_up', label: (c) => `Pick up ${STRUCTURES[obj(c, 'structure')!.type].name.toLowerCase()}`,
+    show: (c) => { const s = obj(c, 'structure'); return !!s && s.built && !!STRUCTURES[s.type].item; },
+    check: (c) => {
+      const w = itemDef(STRUCTURES[obj(c, 'structure')!.type].item!).weight;
+      if (!c.g.dev.on('noWeight') && c.g.inv.weight() + w > CARRY_CAPACITY * 1.5) return `It is too heavy to carry with all that in your pack (${w} kg).`;
+      return null;
+    },
+    time: (c) => 1 + itemDef(STRUCTURES[obj(c, 'structure')!.type].item!).weight / 15, stamina: 5,
+    run: (c) => {
+      const s = obj(c, 'structure')!;
+      const def = STRUCTURES[s.type];
+      const it = makeItem(def.item!, s.ql);
+      it.dmg = s.dmg ?? 0;
+      c.g.world.remove(s);
+      c.g.inv.add(it);
+      c.g.inventoryChanged();
+      c.g.msg(`You pick up the ${def.name.toLowerCase()}${(s.water ?? 0) > 0 ? ', spilling the water' : ''}. Place it again from your pack.`, 'info');
+    },
+  },
+  {
+    id: 'fill_trough', label: 'Pour in a jar of water',
+    show: (c) => { const s = obj(c, 'structure'); return !!s && s.built && !!STRUCTURES[s.type].water && c.g.inv.count('jar_of_water') > 0; },
+    check: (c) => { const s = obj(c, 'structure')!; return (s.water ?? 0) >= STRUCTURES[s.type].water! - 0.01 ? 'The trough is full.' : null; },
+    time: 2,
+    repeat: (c) => { const s = obj(c, 'structure'); return !!s && (s.water ?? 0) < STRUCTURES[s.type].water! - 0.01 && c.g.inv.count('jar_of_water') > 0; },
+    run: (c) => {
+      const s = obj(c, 'structure')!;
+      const jar = c.g.inv.ofType('jar_of_water').at(-1);
+      if (!jar) return;
+      jar.type = 'clay_jar';
+      const cap = STRUCTURES[s.type].water!;
+      s.water = Math.min(cap, (s.water ?? 0) + 1);
+      c.g.world.changed(s);
+      c.g.inventoryChanged();
+      c.g.msg(`You pour a jar of water into the trough (${s.water.toFixed(1)}/${cap}).`, 'info');
+    },
+  },
+  {
+    id: 'quench', label: (c) => `Quench ${itemName(hotItem(c)!).toLowerCase()}`,
+    show: (c) => { const s = obj(c, 'structure'); return !!s && s.built && !!STRUCTURES[s.type].water && !!hotItem(c); },
+    check: (c) => {
+      const s = obj(c, 'structure')!;
+      if (!hotItem(c)) return 'It has already cooled.';
+      if (!c.g.toolFor('tongs')) return 'You need tongs to hold the hot metal.';
+      if ((s.water ?? 0) < 0.5) return 'The trough is dry. Pour jars of water into it first.';
+      return null;
+    },
+    time: 4, skill: 'smithing', stamina: 3,
+    difficulty: (c) => RECIPES.find((r) => r.output.item === hotItem(c)?.type)?.difficulty ?? 15,
+    minigame: (c) => ({ kind: 'quench', gear: obj(c, 'structure')!.ql / 100 }),
+    repeat: (c) => !!hotItem(c),
+    run: (c, o) => {
+      const s = obj(c, 'structure')!;
+      const it = hotItem(c)!;
+      const g = c.g;
+      s.water = Math.max(0, (s.water ?? 0) - 0.5);
+      g.world.changed(s);
+      delete it.hot;
+      const tongs = g.toolFor('tongs');
+      if (tongs) g.wear(tongs, 0.8);
+      const name = itemName(it).toLowerCase();
+      g.inventoryChanged();
+      if (!o.success) {
+        it.dmg = Math.min(99, it.dmg + 12 + Math.random() * 10);
+        g.msg(`It goes in badly and the ${name} cracks (damage ${it.dmg.toFixed(0)}).`, 'fail');
+        return;
+      }
+      // Good quenching hardens the steel; a better trough keeps the water calmer.
+      const perf = o.perf ?? 0.55;
+      const before = it.ql;
+      it.ql = Math.min(100, it.ql + (1.5 + 7 * perf) * (0.6 + 0.4 * s.ql / 100));
+      it.quenched = true;
+      g.msg(`The ${name} hisses and steams in the trough. Hardened: QL ${before.toFixed(1)} → ${it.ql.toFixed(1)}, and it will wear more slowly.`, 'good');
     },
   },
   {
@@ -771,7 +870,11 @@ export const ACTIONS: ActionDef[] = [
     show: () => false,
     check: (c) => craftProblem(c.g, c.recipe!, c.tool),
     time: (c) => c.recipe!.time,
-    minigame: (c) => RECIPE_MINIGAMES[c.recipe!.id],
+    minigame: (c) => withGear(c.g, RECIPE_MINIGAMES[c.recipe!.id]),
+    qualityCap: (c) => {
+      const st = c.recipe!.stations ?? [];
+      return st.includes('forge') && !c.g.dev.on('freeCraft') ? smithyCap(c.g.smithy(), st.includes('anvil')) : undefined;
+    },
     skill: (c) => c.recipe!.skill,
     difficulty: (c) => c.recipe!.difficulty,
     stamina: 4, toolWear: 0.1,
@@ -779,6 +882,8 @@ export const ACTIONS: ActionDef[] = [
       const r = c.recipe!;
       const g = c.g;
       const used: Item[] = [];
+      // Crucibles crack and tongs char a little with every use.
+      for (const k of r.needs ?? []) { const t = g.toolFor(k); if (t) g.wear(t, k === 'crucible' ? 5 : 1.2); }
       for (const inp of r.inputs) used.push(...g.inv.take(inp.item, inp.count));
       const matQl = used.reduce((s, i) => s + i.ql, 0) / Math.max(1, used.length);
       if (!o.success) {
@@ -789,8 +894,14 @@ export const ACTIONS: ActionDef[] = [
         g.msg(lost ? `You fail to make the ${r.name.toLowerCase()} and ruin the ${itemName(lost).toLowerCase()}.` : `You fail to make the ${r.name.toLowerCase()}, but the materials survive.`, 'fail');
         return;
       }
-      const ql = Math.min(o.ql * 0.7 + matQl * 0.3, matQl + 20);
-      for (let i = 0; i < r.output.count; i++) g.inv.add(makeItem(r.output.item, ql));
+      const ql = Math.min(o.ql * 0.7 + matQl * 0.3, matQl + 20, o.cap ?? 100);
+      // Tools fresh off the anvil come out glowing, ready to quench.
+      const hot = !!r.stations?.includes('anvil') && !!itemDef(r.output.item).tool;
+      for (let i = 0; i < r.output.count; i++) {
+        const it = makeItem(r.output.item, ql);
+        if (hot) it.hot = HOT_TIME;
+        g.inv.add(it);
+      }
       for (const ret of r.returns ?? []) {
         const src = used.find((u) => u.type !== r.output.item);
         for (let i = 0; i < ret.count; i++) g.inv.add(makeItem(ret.item, src?.ql ?? ql));
@@ -800,6 +911,9 @@ export const ACTIONS: ActionDef[] = [
       const article = r.output.count > 1 ? `${r.output.count} ` : /^[aeiou]/.test(name) ? 'an ' : 'a ';
       const plural = r.output.count > 1 && !name.endsWith('s') ? 's' : '';
       g.msg(`You create ${article}${name}${plural} (QL ${ql.toFixed(1)}).`, 'good');
+      if (hot) g.msg(g.smithy().trough
+        ? 'It is still glowing. Quench it in the trough now, while it is hot, to harden it.'
+        : 'It is still glowing. Quench it in a water trough before it cools to harden it.', 'info');
     },
   },
 ];
@@ -841,13 +955,35 @@ function fuelItem(c: Ctx): Item | undefined {
   return undefined;
 }
 
+/** Hand equipment quality to the minigame: bellows blow harder, anvils strike truer. */
+function withGear(g: Game, spec: MinigameSpec | undefined): MinigameSpec | undefined {
+  if (!spec) return spec;
+  const s = g.smithy();
+  const blow = s.bellows ? bellowsGrade(s.bellows) : 0;
+  if (spec.kind === 'bellows' || spec.kind === 'pour') return { ...spec, gear: blow };
+  if (spec.kind === 'strike' && spec.variant === 'forge') {
+    return { ...spec, gear: s.anvil ? anvilGrade(s.anvil) : 0, heat: blow, iron: s.anvil?.type === 'iron_anvil' };
+  }
+  return spec;
+}
+
+/** The glowing forging to quench: the one you picked, else the freshest. */
+function hotItem(c: Ctx): Item | undefined {
+  if (c.item?.hot && c.g.inv.find(c.item.uid)) return c.item;
+  return c.g.inv.items.filter((i) => i.hot).sort((a, b) => b.hot! - a.hot!)[0];
+}
+
 export function craftProblem(g: Game, r: Recipe, tool?: Item): string | null {
   if (g.dev.on('freeCraft')) return null;
   if (r.tool && (!tool || !g.inv.find(tool.uid) || itemDef(tool.type).tool !== r.tool)) return `You need a ${r.tool}.`;
+  for (const k of r.needs ?? []) {
+    if (!g.toolFor(k)) return `You need a ${TOOL_NAMES[k]} in your pack${k === 'tongs' ? ' to handle the hot metal' : k === 'crucible' ? ' to melt the ore in' : ''}.`;
+  }
   for (const inp of r.inputs) {
     if (g.usableCount(inp.item) < inp.count) return `Need ${inp.count} ${itemDef(inp.item).name.toLowerCase()}.`;
   }
   for (const st of r.stations ?? []) {
+    if (st === 'forge' && !g.stationNear(st) && g.forgeWithoutBellows()) return 'The forge cannot get hot enough without bellows. Craft bellows and place them against its side.';
     if (!g.stationNear(st)) return `Must be near ${STATION_NAMES[st]}.`;
   }
   return null;

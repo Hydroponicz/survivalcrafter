@@ -43,7 +43,27 @@ const T: Record<string, Tutorial> = {
       { gesture: 'up', text: 'Move the mouse back up (or let go) to refill them.' },
       { gesture: 'wait', text: 'Keep the Heat in the green band until the ore has melted. Too hot burns the iron.' },
     ],
-    quality: 'Time spent in the green band makes better iron.',
+    quality: 'Time spent in the green band makes better iron. Better bellows blow harder and hold the heat steadier, and limit how good the iron can get.',
+  },
+  pour: {
+    title: 'Casting iron',
+    what: 'Pour the molten iron from the crucible into a sand mould shaped like an anvil.',
+    steps: [
+      { gesture: 'down', text: 'Hold the left button and pull the mouse down to tip the crucible. Nothing pours until it tips past level.' },
+      { gesture: 'up', text: 'Move the mouse up to tip it back if the stream gets too fast and splashes.' },
+      { gesture: 'hold', text: 'Keep the Flow in the green band without stopping until the mould is full. A stopped pour skins over and leaves a weak seam.' },
+    ],
+    quality: 'One steady, unbroken pour casts the best anvil. Hotter metal (better bellows) gives you more time.',
+  },
+  quench: {
+    title: 'Quenching',
+    what: 'Plunging hot steel into water hardens it, but cooling it too suddenly can crack it.',
+    steps: [
+      { gesture: 'hold', text: 'Hold the left button to plunge the glowing tool into the trough. It steams and cools.' },
+      { gesture: 'release', text: 'Let go to lift it out before the Stress gauge reaches the red, or it cracks.' },
+      { gesture: 'wait', text: 'Let the stress ease, then plunge again, until the Metal heat is gone.' },
+    ],
+    quality: 'Keeping it under as much as you safely can hardens it best. Cracks damage the tool.',
   },
   'crank:grind': {
     title: 'Grinding flour',
@@ -92,7 +112,7 @@ const T: Record<string, Tutorial> = {
   },
   'strike:forge': {
     title: 'Smithing',
-    what: 'Hammer the glowing iron on the anvil to shape it before it cools.',
+    what: 'Hammer the glowing iron on the anvil to shape it before it cools. A better anvil gives you more time to land each blow; better bellows keep the metal hot for longer.',
     steps: [
       { gesture: 'hold', text: 'Aim at the yellow mark on the hot metal. A white ring shrinks toward it.' },
       { gesture: 'click', text: 'Strike as the ring meets the mark.' },

@@ -34,11 +34,15 @@ export class StrikeGame extends Minigame {
   /** Facing of the struck surface: rings face +y (top) or +z (front). */
   private face: 'top' | 'front';
 
-  constructor(ease: number, private variant: StrikeVariant, private hits: number) {
+  /** Smithing equipment: anvil grade (truer strikes), bellows grade (hotter metal), iron or stone face. */
+  private gear: { anvil: number; heat: number; iron: boolean };
+
+  constructor(ease: number, private variant: StrikeVariant, private hits: number, gear?: { anvil?: number; heat?: number; iron?: boolean }) {
     super(ease);
     this.title = TEXT[variant].title;
     this.instructions = TEXT[variant].how;
-    this.period = 1.5 + ease * 0.6;
+    this.gear = { anvil: gear?.anvil ?? 0.5, heat: gear?.heat ?? 0.5, iron: gear?.iron ?? true };
+    this.period = 1.5 + ease * 0.6 + (variant === 'forge' ? this.gear.anvil * 0.4 : 0);
     this.face = 'top';
     const toolHead = variant === 'split' ? 0x8a8a8a : variant === 'knap' ? 0x77736c : 0x5a5a5a;
     const handle = cyl(0.018, 0.018, 0.5, 0x7a5634, 6);
@@ -79,12 +83,18 @@ export class StrikeGame extends Minigame {
       this.look([0.1, 0.75, 0.45], [0, 0.1, 0]);
     } else if (variant === 'forge') {
       const anvil = new THREE.Group();
-      const body = box(0.5, 0.35, 0.28, 0x55585c, { metalness: 0.6, roughness: 0.4 });
-      body.position.y = -0.18;
-      const horn = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.3, 10), new THREE.MeshStandardMaterial({ color: 0x55585c, metalness: 0.6 }));
-      horn.rotation.z = Math.PI / 2;
-      horn.position.set(0.38, -0.06, 0);
-      anvil.add(body, horn);
+      if (this.gear.iron) {
+        const body = box(0.5, 0.35, 0.28, 0x55585c, { metalness: 0.6, roughness: 0.4 });
+        body.position.y = -0.18;
+        const horn = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.3, 10), new THREE.MeshStandardMaterial({ color: 0x55585c, metalness: 0.6 }));
+        horn.rotation.z = Math.PI / 2;
+        horn.position.set(0.38, -0.06, 0);
+        anvil.add(body, horn);
+      } else {
+        const body = box(0.6, 0.36, 0.34, 0x8a8782, { flatShading: true });
+        body.position.y = -0.18;
+        anvil.add(body);
+      }
       this.scene.add(anvil);
       const bar = box(0.45, 0.04, 0.08, 0x552200, { emissive: 0xff5500, emissiveIntensity: 1.5 });
       bar.position.y = 0.02;
@@ -147,7 +157,7 @@ export class StrikeGame extends Minigame {
 
   update(dt: number, i: MgInput) {
     if (this.variant === 'forge') {
-      this.heat = Math.max(0, this.heat - dt / (9 + this.ease * 6));
+      this.heat = Math.max(0, this.heat - dt / (8 + this.ease * 6 + this.gear.heat * 5));
       ((this.work as THREE.Mesh).material as THREE.MeshStandardMaterial).emissiveIntensity = 0.2 + this.heat * 1.6;
     }
     this.ringT += dt;
@@ -169,7 +179,8 @@ export class StrikeGame extends Minigame {
     }
 
     if (i.pressed) {
-      const timing = clamp01(1 - Math.abs(s - 1) / (0.35 + 0.5 * this.ease));
+      const slack = 0.35 + 0.5 * this.ease + (this.variant === 'forge' ? 0.3 * this.gear.anvil : 0);
+      const timing = clamp01(1 - Math.abs(s - 1) / slack);
       const off = Math.hypot(aim.x - t.x, aim.z - t.z);
       const aimQ = clamp01(1 - off / (0.03 + 0.05 * this.ease));
       let q = timing * 0.6 + aimQ * 0.4;
