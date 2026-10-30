@@ -755,6 +755,9 @@ export class Game {
   /** Pebbles, dust and scraping when you slide or can't get up a slope, plus a one-time tip. */
   private slopeFeedback(dt: number) {
     const p = this.player;
+    // Gravel underfoot: a smooth continuous slide, louder the faster you go.
+    const slideLevel = p.slope === 'sliding' ? 0.5 + 0.5 * Math.min(1, p.slide.length() / 6) : p.slope === 'blocked' ? 0.25 : 0;
+    this.sound.slide(slideLevel);
     if (p.slope !== 'blocked' && p.slope !== 'sliding') { this.screeTimer = 0; return; }
     this.screeTimer -= dt;
     if (this.screeTimer > 0) return;
@@ -765,7 +768,6 @@ export class Game {
     const n = t.normalAt(p.pos.x, p.pos.y - 0.05, p.pos.z);
     const hl = Math.hypot(n.x, n.z) || 1;
     this.view.treeFx.scree(p.pos.x, p.pos.y, p.pos.z, n.x / hl, n.z / hl, colour, p.slope === 'sliding' ? 3 : 2);
-    this.sound.scree(p.slope === 'sliding' ? 0.9 : 0.5);
     if (!this.steepTipShown) {
       this.steepTipShown = true;
       this.msg('Too steep to climb here. Find a gentler way up, or cut steps into the slope with a shovel or pickaxe.', 'warn');
@@ -1253,6 +1255,7 @@ export class Game {
     this.renderDt = dt;
     this.elapsed += dt;
     if (!this.paused) this.update(dt);
+    if (this.paused || this.working) this.sound.slide(0);
     this.render();
     this.input.endFrame();
   }

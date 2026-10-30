@@ -95,19 +95,58 @@ export class Sound {
     this.glance(vol * 0.8);
   }
 
-  /** Gravel skittering underfoot: sliding, or scrabbling at a slope that's too steep. */
-  scree(vol = 1) {
+  private slideGain: GainNode | null = null;
+  private slideFilter: BiquadFilterNode | null = null;
+
+  /**
+   * Loose gravel shifting underfoot while you slide or scrabble at a slope:
+   * one continuous, soft loop whose volume follows `level` (0..1) smoothly,
+   * rather than a burst per step. Call every frame.
+   */
+  slide(level: number) {
+    if (!this.slideGain && level <= 0) return;
     const ctx = this.ensure();
-    if (!ctx) return;
+    if (!ctx) {
+      if (this.ctx && this.slideGain) this.slideGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.05);
+      return;
+    }
+    if (!this.slideGain) {
+      // Three seconds of soft, low rumble with pebbles ticking at random
+      // (never evenly spaced, so it doesn't beat like a drum).
+      const len = ctx.sampleRate * 3;
+      const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+      const d = buf.getChannelData(0);
+      let brown = 0;
+      for (let i = 0; i < len; i++) {
+        brown = (brown + (Math.random() * 2 - 1) * 0.02) * 0.995;
+        d[i] = brown * 2.2;
+      }
+      for (let k = 0; k < 45; k++) {
+        const at = Math.floor(Math.random() * (len - 2000));
+        const amp = 0.08 + Math.random() * 0.2;
+        const decay = 300 + Math.random() * 500;
+        for (let j = 0; j < 1500; j++) d[at + j] += (Math.random() * 2 - 1) * amp * Math.exp(-j / decay);
+      }
+      // Fade the loop's ends together so the seam doesn't click.
+      const fade = 2000;
+      for (let i = 0; i < fade; i++) { const w = i / fade; d[i] *= w; d[len - 1 - i] *= w; }
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      src.loop = true;
+      this.slideFilter = ctx.createBiquadFilter();
+      this.slideFilter.type = 'lowpass';
+      this.slideFilter.frequency.value = 1200;
+      this.slideGain = ctx.createGain();
+      this.slideGain.gain.value = 0;
+      src.connect(this.slideFilter);
+      this.slideFilter.connect(this.slideGain);
+      this.slideGain.connect(this.master!);
+      src.start();
+    }
     const t = ctx.currentTime;
-    const n = this.noise(ctx, 0.3);
-    const f = ctx.createBiquadFilter();
-    f.type = 'bandpass';
-    f.frequency.value = 900 + Math.random() * 900;
-    f.Q.value = 0.7;
-    n.connect(f);
-    f.connect(this.env(ctx, vol, 0.28, 0.26, 0.02));
-    n.start(t);
+    this.slideGain.gain.setTargetAtTime(0.22 * Math.max(0, Math.min(1, level)), t, level > 0 ? 0.15 : 0.35);
+    // Faster sliding sounds a little brighter.
+    this.slideFilter!.frequency.setTargetAtTime(700 + 900 * level, t, 0.2);
   }
 
   /** The long groaning creak as a tree starts to topple. */
