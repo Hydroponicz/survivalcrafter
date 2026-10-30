@@ -82,7 +82,7 @@ Toggles are remembered per browser; a purple **DEV** badge shows while any cheat
 - **Hands-on crafting and building (Schedule 1–style).** Crafting and building steps are 3D minigames at
   the workstation: draw a saw along the line to cut planks, split logs and knap stone with timed strikes,
   carve shafts along a guide, pump the bellows to hold smelting heat, hammer hot iron on the anvil before it
-  cools, turn the quern, stir and pound, throw clay on the wheel, cook over the fire without burning it,
+  cools, twist and wrap two-ply cordage (splicing in fibre as strands run thin), turn the quern, stir and pound, throw clay on the wheel, cook over the fire without burning it,
   nail planks, lay stones and stack logs, and start fires with a bow drill. Performance sets most of the
   quality; skill makes the work more forgiving and caps the quality. At skill 10 above a task's difficulty
   you can Quick craft/build to skip the minigame at a quality cost. Right-click stops working.

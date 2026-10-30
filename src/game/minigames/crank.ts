@@ -1,12 +1,11 @@
 import * as THREE from 'three';
-import { benchMesh, box, clamp01, cyl, Minigame, ringMesh, type Meter, type MgInput } from './core';
+import { benchMesh, clamp01, cyl, Minigame, ringMesh, type Meter, type MgInput } from './core';
 
-export type CrankVariant = 'grind' | 'stir' | 'twist' | 'pound';
+export type CrankVariant = 'grind' | 'stir' | 'pound';
 
 const TEXT: Record<CrankVariant, { title: string; how: string }> = {
   grind: { title: 'Grinding', how: 'Hold left button and circle the mouse around the quern to turn the handle. Steady speed: too fast spills the grain.' },
   stir: { title: 'Mixing', how: 'Hold left button and stir in circles around the bowl. Keep a steady pace so nothing slops out.' },
-  twist: { title: 'Twisting cordage', how: 'Hold left button and circle the mouse to twist the fibres. Too fast and they snap.' },
   pound: { title: 'Pounding', how: 'Hold left button and grind in circles with the pestle. Keep it steady.' },
 };
 
@@ -25,7 +24,6 @@ export class CrankGame extends Minigame {
   private product: THREE.Mesh | null = null;
   private centre = new THREE.Vector3(0, 0.12, 0);
   private band: [number, number];
-  private rope: THREE.Mesh | null = null;
   private lastDir = 0;
 
   constructor(ease: number, private variant: CrankVariant, private turns: number) {
@@ -50,7 +48,7 @@ export class CrankGame extends Minigame {
       this.product.position.set(0.38, 0.0, 0.0);
       this.centre.set(0, 0.2, 0);
       guide.position.y = 0.24;
-    } else if (variant === 'stir' || variant === 'pound') {
+    } else {
       const bowl = new THREE.Mesh(new THREE.SphereGeometry(0.2, 18, 10, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2),
         new THREE.MeshStandardMaterial({ color: variant === 'pound' ? 0x8a8782 : 0xa0754a, side: THREE.DoubleSide }));
       bowl.position.y = 0.2;
@@ -66,26 +64,6 @@ export class CrankGame extends Minigame {
       this.centre.set(0, 0.2, 0);
       guide.position.y = 0.2;
       guide.scale.setScalar(0.6);
-    } else {
-      // twist: two strands of fibre being wound into cordage
-      const peg = box(0.04, 0.3, 0.04, 0x6e4e30);
-      peg.position.set(-0.6, 0.15, 0);
-      this.scene.add(peg);
-      this.rope = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 1, 6), new THREE.MeshStandardMaterial({ color: 0xc9b87a }));
-      this.rope.rotation.z = Math.PI / 2;
-      this.scene.add(this.rope);
-      const loose = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.4, 6), new THREE.MeshStandardMaterial({ color: 0xa8b45a, flatShading: true }));
-      loose.rotation.z = -Math.PI / 2;
-      loose.position.set(0.4, 0.28, 0);
-      this.scene.add(loose);
-      const hand = box(0.06, 0.06, 0.06, 0xd9a982);
-      hand.position.set(0.15, 0, 0);
-      this.spin.add(hand);
-      this.spin.position.set(0, 0.28, 0);
-      this.centre.set(0, 0.28, 0);
-      guide.rotation.set(0, Math.PI / 2, 0);
-      guide.position.set(0, 0.28, 0);
-      guide.scale.setScalar(0.7);
     }
     if (this.product && variant === 'grind') this.scene.add(this.product);
     this.scene.add(this.spin, guide);
@@ -120,8 +98,8 @@ export class CrankGame extends Minigame {
       } else if (this.speed > hi) {
         this.sample(0.25, Math.abs(d));
         this.turned += Math.abs(d) * 0.4;
-        if (Math.random() < dt * 3) this.say(this.variant === 'twist' ? 'Too fast — the fibres fray!' : 'Too fast — it’s spilling!', false, 0.7);
-        if (this.variant !== 'twist' && Math.random() < dt * 12) this.burst(this.centre.clone(), this.variant === 'grind' ? 0xf1e6cc : 0xd9c49a, 2, 0.8);
+        if (Math.random() < dt * 3) this.say('Too fast — it’s spilling!', false, 0.7);
+        if (Math.random() < dt * 12) this.burst(this.centre.clone(), this.variant === 'grind' ? 0xf1e6cc : 0xd9c49a, 2, 0.8);
       } else if (this.speed >= lo) {
         this.sample(1, Math.abs(d));
         this.turned += Math.abs(d);
@@ -131,14 +109,7 @@ export class CrankGame extends Minigame {
     }
     const need = this.turns * Math.PI * 2;
     this.progress = clamp01(this.turned / need);
-    if (this.variant === 'twist') {
-      this.spin.rotation.x = this.angle;
-      const len = 0.1 + this.progress * 0.9;
-      this.rope!.scale.set(1, len, 1);
-      this.rope!.position.set(-0.6 + len / 2, 0.28, 0);
-    } else {
-      this.spin.rotation.y = -this.angle;
-    }
+    this.spin.rotation.y = -this.angle;
     if (this.product && this.variant === 'grind') this.product.scale.setScalar(0.2 + this.progress);
     if (this.product && this.variant !== 'grind') {
       const m = this.product.material as THREE.MeshStandardMaterial;

@@ -62,6 +62,11 @@ export abstract class Minigame {
 
   abstract update(dt: number, i: MgInput): void;
 
+  /** A short label floating by the work, saying what to do next. */
+  hint(): { x: number; y: number; text: string } | null {
+    return null;
+  }
+
   /** Gauges shown in the HUD panel. */
   meters(): Meter[] {
     return [];

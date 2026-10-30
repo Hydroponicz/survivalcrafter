@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { Minigame, type MgInput } from './core';
+import { CordageGame } from './cordage';
 import { CrankGame, type CrankVariant } from './crank';
 import { CarveGame, CenterGame, HeatGame, PlaceGame, type HeatVariant, type PlaceVariant } from './shape';
 import { StrikeGame, type StrikeVariant } from './strike';
@@ -15,7 +16,8 @@ export type MinigameSpec =
   | { kind: 'carve'; passes: number; wide?: boolean }
   | { kind: 'heat'; variant: HeatVariant }
   | { kind: 'place'; variant: PlaceVariant; count: number }
-  | { kind: 'center' };
+  | { kind: 'center' }
+  | { kind: 'cord'; plies: number };
 
 export function createMinigame(spec: MinigameSpec, ease: number): Minigame {
   switch (spec.kind) {
@@ -28,12 +30,13 @@ export function createMinigame(spec: MinigameSpec, ease: number): Minigame {
     case 'heat': return new HeatGame(ease, spec.variant);
     case 'place': return new PlaceGame(ease, spec.variant, spec.count);
     case 'center': return new CenterGame(ease);
+    case 'cord': return new CordageGame(ease, spec.plies);
   }
 }
 
 /** The hands-on work for each recipe. */
 export const RECIPE_MINIGAMES: Record<string, MinigameSpec> = {
-  cordage: { kind: 'crank', variant: 'twist', turns: 4 },
+  cordage: { kind: 'cord', plies: 6 },
   stone_knife: { kind: 'strike', variant: 'knap', hits: 3 },
   stone_hatchet: { kind: 'strike', variant: 'knap', hits: 4 },
   stone_pickaxe: { kind: 'strike', variant: 'knap', hits: 5 },
@@ -86,7 +89,8 @@ export function minigameVerb(spec: MinigameSpec): string {
     case 'saw': return 'saw';
     case 'bowdrill': return 'bow drill';
     case 'bellows': return 'bellows';
-    case 'crank': return { grind: 'grind', stir: 'stir', twist: 'twist', pound: 'pound' }[spec.variant];
+    case 'crank': return { grind: 'grind', stir: 'stir', pound: 'pound' }[spec.variant];
+    case 'cord': return 'twist and wrap';
     case 'strike': return { split: 'split', knap: 'knap', forge: 'hammer', nail: 'nail' }[spec.variant];
     case 'carve': return 'carve';
     case 'heat': return { roast: 'cook', bake: 'bake', fire: 'fire', brew: 'brew' }[spec.variant];
@@ -103,6 +107,7 @@ export class MinigameSession {
   readonly mg: Minigame;
   private panel: HTMLElement;
   private pointer: HTMLElement;
+  private hintEl: HTMLElement;
   private px = window.innerWidth / 2;
   private py = window.innerHeight / 2;
   private wasDown = false;
@@ -124,6 +129,9 @@ export class MinigameSession {
     this.pointer = document.createElement('div');
     this.pointer.className = 'ui-cursor';
     root.appendChild(this.pointer);
+    this.hintEl = document.createElement('div');
+    this.hintEl.className = 'mg-hint';
+    root.appendChild(this.hintEl);
     this.renderPanel();
   }
 
@@ -166,6 +174,7 @@ export class MinigameSession {
     this.ended = true;
     this.panel.remove();
     this.pointer.remove();
+    this.hintEl.remove();
     this.mg.dispose();
     this.onEnd(perf, this.elapsed);
   }
@@ -197,5 +206,11 @@ export class MinigameSession {
       ${meters}
       <div class="mg-foot"><span>Work: <b>${grade}</b></span><span>Right-click to stop</span></div>
       ${fb}`;
+    const h = m.hint();
+    this.hintEl.style.display = h ? 'block' : 'none';
+    if (h) {
+      this.hintEl.textContent = h.text;
+      this.hintEl.style.transform = `translate(${h.x}px, ${h.y}px)`;
+    }
   }
 }

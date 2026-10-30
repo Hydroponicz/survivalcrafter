@@ -238,6 +238,7 @@ table.keys td:first-child { color: var(--accent); white-space: nowrap; font-fami
 
 /* ---------- hands-on work (minigames) */
 #ui.working .crosshair, #ui.working .target, #ui.working .progress, #ui.working .hotbar, #ui.working .status { display: none; }
+#ui.working .log { opacity: 0.35; }
 .mg-panel {
   position: absolute; top: 16px; left: 50%; transform: translateX(-50%); width: min(560px, 92vw);
   background: var(--panel); border: 1px solid var(--panel-edge); border-radius: 8px; padding: 10px 14px;
@@ -260,3 +261,13 @@ table.keys td:first-child { color: var(--accent); white-space: nowrap; font-fami
 .mg-feedback.good { color: var(--good); }
 .mg-feedback.bad { color: var(--bad); }
 .window button.quick { color: var(--skill); }
+
+.mg-step { color: var(--muted); padding: 2px 0 2px 10px; border-left: 2px solid transparent; }
+.mg-step.on { color: var(--ink); border-left-color: var(--accent); }
+.mg-hint {
+  position: absolute; left: 0; top: 0; z-index: 21; pointer-events: none; white-space: nowrap;
+  background: rgba(20, 16, 10, 0.8); border: 1px solid var(--accent); color: var(--accent);
+  padding: 3px 8px; border-radius: 4px; font-size: 14px; font-weight: bold;
+  animation: mg-hint-pulse 1s ease-in-out infinite alternate;
+}
+@keyframes mg-hint-pulse { from { opacity: 0.65; } to { opacity: 1; } }
