@@ -3,6 +3,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { STRUCTURES, totalMaterials } from '../data/structures';
 import { FORAGE, FORAGE_SPECIES } from '../data/forage';
 import { forageGeometry, forageScale } from './forageProps';
+import { TreeFx } from './treefx';
 import { hash2 } from './noise';
 import {
   CROP_STAGES, cropPos, type AnimalObj, type BushObj, type ForageObj, type PileObj, type Species, type StructureObj,
@@ -83,6 +84,8 @@ function treeGeometries(species: Species): { trunk: THREE.BufferGeometry; leaves
 
 export class WorldView implements WorldListener {
   group = new THREE.Group();
+  /** Trees being chopped and felled, chips, leaves and stumps. */
+  treeFx: TreeFx;
   private trunks = {} as Record<Species, InstancePool>;
   private leaves = {} as Record<Species, InstancePool>;
   private bushPool: InstancePool;
@@ -147,6 +150,12 @@ export class WorldView implements WorldListener {
       this.group.add(l);
     }
 
+    const leafGeos = {} as Record<Species, THREE.BufferGeometry>;
+    for (const sp of ['oak', 'birch', 'pine'] as Species[]) leafGeos[sp] = treeGeometries(sp).leaves;
+    this.treeFx = new TreeFx(world.terrain, (sp) => leafGeos[sp], (t) => this.leafColor(t));
+    this.group.add(this.treeFx.group);
+    this.treeFx.syncStumps(world.stumps);
+
     for (const o of world.objects.values()) this.added(o);
     for (const k of world.crops.keys()) this.cropsChanged(k);
     world.listener = this;
@@ -180,6 +189,7 @@ export class WorldView implements WorldListener {
       this.trunks[o.species].release(s);
       this.leaves[o.species].release(s);
       this.slots.delete(o.id);
+      this.treeFx.remove(o.id);
     } else if (o.kind === 'bush') {
       const s = this.slots.get(o.id)!;
       this.bushPool.release(s);
@@ -218,8 +228,21 @@ export class WorldView implements WorldListener {
   }
 
   // ---------- updates
+  /** The same per-tree leaf tint the instanced trees use. */
+  private leafColor(o: TreeObj): THREE.Color {
+    const base = new THREE.Color((this.leaves[o.species].mesh as THREE.InstancedMesh & { baseColor: number }).baseColor);
+    return base.offsetHSL((hash2(o.id, 3) - 0.5) * 0.04, 0, (hash2(o.id, 4) - 0.5) * 0.08);
+  }
+
   private updateTree(o: TreeObj) {
     const slot = this.slots.get(o.id)!;
+    // A tree that's been chopped into is drawn on its own, notch and all.
+    if ((o.chop ?? 0) > 0 || this.treeFx.has(o.id)) {
+      this.trunks[o.species].hide(slot);
+      this.leaves[o.species].hide(slot);
+      this.treeFx.place(this.treeFx.ensure(o));
+      return;
+    }
     const y = this.world.terrain.heightAt(o.x, o.z) - 0.1;
     const s = 0.2 + 0.8 * o.age;
     const r = hash2(o.id, 1) * Math.PI * 2;

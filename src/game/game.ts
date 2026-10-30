@@ -7,12 +7,16 @@ import { Mat, WATER_LEVEL, type Volumes } from '../world/terrain';
 import { forageHeight, forageScale } from '../world/forageProps';
 import { buildPieceMesh, WorldView } from '../world/view';
 import {
-  ANIMALS, pointInPiece, toWorld, World, type AnimalObj, type ForageObj, type PileObj, type StructureObj, type WorldObj,
+  ANIMALS, pointInPiece, toWorld, World, type AnimalObj, type ForageObj, type PileObj, type StructureObj, type TreeObj, type WorldObj,
 } from '../world/world';
 import {
   ACTION_MAP, ACTIONS, craftProblem, DIG_RADIUS, EARTH_PER_ITEM, LEVEL_RADIUS, type ActionDef, type Ctx, type Target,
 } from './actions';
 import { DevSettings } from './dev';
+import { distVol, Sound } from './sound';
+import type { SwingKind } from './tools';
+import { ViewModel } from './viewmodel';
+import { treeScale } from '../world/treefx';
 import { MinigameSession, minigameVerb, type MinigameSpec } from './minigames';
 import { FORAGE, type ForageCategory } from '../data/forage';
 import { ForageGrowth, Knowledge, noticeOf, populateForage } from './forage';
@@ -41,9 +45,15 @@ export interface RunningAction {
   elapsed: number;
   total: number;
   startPos: THREE.Vector3;
+  /** Resolved early, at the moment of impact (the rest of the time is follow-through). */
+  resolved?: boolean;
+  /** For long looping swings: which swing last landed. */
+  lastBlow?: number;
 }
 
 interface QueuedAction { def: ActionDef; ctx: Ctx }
+
+interface PendingDrop { left: number; done: boolean; at: { x: number; z: number }; land: (x: number, z: number) => void }
 
 export type MsgKind = 'info' | 'good' | 'fail' | 'warn' | 'skill';
 
@@ -101,6 +111,11 @@ export class Game {
     bad: new THREE.MeshBasicMaterial({ color: 0xff5555, transparent: true, opacity: 0.4, depthWrite: false }),
   };
   private timer = new THREE.Timer();
+  private renderDt = 1 / 60;
+  /** Felled trees whose logs haven't landed yet. */
+  private pendingDrops: PendingDrop[] = [];
+  readonly sound = new Sound();
+  private viewModel = new ViewModel();
   private saveTimer = 0;
   private respawnTimer = 0;
   private elapsed = 0;
@@ -184,7 +199,7 @@ export class Game {
   setActive(uid: number | null) {
     this.activeUid = uid;
     const it = this.activeItem();
-    this.player.setHeld(it ? itemDef(it.type).tool : undefined);
+    this.player.setHeld(it ? itemDef(it.type).tool : undefined, it?.type);
     this.ui?.refresh();
   }
 
@@ -620,7 +635,7 @@ export class Game {
    * Resolve a finished piece of work. `perf` (0..1) is how well a minigame
    * went; without it, the outcome is a plain skill roll.
    */
-  private complete(def: ActionDef, ctx: Ctx, seconds: number, perf?: number) {
+  private complete(def: ActionDef, ctx: Ctx, seconds: number, perf?: number, atImpact = false) {
     // Conditions may have changed while working.
     const problem = def.check?.(ctx) ?? null;
     if (problem) { this.msg(problem, 'fail'); this.action = null; this.queue = []; return; }
@@ -657,11 +672,14 @@ export class Game {
         this.inventoryChanged();
       }
     }
-    this.action = null;
+    if (!atImpact) this.action = null;
     def.run(ctx, { success, ql, toolQl });
     this.ui?.refresh();
+    if (!atImpact) this.afterAction(def, ctx);
+  }
 
-    // Next: queued action, else automatic repeat.
+  /** After an action: start the next queued one, else repeat it while it still makes sense. */
+  private afterAction(def: ActionDef, ctx: Ctx) {
     const next = this.queue.shift();
     if (next) { this.begin(next.def, next.ctx); return; }
     const rep = typeof def.repeat === 'function' ? def.repeat(ctx) : def.repeat;
@@ -670,6 +688,66 @@ export class Game {
       if (!def.check?.(c)) this.begin(def, c);
     }
     this.repeatBlocked = false;
+  }
+
+  /** Turn the body toward what you're working on (third person). */
+  private faceToward(t: Target): number | null {
+    const p = this.player.pos;
+    const at = t.kind === 'object' ? t.obj : t.kind === 'animal' ? t.animal : t.kind === 'terrain' ? t.point : null;
+    if (!at) return null;
+    const dx = at.x - p.x, dz = at.z - p.z;
+    return Math.hypot(dx, dz) < 0.2 ? null : Math.atan2(dx, dz);
+  }
+
+  /** Feedback for a blow that lands while mining or digging (the work itself resolves at the end). */
+  private blowFx(ctx: Ctx, swing: SwingKind) {
+    if (ctx.t.kind !== 'terrain') return;
+    const hard = ctx.t.mat === Mat.Rock || ctx.t.mat === Mat.Iron;
+    if (swing === 'chop' && hard) this.sound.clink();
+    else this.sound.glance(0.8);
+    this.player.shake(hard ? 0.35 : 0.2);
+  }
+
+  /** A blow lands on a tree: notch, shake, chips, thunk. */
+  treeHit(t: TreeObj, strength: number, clean: boolean) {
+    const p = this.player.pos;
+    this.world.changed(t); // swaps the instanced tree for its own notched model
+    this.view.treeFx.hit(t, p.x, p.z, strength, clean);
+    if (clean) this.sound.chop(0.6 + strength * 0.4); else this.sound.glance();
+    this.player.shake(clean ? 0.3 + strength * 0.25 : 0.15);
+  }
+
+  /**
+   * Fell a tree: it topples away from you; logs and branches land where the
+   * trunk comes down, and a stump is left behind.
+   */
+  fellTree(t: TreeObj, items: Item[], onDone: () => void) {
+    const p = this.player.pos;
+    const dx = t.x - p.x, dz = t.z - p.z;
+    const { s } = treeScale(t);
+    this.world.stumps.push({ x: t.x, z: t.z, s, species: t.species });
+    this.view.treeFx.syncStumps(this.world.stumps);
+    this.sound.creak(distVol(Math.hypot(dx, dz)));
+    // The logs land with the trunk. If the fall is never drawn (e.g. the tab is
+    // in the background), drop them anyway after a few seconds.
+    const len = Math.hypot(dx, dz) || 1;
+    const drop: PendingDrop = {
+      left: 6, done: false, at: { x: t.x + (dx / len) * 2, z: t.z + (dz / len) * 2 },
+      land: (x, z) => {
+        if (drop.done) return;
+        drop.done = true;
+        this.dropToGround(items, x, this.world.terrain.heightAt(x, z), z);
+        onDone();
+      },
+    };
+    this.pendingDrops.push(drop);
+    this.view.treeFx.fell(t, dx, dz, (x, z) => {
+      const d = Math.hypot(x - this.player.pos.x, z - this.player.pos.z);
+      this.sound.crash(distVol(d));
+      this.player.shake(Math.max(0, 1 - d / 22));
+      drop.land(x, z);
+    });
+    this.world.remove(t);
   }
 
   repeatLast() {
@@ -1021,6 +1099,7 @@ export class Game {
   private frame(timestamp: number) {
     this.timer.update(timestamp);
     const dt = Math.min(0.05, this.timer.getDelta());
+    this.renderDt = dt;
     this.elapsed += dt;
     if (!this.paused) this.update(dt);
     this.render();
@@ -1053,6 +1132,10 @@ export class Game {
     if (inp.hit('KeyB')) this.ui.toggle('build');
     if (inp.hit('KeyH') || inp.hit('F1')) this.ui.toggle('help');
     if (inp.hit('KeyJ')) this.ui.toggle('journal');
+    if (inp.hit('KeyM')) {
+      this.sound.muted = !this.sound.muted;
+      this.msg(this.sound.muted ? 'Sound off.' : 'Sound on.', 'info');
+    }
     if (inp.hit('KeyG') && !this.placing) this.request(ACTION_MAP.survey, { g: this, t: { kind: 'none' } });
     if (inp.hit('KeyR')) this.repeatLast();
     if (inp.hit('KeyX')) { if (this.action) this.cancelAction('You stop what you are doing.'); }
@@ -1110,11 +1193,35 @@ export class Game {
     }
 
     // --- action progress
+    p.swingAnim = null;
+    p.faceYaw = null;
     if (this.action) {
       const a = this.action;
       a.elapsed += dt;
-      p.swing = (a.elapsed * 1.2) % 1;
-      if (a.elapsed >= a.total) this.finish(a);
+      const swing = typeof a.def.swing === 'function' ? a.def.swing(a.ctx) : a.def.swing;
+      p.swing = swing ? 0 : (a.elapsed * 1.2) % 1;
+      p.faceYaw = this.faceToward(a.ctx.t);
+      if (swing) {
+        if (a.def.impactAt) {
+          // One swing, one blow: the hit lands partway through.
+          p.swingAnim = { kind: swing, phase: a.elapsed / a.total, impactAt: a.def.impactAt };
+          if (!a.resolved && a.elapsed >= a.total * a.def.impactAt) {
+            a.resolved = true;
+            this.complete(a.def, a.ctx, a.total, undefined, true);
+          }
+        } else {
+          // A longer job (mining, digging) is a series of swings; the work resolves at the end.
+          const period = swing === 'dig' ? 1.6 : 1.3;
+          const phase = (a.elapsed % period) / period;
+          p.swingAnim = { kind: swing, phase, impactAt: 0.62 };
+          const blow = Math.floor(a.elapsed / period - 0.62);
+          if (blow >= 0 && blow !== a.lastBlow) { a.lastBlow = blow; this.blowFx(a.ctx, swing); }
+        }
+      }
+      if (this.action === a && a.elapsed >= a.total) {
+        if (a.resolved) { this.action = null; this.afterAction(a.def, a.ctx); }
+        else this.finish(a);
+      }
     } else {
       p.swing = 0;
     }
@@ -1156,6 +1263,11 @@ export class Game {
     if (p.health <= 0) this.die();
 
     // --- world
+    for (const d of [...this.pendingDrops]) {
+      d.left -= dt;
+      if (!d.done && d.left <= 0) d.land(d.at.x, d.at.z);
+      if (d.done) this.pendingDrops.splice(this.pendingDrops.indexOf(d), 1);
+    }
     this.world.tick(dt * this.dev.timeScale);
     this.growth.update(this.world, p.pos.x, p.pos.z, dt * this.dev.timeScale);
     this.updateMarkers();
@@ -1193,10 +1305,21 @@ export class Game {
 
   private render() {
     const p = this.player;
+    this.view.treeFx.update(this.renderDt);
     this.sky.update(this.world.dayFraction, p.pos, this.elapsed);
     this.view.syncAnimals(this.elapsed);
     this.view.updateFires(p.pos.x, p.pos.z, this.elapsed);
     this.renderer.render(this.scene, this.camera);
+    // First-person hands and tool, on top of the world.
+    if (!this.working) {
+      const it = this.activeItem();
+      const kind = it ? itemDef(it.type).tool : undefined;
+      this.viewModel.setTool(kind, it?.type);
+      const show = p.cameraMode === 'first' && (!!kind || !!p.swingAnim) && !this.ui.anyWindowOpen();
+      const speed = Math.min(1, Math.hypot(p.vel.x, p.vel.z) / 4);
+      this.viewModel.update(this.renderDt, show, p.swingAnim, speed, { hemi: this.sky.hemi.intensity, sun: this.sky.sun.intensity * 0.6 });
+      this.viewModel.render(this.renderer);
+    }
     this.working?.session.render(this.renderer);
   }
 

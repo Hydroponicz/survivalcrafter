@@ -10,6 +10,7 @@ import {
 import { FORAGE, IDENTIFY } from '../data/forage';
 import { BIOMES, biomeAt, type Biome } from './forage';
 import type { Game } from './game';
+import type { SwingKind } from './tools';
 import { buildStepMinigame, RECIPE_MINIGAMES, type MinigameSpec } from './minigames';
 
 export type Target =
@@ -47,6 +48,10 @@ export interface ActionDef {
   toolWear?: number;
   /** Duration ignores tool power (e.g. weapon swings). */
   fixedTime?: boolean;
+  /** How the tool is swung while doing this. */
+  swing?: SwingKind | ((c: Ctx) => SwingKind | undefined);
+  /** Resolve at this fraction of the swing (the moment of impact) instead of at the end. */
+  impactAt?: number;
   /** Hands-on work: the minigame to play instead of waiting out a timer. */
   minigame?: (c: Ctx) => MinigameSpec | undefined;
   /** Always the quick, timed version (no minigame). */
@@ -208,7 +213,7 @@ export const ACTIONS: ActionDef[] = [
       if (c.t.point.y < Y_MIN + 3) return 'You can dig no deeper.';
       return null;
     },
-    time: 4, skill: 'digging', difficulty: 6, stamina: 6, toolWear: 0.12,
+    time: 4, swing: 'dig', skill: 'digging', difficulty: 6, stamina: 6, toolWear: 0.12,
     run: (c, o) => {
       if (!isGround(c)) return;
       const { point: p, normal: n } = c.t;
@@ -229,6 +234,7 @@ export const ACTIONS: ActionDef[] = [
       if (Math.hypot(p.x - c.g.player.pos.x, p.z - c.g.player.pos.z) > 6) return 'Stand closer to the ground you want to level.';
       return null;
     },
+    swing: 'dig',
     time: 4, skill: 'digging', difficulty: 9, stamina: 7, toolWear: 0.12,
     repeat: (c) => !!c.g.levelling,
     run: (c, o) => {
@@ -258,6 +264,7 @@ export const ACTIONS: ActionDef[] = [
   {
     id: 'raise', label: (c) => `Raise ground (uses ${fillItem(c.g) ?? 'dirt'})`,
     show: (c) => toolIs(c, 'shovel') && isGround(c) && !!fillItem(c.g),
+    swing: 'dig',
     time: 3, skill: 'digging', difficulty: 5, stamina: 5, toolWear: 0.06,
     run: (c, o) => {
       if (!isGround(c)) return;
@@ -275,6 +282,7 @@ export const ACTIONS: ActionDef[] = [
   {
     id: 'smooth', label: 'Smooth ground',
     show: (c) => toolIs(c, 'shovel') && isGround(c),
+    swing: 'dig',
     time: 3, skill: 'digging', difficulty: 4, stamina: 4, toolWear: 0.05,
     run: (c) => {
       if (!isGround(c)) return;
@@ -288,7 +296,7 @@ export const ACTIONS: ActionDef[] = [
     id: 'mine', label: 'Mine',
     show: (c) => toolIs(c, 'pickaxe') && isGround(c),
     check: (c) => (isGround(c) && c.t.point.y < Y_MIN + 3 ? 'You have reached bedrock.' : null),
-    time: 7, skill: 'mining', difficulty: (c) => (groundMat(c) === Mat.Iron ? 18 : 8),
+    time: 7, swing: 'chop', skill: 'mining', difficulty: (c) => (groundMat(c) === Mat.Iron ? 18 : 8),
     stamina: 10, toolWear: 0.2,
     run: (c, o) => {
       if (!isGround(c)) return;
@@ -311,6 +319,7 @@ export const ACTIONS: ActionDef[] = [
       if (c.g.world.near(c.t.point.x, c.t.point.z, 1.5).some((o) => o.kind === 'tree' && Math.hypot(o.x - c.t.point.x, o.z - c.t.point.z) < 1.2)) return 'Tree roots are in the way.';
       return null;
     },
+    swing: 'dig',
     time: 6, skill: 'farming', difficulty: 5, stamina: 7, toolWear: 0.1,
     run: (c, o) => {
       if (!isGround(c)) return;
@@ -429,22 +438,44 @@ export const ACTIONS: ActionDef[] = [
     },
   },
   {
-    id: 'cut_tree', label: 'Cut down',
+    id: 'cut_tree',
+    label: (c) => { const t = obj(c, 'tree'); return t && t.chop ? `Chop (${Math.round(t.chop * 100)}% through)` : 'Chop down'; },
     show: (c) => !!obj(c, 'tree') && toolIs(c, 'hatchet'),
-    check: (c) => (obj(c, 'tree')!.age < 0.2 ? 'It is only a sapling. Leave it to grow.' : null),
-    time: (c) => 8 + obj(c, 'tree')!.age * 10,
-    skill: 'woodcutting', difficulty: (c) => ({ pine: 8, oak: 14, birch: 10 })[obj(c, 'tree')!.species], stamina: 18, toolWear: 0.35,
+    check: (c) => {
+      const t = obj(c, 'tree')!;
+      if (!c.g.world.objects.has(t.id)) return 'The tree is down.';
+      return t.age < 0.2 ? 'It is only a sapling. Leave it to grow.' : null;
+    },
+    // Each swing is one blow; it lands at the bottom of the stroke.
+    time: 1.35, fixedTime: true, impactAt: 0.62, swing: 'chop',
+    skill: 'woodcutting', difficulty: (c) => ({ pine: 8, oak: 14, birch: 10 })[obj(c, 'tree')!.species], stamina: 3, toolWear: 0.05,
+    repeat: (c) => { const t = obj(c, 'tree'); return !!t && c.g.world.objects.has(t.id); },
     run: (c, o) => {
       const t = obj(c, 'tree')!;
-      if (!o.success) return c.g.msg('Your hatchet glances off the trunk. You make little progress.', 'fail');
-      c.g.world.remove(t);
+      const g = c.g;
+      const p = g.player.pos;
+      // The notch opens on the side you first chop from.
+      if (t.notchDir === undefined) t.notchDir = Math.atan2(p.x - t.x, p.z - t.z);
+      const power = c.tool ? itemDef(c.tool.type).toolPower ?? 1 : 0.5;
+      const hardness = { pine: 0.9, oak: 1.25, birch: 1.0 }[t.species] * (0.6 + 0.6 * t.age);
+      const bite = (0.13 + 0.08 * power + g.skills.get('woodcutting') / 300) / hardness;
+      // A glancing blow still takes a little out.
+      const gained = o.success ? bite * (0.85 + Math.random() * 0.3) : bite * 0.45;
+      const before = t.chop ?? 0;
+      t.chop = Math.min(1, before + gained);
+      // The logs' quality is the average quality of the blows that made them.
+      t.chopQl = before > 0 ? ((t.chopQl ?? o.ql) * before + o.ql * gained) / t.chop : o.ql;
+      g.treeHit(t, Math.min(1, gained / 0.15), o.success);
+      if (!o.success && Math.random() < 0.35) g.msg('Your hatchet glances off the trunk.', 'fail');
+      if (t.chop < 1) return;
+      const ql = t.chopQl ?? o.ql;
       const logs = Math.max(1, Math.round(t.age * 3.2));
       const items = [];
-      for (let i = 0; i < logs; i++) items.push(makeItem('log', o.ql * (0.75 + t.age * 0.35), `${t.species} log`));
-      for (let i = 0; i < 1 + Math.floor(Math.random() * 3); i++) items.push(makeItem('branch', o.ql));
-      if (Math.random() < 0.35) items.push(makeItem('sprout', o.ql, `${t.species} sprout`));
-      c.g.dropToGround(items, t.x, c.g.world.terrain.heightAt(t.x, t.z), t.z);
-      c.g.msg(`The ${t.species} tree crashes down! It leaves ${logs} log${logs > 1 ? 's' : ''} and some branches on the ground.`, 'good');
+      for (let i = 0; i < logs; i++) items.push(makeItem('log', ql * (0.75 + t.age * 0.35), `${t.species} log`));
+      for (let i = 0; i < 1 + Math.floor(Math.random() * 3); i++) items.push(makeItem('branch', ql));
+      if (Math.random() < 0.35) items.push(makeItem('sprout', ql, `${t.species} sprout`));
+      g.msg('Timber! The tree creaks and starts to fall.', 'good');
+      g.fellTree(t, items, () => g.msg(`The ${t.species} crashes down, leaving ${logs} log${logs > 1 ? 's' : ''} and some branches.`, 'good'));
     },
   },
   {
@@ -714,7 +745,7 @@ export const ACTIONS: ActionDef[] = [
       const d = Math.hypot(c.t.animal.x - c.g.player.pos.x, c.t.animal.z - c.g.player.pos.z);
       return d > 3.2 ? 'It is out of reach.' : null;
     },
-    time: (c) => (toolIs(c, 'weapon') ? 1.8 : c.tool ? 2.2 : 1.5), fixedTime: true, skill: 'fighting',
+    time: (c) => (toolIs(c, 'weapon') ? 1.8 : c.tool ? 2.2 : 1.5), fixedTime: true, swing: 'chop', impactAt: 0.6, skill: 'fighting',
     difficulty: (c) => (c.t.kind === 'animal' && c.t.animal.species === 'boar' ? 8 : 4) - (toolIs(c, 'weapon') ? 4 : 0),
     stamina: 6, toolWear: 0.15,
     repeat: (c) => c.t.kind === 'animal' && c.t.animal.hp > 0,

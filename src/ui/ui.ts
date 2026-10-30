@@ -835,7 +835,7 @@ export class UI {
         <tr><td>R</td><td>Repeat last action · X: stop current action</td></tr>
         <tr><td>I / Tab · C · B · K</td><td>Inventory · Crafting · Build · Skills</td></tr>
         <tr><td>H · Esc</td><td>This guide · release mouse / close windows</td></tr>
-        <tr><td>G · J</td><td>Survey the area for things to pick · Field journal</td></tr>
+        <tr><td>G · J · M</td><td>Survey the area for things to pick · Field journal · Sound on/off</td></tr>
         <tr><td>Mouse in windows</td><td>While a window or the action menu is open, the mouse moves an in-game cursor (the camera holds still). Esc releases the real mouse.</td></tr>
         <tr><td>&#96; or F2</td><td>Dev console (cheats: instant crafting, no needs, fly…)</td></tr>
       </table>

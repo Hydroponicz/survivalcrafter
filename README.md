@@ -36,7 +36,7 @@ chunks you changed are stored; the rest regenerates from the seed).
 | 1-9 / 0 | Activate hotbar item / bare hands (drag items from the inventory onto the hotbar to bind them) |
 | R / X | Repeat last action / stop current action |
 | I or Tab, C, B, K, H | Inventory, Crafting, Build, Skills, Help |
-| G / J | Survey for forage / field journal |
+| G / J / M | Survey for forage / field journal / sound on-off |
 | ` or F2 | Dev console (cheats) |
 
 ## Dev console
@@ -73,6 +73,12 @@ Toggles are remembered per browser; a purple **DEV** badge shows while any cheat
   ("red spotted mushroom"). Recognise them as you pick (Herbalism), **Study** them, or learn by handling
   enough. Some are poisonous — eating an unknown one is a gamble; a yarrow poultice draws out poison.
   Mint tea and hearty stew reward knowing your plants. The field journal (**J**) records it all.
+- **Chopping trees you can feel.** Every swing is a blow: wind up, drive the axe in, and the hit lands
+  at the bottom of the stroke with a thunk, flying chips, falling leaves, camera shake and a shudder
+  through the tree. A V-notch deepens with each hit (and stays if you walk away). When it's through,
+  the tree creaks, topples away from you with gathering speed and crashes down in a cloud of dust,
+  leaving a stump and the logs where the trunk landed. First person shows your arm and axe; third person
+  shows a two-handed overhead swing. Mining and digging get their own swings too. M toggles sound.
 - **Hands-on crafting and building (Schedule 1–style).** Crafting and building steps are 3D minigames at
   the workstation: draw a saw along the line to cut planks, split logs and knap stone with timed strikes,
   carve shafts along a guide, pump the bellows to hold smelting heat, hammer hot iron on the anvil before it

@@ -1,5 +1,7 @@
 import * as THREE from 'three';
+import type { ToolKind } from '../data/items';
 import { pieceBoxes, STRUCTURES } from '../data/structures';
+import { buildToolMesh, swingPose, type SwingKind } from './tools';
 import { WATER_LEVEL, Y_MIN, type Terrain } from '../world/terrain';
 import { toLocal, type World } from '../world/world';
 import type { Input } from './input';
@@ -36,10 +38,17 @@ export class Player {
   stamina = 100;
 
   model: THREE.Group;
-  private parts: Record<string, THREE.Object3D> = {};
+  private parts = {} as Record<'armL' | 'armR' | 'legL' | 'legR' | 'head' | 'upper', THREE.Object3D>;
   private walkPhase = 0;
-  swing = 0; // 0..1 action animation
+  swing = 0; // 0..1 action animation (legacy, for actions without a swing)
+  /** The current tool swing, driven by the running action. */
+  swingAnim: { kind: SwingKind; phase: number; impactAt: number } | null = null;
+  /** While working on something, the body turns to face it (world yaw). */
+  faceYaw: number | null = null;
   heldItem = new THREE.Group();
+  private heldKind: ToolKind | undefined;
+  private shakeAmt = 0;
+  private modelYaw = 0;
 
   constructor() {
     this.model = this.buildModel();
@@ -55,41 +64,45 @@ export class Player {
       mesh.castShadow = true;
       return mesh;
     };
-    const torso = box(0.5, 0.65, 0.28, 0x6b5a3e);
-    torso.position.y = 1.15;
-    const belt = box(0.52, 0.08, 0.3, 0x3a2a1a);
-    belt.position.y = 0.85;
-    const head = box(0.3, 0.32, 0.3, 0xd9a982);
-    head.position.y = 1.66;
-    const hair = box(0.32, 0.1, 0.32, 0x4a3020);
-    hair.position.y = 1.83;
-    const armL = box(0.15, 0.62, 0.15, 0x6b5a3e, true);
-    armL.position.set(-0.33, 1.45, 0);
-    const armR = box(0.15, 0.62, 0.15, 0x6b5a3e, true);
-    armR.position.set(0.33, 1.45, 0);
+    // Legs hang from the hips; everything above twists and leans as one (pivot at the hips).
     const legL = box(0.2, 0.82, 0.2, 0x4a4036, true);
     legL.position.set(-0.13, 0.82, 0);
     const legR = box(0.2, 0.82, 0.2, 0x4a4036, true);
     legR.position.set(0.13, 0.82, 0);
-    this.heldItem.position.set(0, -0.6, 0.1);
+    const upper = new THREE.Group();
+    upper.position.y = 0.85;
+    const torso = box(0.5, 0.65, 0.28, 0x6b5a3e);
+    torso.position.y = 0.3;
+    const belt = box(0.52, 0.08, 0.3, 0x3a2a1a);
+    const head = box(0.3, 0.32, 0.3, 0xd9a982);
+    head.position.y = 0.81;
+    const hair = box(0.32, 0.1, 0.32, 0x4a3020);
+    hair.position.y = 0.98;
+    const nose = box(0.05, 0.06, 0.05, 0xc9926c);
+    nose.position.set(0, 0.79, 0.17);
+    const armL = box(0.15, 0.62, 0.15, 0x6b5a3e, true);
+    armL.position.set(-0.33, 0.6, 0);
+    const armR = box(0.15, 0.62, 0.15, 0x6b5a3e, true);
+    armR.position.set(0.33, 0.6, 0);
+    for (const arm of [armL, armR]) {
+      const hand = box(0.13, 0.12, 0.13, 0xd9a982);
+      hand.position.y = -0.62;
+      arm.add(hand);
+    }
+    // The tool sits in the right fist, pointing forward out of it.
+    this.heldItem.position.set(0, -0.63, 0);
+    this.heldItem.rotation.x = Math.PI / 2;
     armR.add(this.heldItem);
-    g.add(torso, belt, head, hair, armL, armR, legL, legR);
-    this.parts = { armL, armR, legL, legR, head };
+    upper.add(torso, belt, head, hair, nose, armL, armR);
+    g.add(legL, legR, upper);
+    this.parts = { armL, armR, legL, legR, head, upper };
     return g;
   }
 
-  setHeld(kind: string | undefined) {
+  setHeld(kind: ToolKind | undefined, itemType?: string) {
     this.heldItem.clear();
-    if (!kind) return;
-    const wood = new THREE.MeshStandardMaterial({ color: 0x7a5a38 });
-    const metal = new THREE.MeshStandardMaterial({ color: 0x8a8a8a, metalness: 0.4, roughness: 0.5 });
-    const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.6, 5), wood);
-    handle.rotation.x = Math.PI / 2;
-    handle.position.z = 0.25;
-    this.heldItem.add(handle);
-    const head = new THREE.Mesh(new THREE.BoxGeometry(kind === 'shovel' ? 0.2 : 0.06, kind === 'shovel' ? 0.02 : 0.18, 0.12), metal);
-    head.position.z = 0.55;
-    this.heldItem.add(head);
+    this.heldKind = kind;
+    if (kind) this.heldItem.add(buildToolMesh(kind, itemType));
   }
 
   get eye(): THREE.Vector3 {
@@ -308,6 +321,11 @@ export class Player {
     this.animate(dt);
   }
 
+  /** Camera shake (e.g. a heavy chop or a tree landing nearby). */
+  shake(amount: number) {
+    this.shakeAmt = Math.min(1, Math.max(this.shakeAmt, amount));
+  }
+
   private animate(dt: number) {
     const speed = Math.hypot(this.vel.x, this.vel.z);
     if (speed > 0.1 && this.onGround) this.walkPhase += dt * speed * 2.2;
@@ -316,12 +334,56 @@ export class Player {
     const p = this.parts;
     p.legL.rotation.x = s;
     p.legR.rotation.x = -s;
-    p.armL.rotation.x = -s * 0.8;
-    // Action swing overrides the right arm
-    p.armR.rotation.x = this.swing > 0 ? -1.2 - Math.sin(this.swing * Math.PI * 2) * 0.9 : s * 0.8;
+    p.armL.rotation.set(-s * 0.8, 0, 0);
+    p.armR.rotation.set(s * 0.8, 0, 0);
+    p.upper.rotation.set(0, 0, 0);
+    p.upper.position.y = 0.85;
+    const sw = this.swingAnim;
+    if (sw) {
+      const { raise, drive, jolt } = swingPose(sw.kind, sw.phase, sw.impactAt);
+      if (sw.kind === 'chop') {
+        // Two-handed: wind up over the right shoulder, twist through, drive the blade in.
+        const armX = -1.15 - 1.75 * raise + 0.25 * jolt;
+        p.armR.rotation.set(armX, 0, 0.45 + 0.25 * raise);
+        p.armL.rotation.set(armX + 0.1, 0, -0.35 + 0.15 * raise);
+        p.upper.rotation.set(-0.12 * raise + 0.32 * drive - 0.06 * jolt, 0.55 * raise - 0.35 * drive, 0);
+        p.legL.rotation.x = -0.15 * drive;
+        p.legR.rotation.x = 0.2 * drive;
+        p.upper.position.y = 0.85 - 0.05 * drive;
+      } else if (sw.kind === 'dig') {
+        // Shovel: lean in, push the blade down, then lever it back.
+        const armX = -0.75 - 0.35 * raise + 0.25 * drive;
+        p.armR.rotation.set(armX, 0, 0.3);
+        p.armL.rotation.set(armX - 0.25, 0, -0.3);
+        p.upper.rotation.set(0.15 + 0.35 * drive, 0.1, 0);
+      } else {
+        p.armR.rotation.set(-0.6 - drive * 0.9, 0, 0.1);
+        p.upper.rotation.set(drive * 0.25, 0, 0);
+      }
+    } else if (this.swing > 0) {
+      p.armR.rotation.x = -1.2 - Math.sin(this.swing * Math.PI * 2) * 0.9;
+    } else if (this.heldKind) {
+      // Carry the tool a little forward.
+      p.armR.rotation.x = -0.35 + s * 0.4;
+    }
     this.model.position.copy(this.pos);
     if (this.swimming) this.model.position.y += 0.3;
-    this.model.rotation.y = this.yaw;
+    // Local +Z is the front of the body: face the work, otherwise the way you're looking.
+    const want = this.faceYaw ?? this.yaw + Math.PI;
+    let d = want - this.modelYaw;
+    while (d > Math.PI) d -= Math.PI * 2;
+    while (d < -Math.PI) d += Math.PI * 2;
+    this.modelYaw += d * Math.min(1, dt * 14);
+    this.model.rotation.y = this.modelYaw;
+    this.shakeAmt = Math.max(0, this.shakeAmt - dt * 2.8);
+  }
+
+  private applyShake(cam: THREE.PerspectiveCamera) {
+    if (this.shakeAmt <= 0) return;
+    const a = this.shakeAmt * this.shakeAmt * 0.035;
+    cam.rotateX((Math.random() - 0.5) * a);
+    cam.rotateY((Math.random() - 0.5) * a);
+    cam.rotateZ((Math.random() - 0.5) * a * 0.6);
   }
 
   updateCamera(cam: THREE.PerspectiveCamera, terrain: Terrain) {
@@ -330,6 +392,7 @@ export class Player {
     if (this.cameraMode === 'first') {
       cam.position.copy(eye);
       cam.lookAt(eye.clone().add(this.forward()));
+      this.applyShake(cam);
       return;
     }
     const f = this.forward();
@@ -343,5 +406,6 @@ export class Player {
     const pos = target.clone().addScaledVector(f, -d);
     cam.position.copy(pos);
     cam.lookAt(target.clone().addScaledVector(f, 4));
+    this.applyShake(cam);
   }
 }

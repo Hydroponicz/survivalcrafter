@@ -10,7 +10,14 @@ export interface TreeObj {
   kind: 'tree'; id: number; species: Species; x: number; z: number;
   age: number; // 0..1, sprouts grow into full trees
   branches: number; // harvestable branches, regrow slowly
+  /** How far it has been chopped through (0..1), the direction the notch faces, and the work's quality so far. */
+  chop?: number;
+  notchDir?: number;
+  chopQl?: number;
 }
+
+/** What's left after felling a tree. Scenery only. */
+export interface Stump { x: number; z: number; s: number; species: Species }
 
 export interface BushObj {
   kind: 'bush'; id: number; x: number; z: number;
@@ -98,6 +105,7 @@ export class World {
   objects = new Map<number, WorldObj>();
   crops = new Map<number, Crop>();
   animals: AnimalObj[] = [];
+  stumps: Stump[] = [];
   time = DAY_LENGTH * 0.36; // start in the morning
   private grid = new Map<number, Set<WorldObj>>();
   private nextId = 1;
@@ -318,6 +326,7 @@ export class World {
       animals: this.animals.map((a) => ({ species: a.species, x: a.x, z: a.z, hp: a.hp })),
       time: this.time,
       spawn: this.spawn,
+      stumps: this.stumps,
     };
   }
 
@@ -333,6 +342,7 @@ export class World {
     }
     w.time = data.time;
     w.spawn = data.spawn;
+    w.stumps = data.stumps ?? [];
     return w;
   }
 }
