@@ -57,6 +57,7 @@ const lin = (c: [number, number, number]) => c.map((v) => Math.pow(v, 2.2));
 const GRASS_DRY = lin([0.6, 0.55, 0.27]), GRASS_LUSH = lin([0.22, 0.47, 0.16]), GRASS_COLD = lin([0.27, 0.4, 0.27]);
 const SNOW = lin([0.93, 0.95, 0.98]);
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
+const tmpCol = [0, 0, 0];
 const LIN = Object.fromEntries(Object.entries(SRGB).map(([k, c]) => [k, c.map((v) => Math.pow(v, 2.2))])) as unknown as Record<Mat, number[]>;
 
 /** Drainage (log of water through a column) above which valley floors are clay. */
@@ -257,6 +258,28 @@ export class Terrain {
     const n = this.normalAt(x, h - 0.05, z);
     const slope = Math.sqrt(Math.max(0, 1 - n.y * n.y)) / Math.max(0.2, n.y);
     return zoneOf(tempAt(this.climBase[i], h), this.moist[i], h, WATER_LEVEL, !!this.nearWater[i], slope);
+  }
+
+  /**
+   * Linear colour of a material at a point: grass shows the climate (straw
+   * where dry, deep green where wet, dark up high) and snow lies on cold,
+   * gentle ground. `ny` is the surface normal's up component.
+   */
+  surfaceColor(m: Mat, x: number, y: number, z: number, ny: number, out: number[] = [0, 0, 0]): number[] {
+    const base = LIN[m] ?? LIN[Mat.Dirt];
+    let r = base[0], g = base[1], b = base[2];
+    const ci = this.col(x, z);
+    const temp = tempAt(this.climBase[ci], y);
+    const mix = (c: number[], k: number) => { if (k <= 0) return; r += (c[0] - r) * k; g += (c[1] - g) * k; b += (c[2] - b) * k; };
+    if (m === Mat.Grass) {
+      const mo = this.moist[ci];
+      mix(GRASS_DRY, clamp01((0.42 - mo) / 0.3) * 0.85);
+      mix(GRASS_LUSH, clamp01((mo - 0.55) / 0.3) * 0.7);
+      mix(GRASS_COLD, clamp01((0.45 - temp) / 0.2) * 0.8);
+    }
+    mix(SNOW, clamp01((SNOW_TEMP + 0.03 - temp) / 0.05) * clamp01((ny - 0.45) / 0.25));
+    out[0] = r; out[1] = g; out[2] = b;
+    return out;
   }
 
   surfaceMaterial(x: number, z: number): Mat {
@@ -712,20 +735,7 @@ export class Terrain {
           let m = this.m(gx + (bk & 1), gy + ((bk >> 1) & 1), gz + ((bk >> 2) & 1));
           if (m === Mat.Grass && ny < 0.55) m = Mat.Dirt; // grass doesn't cling to steep banks
           const wx = gx + fx, wy = gy + fy, wz = gz + fz;
-          const base = LIN[m] ?? LIN[Mat.Dirt];
-          let r = base[0], gC = base[1], b = base[2];
-          const ci = this.col(wx, wz);
-          const temp = tempAt(this.climBase[ci], wy);
-          const mix = (c: number[], k: number) => { if (k <= 0) return; r += (c[0] - r) * k; gC += (c[1] - gC) * k; b += (c[2] - b) * k; };
-          if (m === Mat.Grass) {
-            // Grass shows the climate: straw-coloured where it's dry, deep green where wet, dark up high.
-            const mo = this.moist[ci];
-            mix(GRASS_DRY, clamp01((0.42 - mo) / 0.3) * 0.85);
-            mix(GRASS_LUSH, clamp01((mo - 0.55) / 0.3) * 0.7);
-            mix(GRASS_COLD, clamp01((0.45 - temp) / 0.2) * 0.8);
-          }
-          // Snow lies on the cold heights, but slides off steep faces.
-          mix(SNOW, clamp01((SNOW_TEMP + 0.03 - temp) / 0.05) * clamp01((ny - 0.45) / 0.25));
+          const [r, gC, b] = this.surfaceColor(m, wx, wy, wz, ny, tmpCol);
           const j = 0.88 + hash2(Math.floor(wx * 3), Math.floor(wz * 3) + Math.floor(wy * 7), 3) * 0.24;
           const wet = wy < this.waterAt(wx, wz) + 0.25 ? 0.72 : 1;
           pos.push(wx, wy, wz);

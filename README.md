@@ -56,6 +56,14 @@ Toggles are remembered per browser; a purple **DEV** badge shows while any cheat
   tool QL and material QL. Tools wear out and eventually break.
 - **The active item decides your options.** Activate a shovel and the action menu offers Dig, Flatten,
   Cultivate; a pickaxe offers Mine; bare hands forage.
+- **Life underfoot.** Grass sways in the wind around you, coloured by the local climate, with
+  flowers in the meadows, ferns under the woods, reeds and cattails along the banks and in the
+  shallows, heather on the dry heath and pebbles on rock and shore. Boulders (coloured like the
+  bedrock they broke from) and mossy fallen trees lie further out. Fireflies drift over damp ground
+  on warm nights.
+- **A soundscape.** Wind that rises with altitude and gusts across open ground, birdsong by day
+  (busiest in the woods and loudest at the dawn chorus), crickets at night, frogs in the marshes and
+  babbling water near rivers, all synthesised in the browser.
 - **A living sky.** A physically based sky (Rayleigh and Mie scattering) with drifting clouds lights the
   world: it's captured as an environment map so everything picks up skylight and water reflects it.
   Distant hills fade into the real horizon colour, sunrise and sunset glow warm with long shadows, stars

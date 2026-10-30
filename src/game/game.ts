@@ -7,6 +7,8 @@ import { anvilGrade } from './smithy';
 import { isRock, Mat, type Volumes } from '../world/terrain';
 import { forageHeight, forageScale } from '../world/forageProps';
 import { buildPieceMesh, WorldView } from '../world/view';
+import { GroundCover } from '../world/groundcover';
+import { Fireflies } from '../world/fireflies';
 import {
   ANIMALS, pointInPiece, toLocal, toWorld, World, type AnimalObj, type ForageObj, type PileObj, type StructureObj, type TreeObj, type WorldObj,
 } from '../world/world';
@@ -131,6 +133,12 @@ export class Game {
   private screeTimer = 0;
   private steepTipShown = false;
   readonly sound = new Sound();
+  /** Grass, plants, rocks and logs around you (visual only). */
+  groundCover!: GroundCover;
+  private fireflies = new Fireflies();
+  /** What the surroundings sound and look like right now, refreshed a couple of times a second. */
+  private amb = { wind: 0.3, water: 0, birds: 0, crickets: 0, frogs: 0, fireflies: 0, sway: 0.4 };
+  private ambTimer = 0;
   private viewModel = new ViewModel();
   private saveTimer = 0;
   private respawnTimer = 0;
@@ -160,6 +168,9 @@ export class Game {
     this.sky = new Sky(this.scene, world.terrain.size);
     // Rivers and lakes share the sea's water material (and its ripples).
     this.scene.add(world.terrain.waterMesh(this.sky.water.material as THREE.Material));
+    this.groundCover = new GroundCover(world);
+    this.scene.add(this.groundCover.group, this.fireflies.points);
+    this.view.onStructure = (o) => this.groundCover.invalidate(o.x, o.z, 3);
 
     const ring = (opacity: number) => new THREE.LineLoop(
       new THREE.BufferGeometry().setFromPoints(Array.from({ length: 48 }, () => new THREE.Vector3())),
@@ -1482,6 +1493,11 @@ export class Game {
     const p = this.player;
     this.view.treeFx.update(this.renderDt);
     this.sky.update(this.world.dayFraction, p.pos, this.elapsed, this.renderer, this.camera, this.renderDt);
+    this.ambTimer -= this.renderDt;
+    if (this.ambTimer <= 0) { this.ambTimer = 0.5; this.surroundings(); }
+    this.groundCover.update(this.camera.position, this.elapsed, this.world.terrain.wind, this.amb.sway);
+    this.fireflies.update(this.renderDt, this.elapsed, this.camera.position, this.world.terrain, this.amb.fireflies);
+    this.sound.ambience(this.amb, this.renderDt);
     this.view.syncAnimals(this.elapsed);
     this.view.updateFires(p.pos.x, p.pos.z, this.elapsed);
     this.renderer.render(this.scene, this.camera);
@@ -1522,6 +1538,40 @@ export class Game {
     } catch (e) {
       console.warn('Save failed', e);
     }
+  }
+
+  /**
+   * Read the surroundings for ambience: time of day, the zone you're in, how
+   * wooded and how high it is, and how close running water is.
+   */
+  private surroundings() {
+    const p = this.player.pos, t = this.world.terrain, f = this.world.dayFraction;
+    const elev = Math.sin((f - 0.25) * Math.PI * 2);
+    const day = Math.max(0, Math.min(1, elev * 4 + 0.3));
+    const night = 1 - day;
+    const chorus = Math.exp(-(((f - 0.27) / 0.05) ** 2));
+    const zone = t.zoneAt(p.x, p.z);
+    let trees = 0;
+    for (const o of this.world.near(p.x, p.z, 14)) if (o.kind === 'tree' && o.age > 0.4 && Math.hypot(o.x - p.x, o.z - p.z) < 14) trees++;
+    let wd = Infinity;
+    for (let dz = -16; dz <= 16; dz += 2) for (let dx = -16; dx <= 16; dx += 2) {
+      if (t.freshWaterAt(p.x + dx, p.z + dz)) wd = Math.min(wd, Math.hypot(dx, dz));
+    }
+    const water = wd < 16 ? (1 - wd / 16) ** 1.5 : 0;
+    const underground = t.heightAt(p.x, p.z) > p.y + 2.5;
+    const alt = Math.max(0, Math.min(1, (p.y - 2) / 28));
+    const wooded = Math.min(1, trees / 10);
+    const high = zone === 'alpine' || zone === 'snow';
+    const warm = zone === 'meadow' || zone === 'heath' || zone === 'broadleaf' || zone === 'marsh';
+    const a = this.amb;
+    a.wind = Math.min(1, 0.15 + 0.5 * alt + 0.25 * (1 - wooded) + (high ? 0.25 : 0) + (zone === 'heath' ? 0.1 : 0));
+    a.water = water;
+    a.birds = Math.min(1, day * (0.2 + 0.8 * wooded + 0.8 * chorus) * (high ? 0.2 : zone === 'beach' ? 0.5 : 1));
+    a.crickets = night * (warm ? 1 : 0.25);
+    a.frogs = night * Math.min(1, (zone === 'marsh' ? 1 : 0) + water * 0.6);
+    a.fireflies = night * (zone === 'marsh' ? 1 : zone === 'meadow' || zone === 'broadleaf' ? 0.6 : 0) * (t.moistureAt(p.x, p.z) > 0.4 ? 1 : 0.4);
+    a.sway = 0.25 + a.wind * 0.9;
+    if (underground) { a.wind *= 0.15; a.birds = 0; a.crickets *= 0.2; a.frogs = 0; a.water *= 0.4; }
   }
 
   /** Pause-menu escape hatch: hop to the nearest clear spot, or home if there is none. */

@@ -123,6 +123,7 @@ function afterEdit(c: Ctx, x: number, z: number, r: number) {
   c.g.world.disturbCrops(x, z, r);
   c.g.world.settleForage(x, z, r);
   c.g.view.refreshNear(x, z, r + 1);
+  c.g.groundCover.invalidate(x, z, r + 1);
 }
 
 function cropAt(c: Ctx): { key: number; crop?: Crop } {

@@ -208,6 +208,174 @@ export class Sound {
     hf.connect(this.env(ctx, vol, 0.25, 1.1, 0.15));
     rustle.start(t + 0.05);
   }
+
+  // ---------- ambience
+  private amb: { wind: GainNode; windFilter: BiquadFilterNode; water: GainNode; out: GainNode } | null = null;
+  private gustPhase = Math.random() * 100;
+  private nextBird = 0;
+  private nextCricket = 0;
+  private nextFrog = 0;
+
+  /** A looping buffer of soft noise (brown-ish), shared by the wind and water beds. */
+  private loopNoise(ctx: AudioContext, seconds: number, brown: boolean): AudioBufferSourceNode {
+    const len = Math.floor(ctx.sampleRate * seconds);
+    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    let b = 0;
+    for (let i = 0; i < len; i++) {
+      const w = Math.random() * 2 - 1;
+      b = brown ? (b + w * 0.02) * 0.996 : w;
+      d[i] = brown ? b * 3 : w;
+    }
+    const fade = 2000;
+    for (let i = 0; i < fade; i++) { const k = i / fade; d[i] *= k; d[len - 1 - i] *= k; }
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.loop = true;
+    return src;
+  }
+
+  /**
+   * The world's background sound, called every frame with how much of each
+   * there should be (0..1): wind, running water, birdsong, crickets, frogs.
+   */
+  ambience(lv: { wind: number; water: number; birds: number; crickets: number; frogs: number }, dt: number) {
+    const ctx = this.ensure();
+    if (!ctx) {
+      if (this.ctx && this.amb) this.amb.out.gain.setTargetAtTime(0, this.ctx.currentTime, 0.1);
+      return;
+    }
+    if (!this.amb) {
+      const out = ctx.createGain();
+      out.gain.value = 0;
+      out.connect(this.master!);
+      const windSrc = this.loopNoise(ctx, 4, true);
+      const windFilter = ctx.createBiquadFilter();
+      windFilter.type = 'lowpass';
+      windFilter.frequency.value = 500;
+      const wind = ctx.createGain();
+      wind.gain.value = 0;
+      windSrc.connect(windFilter); windFilter.connect(wind); wind.connect(out);
+      windSrc.start();
+      // Babbling water: two bands of noise, gently fluttering.
+      const waterSrc = this.loopNoise(ctx, 3, false);
+      const b1 = ctx.createBiquadFilter(); b1.type = 'bandpass'; b1.frequency.value = 900; b1.Q.value = 0.8;
+      const b2 = ctx.createBiquadFilter(); b2.type = 'bandpass'; b2.frequency.value = 2600; b2.Q.value = 1.2;
+      const water = ctx.createGain();
+      water.gain.value = 0;
+      const flutter = ctx.createOscillator(); flutter.frequency.value = 6.3;
+      const fg = ctx.createGain(); fg.gain.value = 0.25;
+      flutter.connect(fg);
+      const wmix = ctx.createGain(); wmix.gain.value = 0.7;
+      fg.connect(wmix.gain);
+      waterSrc.connect(b1); waterSrc.connect(b2); b1.connect(wmix); b2.connect(wmix); wmix.connect(water); water.connect(out);
+      waterSrc.start(); flutter.start();
+      this.amb = { wind, windFilter, water, out };
+    }
+    const t = ctx.currentTime;
+    const a = this.amb;
+    a.out.gain.setTargetAtTime(0.9, t, 0.5);
+    // Wind comes in gusts: two slow waves.
+    this.gustPhase += dt;
+    const gust = 0.55 + 0.3 * Math.sin(this.gustPhase * 0.31) + 0.15 * Math.sin(this.gustPhase * 0.83 + 1.7);
+    a.wind.gain.setTargetAtTime(0.35 * lv.wind * gust, t, 0.4);
+    a.windFilter.frequency.setTargetAtTime(280 + 700 * lv.wind * gust, t, 0.4);
+    a.water.gain.setTargetAtTime(0.16 * lv.water, t, 0.5);
+
+    const now = performance.now() / 1000;
+    if (lv.birds > 0.02 && now > this.nextBird) {
+      this.bird(lv.birds);
+      this.nextBird = now + (1.2 + Math.random() * 4) / (0.3 + lv.birds);
+    }
+    if (lv.crickets > 0.02 && now > this.nextCricket) {
+      this.cricket(lv.crickets);
+      this.nextCricket = now + 0.5 + Math.random() * 0.9;
+    }
+    if (lv.frogs > 0.02 && now > this.nextFrog) {
+      this.frog(lv.frogs);
+      this.nextFrog = now + (1.5 + Math.random() * 5) / (0.4 + lv.frogs);
+    }
+  }
+
+  /** Somewhere off to one side. */
+  private panned(ctx: AudioContext, gain: number): GainNode {
+    const g = ctx.createGain();
+    g.gain.value = gain;
+    const pan = ctx.createStereoPanner();
+    pan.pan.value = Math.random() * 1.6 - 0.8;
+    g.connect(pan);
+    pan.connect(this.amb?.out ?? this.master!);
+    return g;
+  }
+
+  /** A songbird: a few whistled notes, a trill or a falling call. */
+  private bird(level: number) {
+    const ctx = this.ctx!;
+    const out = this.panned(ctx, 0.05 * level * (0.4 + Math.random() * 0.6));
+    const t0 = ctx.currentTime + 0.02;
+    const kind = Math.floor(Math.random() * 3);
+    const base = 2400 + Math.random() * 2200;
+    const notes = kind === 1 ? 6 + Math.floor(Math.random() * 6) : 2 + Math.floor(Math.random() * 4);
+    let t = t0;
+    for (let n = 0; n < notes; n++) {
+      const o = ctx.createOscillator();
+      o.type = 'sine';
+      const g = ctx.createGain();
+      const len = kind === 1 ? 0.045 : 0.09 + Math.random() * 0.12;
+      const f = kind === 2 ? base * (1.25 - n * 0.08) : base * (0.85 + Math.random() * 0.4);
+      o.frequency.setValueAtTime(f, t);
+      o.frequency.exponentialRampToValueAtTime(f * (kind === 0 ? 1.25 : 0.85), t + len);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(1, t + 0.012);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + len);
+      o.connect(g); g.connect(out);
+      o.start(t); o.stop(t + len + 0.02);
+      t += len + (kind === 1 ? 0.015 : 0.04 + Math.random() * 0.08);
+    }
+  }
+
+  /** A cricket's pulsing chirp. */
+  private cricket(level: number) {
+    const ctx = this.ctx!;
+    const out = this.panned(ctx, 0.018 * level);
+    const t = ctx.currentTime + 0.01;
+    const o = ctx.createOscillator();
+    o.frequency.value = 4300 + Math.random() * 600;
+    const g = ctx.createGain();
+    g.gain.value = 0;
+    for (let p = 0; p < 3; p++) {
+      const s = t + p * 0.07;
+      g.gain.setValueAtTime(0, s);
+      g.gain.linearRampToValueAtTime(1, s + 0.01);
+      g.gain.linearRampToValueAtTime(0, s + 0.045);
+    }
+    o.connect(g); g.connect(out);
+    o.start(t); o.stop(t + 0.25);
+  }
+
+  /** A frog's croak: a low, buzzy pulse train. */
+  private frog(level: number) {
+    const ctx = this.ctx!;
+    const out = this.panned(ctx, 0.06 * level);
+    const t = ctx.currentTime + 0.01;
+    const o = ctx.createOscillator();
+    o.type = 'sawtooth';
+    o.frequency.setValueAtTime(140 + Math.random() * 90, t);
+    const f = ctx.createBiquadFilter();
+    f.type = 'lowpass';
+    f.frequency.value = 600;
+    const g = ctx.createGain();
+    g.gain.value = 0;
+    const pulses = 3 + Math.floor(Math.random() * 4);
+    for (let p = 0; p < pulses; p++) {
+      const s = t + p * 0.06;
+      g.gain.setValueAtTime(0, s);
+      g.gain.linearRampToValueAtTime(1, s + 0.012);
+      g.gain.linearRampToValueAtTime(0, s + 0.05);
+    }
+    o.connect(f); f.connect(g); g.connect(out);
+    o.start(t); o.stop(t + pulses * 0.06 + 0.1);
+  }
 }
 
 /** Volume falloff with distance (metres). */

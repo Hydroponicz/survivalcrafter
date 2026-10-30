@@ -83,6 +83,8 @@ function treeGeometries(species: Species): { trunk: THREE.BufferGeometry; leaves
 }
 
 export class WorldView implements WorldListener {
+  /** Called when a building piece appears or goes (the ground cover around it changes). */
+  onStructure?: (o: StructureObj) => void;
   group = new THREE.Group();
   /** Trees being chopped and felled, chips, leaves and stumps. */
   treeFx: TreeFx;
@@ -163,6 +165,7 @@ export class WorldView implements WorldListener {
 
   // ---------- WorldListener
   added(o: WorldObj) {
+    if (o.kind === 'structure') this.onStructure?.(o);
     if (o.kind === 'tree') {
       const slot = this.trunks[o.species].alloc();
       this.leaves[o.species].alloc();
@@ -184,6 +187,7 @@ export class WorldView implements WorldListener {
   }
 
   removed(o: WorldObj) {
+    if (o.kind === 'structure') this.onStructure?.(o);
     if (o.kind === 'tree') {
       const s = this.slots.get(o.id)!;
       this.trunks[o.species].release(s);
