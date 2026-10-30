@@ -9,6 +9,7 @@ import {
 } from '../world/world';
 import { FORAGE, IDENTIFY } from '../data/forage';
 import { BIOMES, biomeAt, type Biome } from './forage';
+import { ZONE_NAMES } from '../world/climate';
 import type { Game } from './game';
 import type { SwingKind } from './tools';
 import { buildStepMinigame, RECIPE_MINIGAMES, type MinigameSpec } from './minigames';
@@ -147,7 +148,10 @@ export const ACTIONS: ActionDef[] = [
       const { point: p, normal: n, mat } = c.t;
       const slope = Math.round((Math.acos(Math.min(1, Math.max(-1, n.y))) * 180) / Math.PI);
       const under = c.g.world.terrain.heightAt(p.x, p.z) - p.y > 1.5 ? ' You are under the surface.' : '';
-      c.g.msg(`${MAT_NAMES[mat]} at ${p.y.toFixed(1)} m (${p.y >= 0 ? 'above' : 'below'} sea level), ${slope}° slope.${under}`, 'info');
+      const t = c.g.world.terrain;
+      const temp = t.temperatureAt(p.x, p.y, p.z), wet = t.moistureAt(p.x, p.z);
+      const feel = `${temp < 0.2 ? 'bitterly cold' : temp < 0.35 ? 'cold' : temp < 0.55 ? 'cool' : 'mild'} and ${wet < 0.3 ? 'dry' : wet < 0.55 ? 'fair' : wet < 0.75 ? 'damp' : 'wet'}`;
+      c.g.msg(`${MAT_NAMES[mat]} at ${p.y.toFixed(1)} m (${p.y >= 0 ? 'above' : 'below'} sea level), ${slope}° slope.${under} ${mat === Mat.Rock || mat === Mat.Iron ? 'Exposed rock' : ZONE_NAMES[t.zoneAt(p.x, p.z)]}, ${feel} here.`, 'info');
       const b = biome(c)!;
       c.g.msg(`${BIOMES[b].name}: ${BIOMES[b].hint}`, 'info');
       const { crop } = cropAt(c);

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { hash2, Simplex } from './noise';
 import { erode } from './erosion';
 import { hydrology } from './hydrology';
+import { climate, SNOW_TEMP, tempAt, zoneOf, type Zone } from './climate';
 
 // Voxel terrain. Density lives on a 1 m grid of points (0..255, solid at >= 128)
 // and is meshed with Surface Nets, so the ground is smooth like Enshrouded but
@@ -41,6 +42,11 @@ const SRGB: Record<Mat, [number, number, number]> = {
   [Mat.Iron]: [0.55, 0.36, 0.26],
   [Mat.Field]: [0.33, 0.23, 0.15],
 };
+const lin = (c: [number, number, number]) => c.map((v) => Math.pow(v, 2.2));
+/** Grass in a dry spell, at its lushest, and up in the cold. */
+const GRASS_DRY = lin([0.6, 0.55, 0.27]), GRASS_LUSH = lin([0.22, 0.47, 0.16]), GRASS_COLD = lin([0.27, 0.4, 0.27]);
+const SNOW = lin([0.93, 0.95, 0.98]);
+const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
 const LIN = Object.fromEntries(Object.entries(SRGB).map(([k, c]) => [k, c.map((v) => Math.pow(v, 2.2))])) as unknown as Record<Mat, number[]>;
 
 /** Drainage (log of water through a column) above which valley floors are clay. */
@@ -61,6 +67,13 @@ export class Terrain {
   water: Float32Array = new Float32Array(PX * PZ).fill(NaN);
   /** 1 where a column is part of a lake (vs. a river). */
   lake: Uint8Array = new Uint8Array(PX * PZ);
+  /** Within a couple of metres of a river or lake. */
+  nearWater: Uint8Array = new Uint8Array(PX * PZ);
+  /** Climate per column: temperature before height, and wetness (see climate.ts). */
+  climBase: Float32Array = new Float32Array(PX * PZ).fill(0.8);
+  moist: Float32Array = new Float32Array(PX * PZ).fill(0.5);
+  /** Direction the prevailing wind blows toward. */
+  wind: [number, number] = [1, 0];
 
   group = new THREE.Group();
   private meshes = new Map<number, THREE.Mesh>();
@@ -214,6 +227,28 @@ export class Terrain {
     return mesh;
   }
 
+  private col(x: number, z: number) {
+    return Math.max(0, Math.min(PZ - 1, Math.round(z))) * PX + Math.max(0, Math.min(PX - 1, Math.round(x)));
+  }
+
+  /** Temperature (0 cold .. 1 warm) at a point, cooling with height. */
+  temperatureAt(x: number, y: number, z: number): number {
+    return tempAt(this.climBase[this.col(x, z)], y);
+  }
+
+  moistureAt(x: number, z: number): number {
+    return this.moist[this.col(x, z)];
+  }
+
+  /** What grows here, from climate and the lie of the land. */
+  zoneAt(x: number, z: number): Zone {
+    const i = this.col(x, z);
+    const h = this.heightAt(x, z);
+    const n = this.normalAt(x, h - 0.05, z);
+    const slope = Math.sqrt(Math.max(0, 1 - n.y * n.y)) / Math.max(0.2, n.y);
+    return zoneOf(tempAt(this.climBase[i], h), this.moist[i], h, WATER_LEVEL, !!this.nearWater[i], slope);
+  }
+
   surfaceMaterial(x: number, z: number): Mat {
     return this.materialAt(x, this.heightAt(x, z) - 0.3, z);
   }
@@ -302,9 +337,17 @@ export class Terrain {
     // Weather it: rain carves gullies and valleys and lays down sediment.
     const { deposit, flow } = erode(H, PX, this.seed, WATER_LEVEL);
     this.flow = flow;
-    // Rivers and lakes: drainage carves channels and fills basins.
-    const hyd = hydrology(H, PX, WATER_LEVEL);
+    // Climate: the wind brings rain to the windward slopes and leaves a dry shadow behind ranges.
+    const clim = climate(H, PX, this.seed, WATER_LEVEL);
+    this.climBase = clim.base;
+    this.wind = clim.wind;
+    // Rivers and lakes: drainage carves channels and fills basins, fed by that rain.
+    const hyd = hydrology(H, PX, WATER_LEVEL, clim.rain);
     this.water = hyd.water;
+    this.nearWater = hyd.bank;
+    // Land by water stays damp whatever the rain.
+    this.moist = clim.moist;
+    for (let i = 0; i < this.moist.length; i++) if (hyd.bank[i]) this.moist[i] = Math.min(1, this.moist[i] + 0.2);
     for (let i = 0; i < hyd.kind.length; i++) this.lake[i] = hyd.kind[i] === 2 ? 1 : 0;
     const hAt = (x: number, z: number) => H[Math.max(0, Math.min(PZ - 1, z)) * PX + Math.max(0, Math.min(PX - 1, x))];
     for (let z = 0; z < PZ; z++) {
@@ -644,12 +687,25 @@ export class Terrain {
           let m = this.m(gx + (bk & 1), gy + ((bk >> 1) & 1), gz + ((bk >> 2) & 1));
           if (m === Mat.Grass && ny < 0.55) m = Mat.Dirt; // grass doesn't cling to steep banks
           const wx = gx + fx, wy = gy + fy, wz = gz + fz;
-          const col3 = LIN[m] ?? LIN[Mat.Dirt];
+          const base = LIN[m] ?? LIN[Mat.Dirt];
+          let r = base[0], gC = base[1], b = base[2];
+          const ci = this.col(wx, wz);
+          const temp = tempAt(this.climBase[ci], wy);
+          const mix = (c: number[], k: number) => { if (k <= 0) return; r += (c[0] - r) * k; gC += (c[1] - gC) * k; b += (c[2] - b) * k; };
+          if (m === Mat.Grass) {
+            // Grass shows the climate: straw-coloured where it's dry, deep green where wet, dark up high.
+            const mo = this.moist[ci];
+            mix(GRASS_DRY, clamp01((0.42 - mo) / 0.3) * 0.85);
+            mix(GRASS_LUSH, clamp01((mo - 0.55) / 0.3) * 0.7);
+            mix(GRASS_COLD, clamp01((0.45 - temp) / 0.2) * 0.8);
+          }
+          // Snow lies on the cold heights, but slides off steep faces.
+          mix(SNOW, clamp01((SNOW_TEMP + 0.03 - temp) / 0.05) * clamp01((ny - 0.45) / 0.25));
           const j = 0.88 + hash2(Math.floor(wx * 3), Math.floor(wz * 3) + Math.floor(wy * 7), 3) * 0.24;
           const wet = wy < this.waterAt(wx, wz) + 0.25 ? 0.72 : 1;
           pos.push(wx, wy, wz);
           nor.push(nx, ny, nz);
-          col.push(col3[0] * j * wet, col3[1] * j * wet, col3[2] * j * wet);
+          col.push(r * j * wet, gC * j * wet, b * j * wet);
           vid[(lz * S + ly) * S + lx] = nv++;
         }
       }

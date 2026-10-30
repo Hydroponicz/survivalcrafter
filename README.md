@@ -59,6 +59,11 @@ Toggles are remembered per browser; a purple **DEV** badge shows while any cheat
 - **Weathered, eroded landscapes.** Each world is shaped by simulated rain: ~90,000 droplets run
   downhill, carving gullies into the mountains and laying sediment along valley floors. Soil is thick
   where sediment settled and thin where water stripped it; clay lines the well-watered valley bottoms.
+- **Climate and vegetation zones.** A prevailing wind brings rain in off the sea; it falls on windward
+  slopes and leaves a dry rain shadow behind the ranges, and the air cools with height. Together they
+  decide what grows: broadleaf woods on the wet lowlands, grassland, pine forest higher up, dry heath in
+  the lee, marsh by the water, stunted alpine pines near the tree line and snow on the peaks. Grass is lush
+  or straw-coloured with the rain, and rivers run bigger on the wet side. Examine the ground to read it.
 - **Rivers and lakes.** Drainage is worked out for the whole island: streams start where enough rain
   gathers, join into rivers that carve their channels down to the sea, and basins fill into lakes deep
   enough to swim in. River beds are sand and grit, lake beds silty clay, and the banks are where you dig

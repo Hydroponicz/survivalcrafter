@@ -2,6 +2,7 @@ import { type Item } from '../data/items';
 import { pieceBoxes, STRUCTURES, type V3 } from '../data/structures';
 import { mulberry32, Simplex } from './noise';
 import { Mat, Terrain, WORLD_SIZE } from './terrain';
+import type { Zone } from './climate';
 
 export type Species = 'oak' | 'birch' | 'pine';
 export type AnimalSpecies = 'deer' | 'boar';
@@ -104,6 +105,18 @@ export function pointInPiece(s: StructureObj, x: number, y: number, z: number, m
   return false;
 }
 
+/** What grows in each climate zone: tree density per 4 m², species mix, stature, berry bushes. */
+const VEGETATION: Record<Zone, { trees: number; oak: number; birch: number; pine: number; stature: number; bushes: number }> = {
+  broadleaf: { trees: 0.32, oak: 6, birch: 3, pine: 1, stature: 1, bushes: 0.04 },
+  conifer: { trees: 0.34, oak: 0.5, birch: 1.5, pine: 8, stature: 1, bushes: 0.02 },
+  meadow: { trees: 0.025, oak: 6, birch: 2, pine: 1, stature: 1, bushes: 0.05 },
+  heath: { trees: 0.015, oak: 1, birch: 3, pine: 4, stature: 0.75, bushes: 0.03 },
+  marsh: { trees: 0.05, oak: 0, birch: 8, pine: 1, stature: 0.85, bushes: 0.02 },
+  alpine: { trees: 0.035, oak: 0, birch: 1, pine: 9, stature: 0.65, bushes: 0.01 },
+  beach: { trees: 0.008, oak: 0, birch: 1, pine: 3, stature: 0.8, bushes: 0 },
+  snow: { trees: 0, oak: 0, birch: 0, pine: 1, stature: 0.5, bushes: 0 },
+};
+
 export class World {
   terrain: Terrain;
   objects = new Map<number, WorldObj>();
@@ -189,12 +202,17 @@ export class World {
         const h = t.heightAt(px, pz);
         if (h < t.waterAt(px, pz) + 0.5) continue;
         if (t.surfaceMaterial(px, pz) !== Mat.Grass) continue;
+        // The climate zone sets what grows; patchy noise breaks it into stands and clearings.
+        const zone = VEGETATION[t.zoneAt(px, pz)];
         const f = forest.fbm(px * 0.02, pz * 0.02, 3);
-        const density = f > 0.15 ? 0.3 : f > -0.1 ? 0.055 : 0.011;
+        const density = zone.trees * Math.max(0.15, Math.min(1.8, 1 + f * 2.2));
         if (rng() < density) {
-          const species: Species = h > 14 ? 'pine' : rng() < 0.25 ? 'birch' : rng() < 0.3 ? 'pine' : 'oak';
-          this.add<TreeObj>({ kind: 'tree', species, x: px, z: pz, age: 0.55 + rng() * 0.45, branches: 3 });
-        } else if (rng() < 0.03) {
+          const r = rng() * (zone.oak + zone.birch + zone.pine);
+          const species: Species = r < zone.oak ? 'oak' : r < zone.oak + zone.birch ? 'birch' : 'pine';
+          // Up high and in the dry, trees grow stunted.
+          const age = (0.55 + rng() * 0.45) * zone.stature;
+          this.add<TreeObj>({ kind: 'tree', species, x: px, z: pz, age, branches: 3 });
+        } else if (rng() < zone.bushes) {
           this.add<BushObj>({ kind: 'bush', x: px, z: pz, ripe: rng() < 0.7, regrowAt: 0 });
         }
       }

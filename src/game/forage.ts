@@ -33,6 +33,7 @@ export function biomeAt(world: World, x: number, y: number, z: number, mat: Mat)
     case Mat.Field:
       return 'bare';
     case Mat.Grass: {
+      if (world.terrain.zoneAt(x, z) === 'marsh') return 'wetland';
       let trees = 0;
       for (const o of world.near(x, z, 6)) {
         if (o.kind === 'tree' && o.age > 0.4 && Math.hypot(o.x - x, o.z - z) < 6) trees++;
