@@ -3,7 +3,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { STRUCTURES, totalMaterials } from '../data/structures';
 import { FORAGE, FORAGE_SPECIES } from '../data/forage';
 import { forageGeometry, forageScale } from './forageProps';
-import { TreeFx } from './treefx';
+import { TreeFx, treeScale } from './treefx';
 import { hash2 } from './noise';
 import {
   CROP_STAGES, cropPos, type AnimalObj, type BushObj, type ForageObj, type PileObj, type Species, type StructureObj,
@@ -248,9 +248,8 @@ export class WorldView implements WorldListener {
       return;
     }
     const y = this.world.terrain.heightAt(o.x, o.z) - 0.1;
-    const s = 0.2 + 0.8 * o.age;
-    const r = hash2(o.id, 1) * Math.PI * 2;
-    const hs = 0.85 + hash2(o.id, 2) * 0.35;
+    // The same size the chopping, felling and collisions use.
+    const { s, hs, yaw: r } = treeScale(o);
     this.q.setFromAxisAngle(this.up, r);
     this.m4.compose(new THREE.Vector3(o.x, y, o.z), this.q, new THREE.Vector3(s, s * hs, s));
     this.trunks[o.species].set(slot, this.m4);

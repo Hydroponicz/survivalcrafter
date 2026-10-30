@@ -1023,8 +1023,9 @@ export class Game {
         const g = this.world.terrain.heightAt(o.x, o.z);
         const { s } = treeScale(o);
         const y = p.y - g;
-        if (y < 0 || y > 6.5 * s) return false;
-        const r = y < 2.6 * s ? 0.2 + 0.3 * s : 1.5 * s;
+        const { hs } = treeScale(o);
+        if (y < 0 || y > 6.5 * s * hs) return false;
+        const r = y < 2.6 * s * hs ? 0.2 + 0.3 * s : 1.5 * s;
         return dx * dx + dz * dz < r * r;
       }
       case 'bush': {

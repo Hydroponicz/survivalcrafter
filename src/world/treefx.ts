@@ -18,18 +18,22 @@ const HEARTWOOD = new THREE.Color(0xf6dfae);
 /** Height of the felling notch above the ground, in the trunk's local units. */
 const NOTCH_Y = 0.7;
 
+/** Model multiplier for a typical full-grown tree of each kind: oaks ~20 m, birches ~18 m, pines ~27 m. */
+const GROWN: Record<Species, number> = { oak: 2.7, birch: 2.4, pine: 3.4 };
+
 /**
- * How big this tree grows (a multiplier on the model), fixed by its id: most
- * full-grown trees stand 12–20 m, and the odd giant much more.
+ * How big this tree grows (a multiplier on the model), fixed by its id: a
+ * spread around its kind's typical size, and the odd giant much more.
  */
-export function treeSize(o: { id: number }): number {
+export function treeSize(o: { id: number; species: Species }): number {
   const giant = hash2(o.id, 8) > 0.94;
-  return (2.0 + 1.1 * hash2(o.id, 7)) * (giant ? 1.4 : 1);
+  return GROWN[o.species] * (0.8 + 0.45 * hash2(o.id, 7)) * (giant ? 1.35 : 1);
 }
 
-export function treeScale(o: { id: number; age: number }) {
+export function treeScale(o: { id: number; age: number; species: Species }) {
   const s = (0.2 + 0.8 * o.age) * treeSize(o);
-  const hs = 0.85 + hash2(o.id, 2) * 0.35;
+  // Taller than they are wide: real trees are tall, not lollipops.
+  const hs = 1.15 + hash2(o.id, 2) * 0.35;
   return { s, hs, yaw: hash2(o.id, 1) * Math.PI * 2 };
 }
 
