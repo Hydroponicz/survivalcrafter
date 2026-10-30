@@ -915,11 +915,23 @@ export class Terrain {
       }
       if (cnt) V[k] = sum / cnt - 0.25;
     }
-    const mesh = new THREE.Mesh(new THREE.BufferGeometry(), this.waterMaterial ?? undefined);
+    const mesh = new THREE.Mesh(new THREE.BufferGeometry(), this.riverMaterial() ?? undefined);
     mesh.visible = false;
     this.waterMeshes.set(key, mesh);
     if (!any || !this.waterMaterial) return;
-    const pos: number[] = [], uv: number[] = [], idx: number[] = [];
+    const pos: number[] = [], uv: number[] = [], idx: number[] = [], foam: number[] = [];
+    // White water where the surface drops steeply: rapids and little falls.
+    const drop = (k: number) => {
+      const lx = k % CI, lz = Math.floor(k / CI);
+      let g = 0;
+      for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const x = lx + dx, z = lz + dz;
+        if (x < 0 || z < 0 || x >= CI || z >= CI) continue;
+        const a = W[z * CI + x], b = W[k];
+        if (!Number.isNaN(a) && !Number.isNaN(b)) g = Math.max(g, Math.abs(a - b));
+      }
+      return Math.max(0, Math.min(1, (g - 0.05) / 0.2));
+    };
     const vid = new Int32Array(CI * CI).fill(-1);
     const x0 = cx * CH - 1, z0 = cz * CH - 1;
     const vert = (k: number) => {
@@ -928,6 +940,7 @@ export class Terrain {
         const x = x0 + (k % CI), z = z0 + Math.floor(k / CI);
         pos.push(x, V[k] - 0.04, z);
         uv.push(x / 960, z / 960);
+        foam.push(drop(k));
       }
       return vid[k];
     };
@@ -944,12 +957,40 @@ export class Terrain {
     const geo = mesh.geometry;
     geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    geo.setAttribute('foam', new THREE.Float32BufferAttribute(foam, 1));
     geo.setIndex(idx);
     geo.computeVertexNormals();
     geo.computeBoundingSphere();
     mesh.visible = true;
     mesh.receiveShadow = true;
     this.group.add(mesh);
+  }
+
+  /** Seconds, for the churning of white water (set by the game each frame). */
+  readonly waterTime = { value: 0 };
+  private riverMat: THREE.Material | null = null;
+
+  /** The water material with white water where rivers run steep. */
+  private riverMaterial(): THREE.Material | null {
+    if (this.riverMat || !this.waterMaterial) return this.riverMat;
+    const m = (this.waterMaterial as THREE.MeshStandardMaterial).clone();
+    m.onBeforeCompile = (shader) => {
+      shader.uniforms.uWaterTime = this.waterTime;
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\nattribute float foam;\nvarying float vFoam;\nvarying vec2 vFoamPos;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvFoam = foam;\nvFoamPos = (modelMatrix * vec4(transformed, 1.0)).xz;');
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', '#include <common>\nvarying float vFoam;\nvarying vec2 vFoamPos;\nuniform float uWaterTime;')
+        .replace('#include <color_fragment>', `#include <color_fragment>
+  // Streaks of foam tumbling downstream, broken up so it doesn't look painted on.
+  float churn = sin(vFoamPos.x * 2.1 + uWaterTime * 6.0) * sin(vFoamPos.y * 1.7 - uWaterTime * 5.0)
+    + 0.6 * sin((vFoamPos.x + vFoamPos.y) * 3.3 - uWaterTime * 8.0);
+  float white = clamp(vFoam * (0.75 + 0.45 * churn), 0.0, 1.0);
+  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.9, 0.94, 0.96), white);
+  diffuseColor.a = mix(diffuseColor.a, 0.97, white);`);
+    };
+    this.riverMat = m;
+    return m;
   }
 
   // ---------- persistence: only chunks you changed are stored

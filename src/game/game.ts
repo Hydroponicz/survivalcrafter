@@ -1526,6 +1526,7 @@ export class Game {
     this.ambTimer -= this.renderDt;
     if (this.ambTimer <= 0) { this.ambTimer = 0.5; this.surroundings(); }
     this.groundCover.update(this.camera.position, this.elapsed, this.world.terrain.wind, this.amb.sway);
+    this.world.terrain.waterTime.value = this.elapsed;
     this.tileTimer -= this.renderDt;
     if (this.tileTimer <= 0) { this.tileTimer = 0.5; this.keepTiles(); }
     const mc = this.world.terrain.meshCentre;

@@ -429,6 +429,16 @@ export class GroundCover {
             continue;
           }
         }
+        // Stones break the surface where a river runs fast and shallow.
+        if (g.h < water && t.riverAt(x, z)) {
+          const fall = Math.max(Math.abs(t.waterAt(x + 1, z) - t.waterAt(x - 1, z)), Math.abs(t.waterAt(x, z + 1) - t.waterAt(x, z - 1))) / 2;
+          if (fall > 0.06 && roll < 0.5 && water - g.h < 1.2) {
+            t.surfaceColor(t.bedrockAt(x, g.h - 1, z), x, g.h, z, 0, col);
+            const v = rnd(r, 0.55, 0.8) * 1.4;
+            put('pebble', x, g.h - 0.05, z, yaw, rnd(r, 3, 7), col[0] * v, col[1] * v, col[2] * v, 0, rnd(r, 2.5, 6));
+          }
+          continue;
+        }
         if (g.h < water + 0.05) continue;
         if (isRock(g.mat) || g.mat === Mat.Gravel || g.mat === Mat.Sand) {
           if (roll < (g.mat === Mat.Sand ? 0.12 : 0.3) && g.slope < 1.2) {

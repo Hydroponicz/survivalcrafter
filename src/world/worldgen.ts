@@ -325,24 +325,48 @@ export class WorldGen {
   }
 
   // ---------- detail
+  /**
+   * The river channel at a point, shaped for the ground it runs through: it
+   * never runs above the valley floor around it (so it can't float over low
+   * ground), it meets the sea at sea level, and its width and depth wander
+   * along its course: pools, riffles and narrows rather than a ditch.
+   */
+  channel(x: number, z: number, mapH = this.mapHeight(x, z)): (RiverHit & { sea: boolean }) | null {
+    const rv = this.river(x, z);
+    if (!rv) return null;
+    let s = Math.min(rv.s, mapH - 0.2);
+    // Across the coastal lowland the river eases down to sea level and becomes the sea.
+    s = SEA + Math.max(0, s - SEA) * smooth(0.5, 5, mapH);
+    const sea = s < SEA + 0.12;
+    if (sea) s = SEA;
+    const wobble = this.detail2.noise(x / 37 + 11, z / 37);
+    const r = rv.r * (0.8 + 0.35 * (wobble * 0.5 + 0.5));
+    const depth = rv.depth * (0.65 + 0.6 * (this.detail.noise(x / 23 + 5, z / 23) * 0.5 + 0.5));
+    return { d: rv.d, s, r, depth, sea };
+  }
+
   /** Ground height at any point: the map plus local relief, with river channels cut in. */
   height(x: number, z: number): number {
-    let h = this.mapHeight(x, z);
+    const mapH = this.mapHeight(x, z);
+    let h = mapH;
     const slope = this.mapSlope(x, z);
-    // Rugged where the land is steep, gentle in the lowlands.
+    const ch = this.channel(x, z, mapH);
+    // Rugged where the land is steep, gentle in the lowlands, calm by water
+    // (so banks don't dip below the waterline).
     const amp = 0.5 + 4.5 * smooth(0.15, 0.9, slope);
-    const calm = Number.isNaN(this.lakeSurface(x, z)) ? 1 : 0.25;
+    let calm = Number.isNaN(this.lakeSurface(x, z)) ? 1 : 0.25;
+    if (ch) calm *= 0.15 + 0.85 * smooth(ch.r, ch.r + 8, ch.d);
     h += (this.detail.fbm(x / 26, z / 26, 4) * amp + this.detail2.fbm(x / 7, z / 7, 2) * amp * 0.25) * calm;
-    const rv = this.river(x, z);
-    if (rv) {
-      const { d, s, r, depth } = rv;
+    if (ch) {
+      const { d, s, r, depth } = ch;
       if (d < r) {
+        // A rounded bed, a little rough.
         const k = 1 - (d / r) * (d / r);
-        h = Math.min(h, s + 0.15 - (depth + 0.15) * k);
+        const rough = this.detail2.noise(x / 2.3, z / 2.3) * 0.18 * k;
+        h = Math.min(h, s + 0.15 - (depth + 0.15) * k + rough);
       } else {
-        // Banks slope down to the water; a slight levee keeps it in.
+        // Banks slope down to the water.
         h = Math.min(h, s + 0.15 + (d - r) * 0.55);
-        if (d < r + 1.5) h = Math.max(h, s + 0.12);
       }
     }
     return h;
@@ -350,8 +374,9 @@ export class WorldGen {
 
   /** Fresh water surface at a point (river or lake), or NaN. Pass the ground height if known. */
   water(x: number, z: number, ground = this.height(x, z)): number {
-    const rv = this.river(x, z);
-    if (rv && rv.d < rv.r * 0.97 && ground < rv.s) return rv.s;
+    const ch = this.channel(x, z);
+    // Where a river meets the sea, it's the sea.
+    if (ch && ch.d < ch.r * 0.97 && ground < ch.s) return ch.sea ? NaN : ch.s;
     const lake = this.lakeSurface(x, z);
     if (!Number.isNaN(lake) && ground < lake) return lake;
     return NaN;
