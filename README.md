@@ -58,12 +58,14 @@ Toggles are remembered per browser; a purple **DEV** badge shows while any cheat
   Cultivate; a pickaxe offers Mine; bare hands forage.
 - **Life underfoot.** Grass sways in the wind around you, coloured by the local climate, with
   flowers in the meadows, ferns under the woods, reeds and cattails along the banks and in the
-  shallows, heather on the dry heath and pebbles on rock and shore. Boulders (coloured like the
+  shallows, purple-flowering heather on the dry heath and pebbles on rock and shore. Boulders (coloured like the
   bedrock they broke from) and mossy fallen trees lie further out. Fireflies drift over damp ground
   on warm nights.
-- **A soundscape.** Wind that rises with altitude and gusts across open ground, birdsong by day
-  (busiest in the woods and loudest at the dawn chorus), crickets at night, frogs in the marshes and
-  babbling water near rivers, all synthesised in the browser.
+- **A soundscape from real recordings.** Wind that rises with altitude and on open ground, birdsong
+  by day (busiest in the woods and at dawn), crickets at night, frogs in the marshes and a babbling
+  brook near rivers. Drop royalty-free recordings into `public/sounds/` and list them in
+  `sounds.json` (see `public/sounds/README.md` for names and where to find them); until then
+  ambience is silent and effects use small synthesized sounds.
 - **A living sky.** A physically based sky (Rayleigh and Mie scattering) with drifting clouds lights the
   world: it's captured as an environment map so everything picks up skylight and water reflects it.
   Distant hills fade into the real horizon colour, sunrise and sunset glow warm with long shadows, stars

@@ -151,7 +151,7 @@ function rock(radius: number, detail: number, squash: number, seed: number): THR
     v.y = v.y * squash + radius * squash * 0.55;
     p.setXYZ(i, v.x, v.y, v.z);
   }
-  const ng = g.toNonIndexed();
+  const ng = g.index ? g.toNonIndexed() : g;
   ng.computeVertexNormals();
   const col: number[] = [];
   const np = ng.attributes.normal;
@@ -164,18 +164,10 @@ function rock(radius: number, detail: number, squash: number, seed: number): THR
   return ng;
 }
 
-/** Heather and low scrub: a rounded, knobbly clump. */
+/** Heather: a low, dense shrub of wiry stems, purple with flowers toward the tips. */
 function heather(seed: number): THREE.BufferGeometry {
-  const g = rock(0.28, 1, 0.55, seed);
-  const col = g.attributes.color;
-  const r = mulberry32(seed + 1);
-  for (let i = 0; i < col.count; i += 3) {
-    // Purple flower heads speckled over brown-green.
-    // (Linear colour, so these are darker than they look.)
-    const c = r() < 0.4 ? [0.14, 0.045, 0.12] : r() < 0.5 ? [0.05, 0.065, 0.025] : [0.07, 0.045, 0.028];
-    for (let k = 0; k < 3; k++) col.setXYZ(i + k, c[0], c[1], c[2]);
-  }
-  return g;
+  // (Linear colour, so these look brighter on screen than the numbers suggest.)
+  return blades(26, 0.14, 0.3, 0.03, 0.16, seed, [0.05, 0.05, 0.025], [0.24, 0.07, 0.22]);
 }
 
 /** A fallen trunk lying along X, with broken branch stubs; mossy along the top. */
@@ -194,7 +186,7 @@ function fallenLog(): THREE.BufferGeometry {
   }
   const pos: number[] = [], nor: number[] = [], col: number[] = [];
   for (const p of parts) {
-    const g = p.toNonIndexed();
+    const g = p.index ? p.toNonIndexed() : p;
     const pa = g.attributes.position, na = g.attributes.normal;
     for (let i = 0; i < pa.count; i++) {
       pos.push(pa.getX(i), pa.getY(i), pa.getZ(i));
@@ -254,7 +246,7 @@ const KIND_DEFS: Omit<Kind, 'mesh' | 'material'>[] = [
   { name: 'fern', geo: fern(31), range: 40, cap: 5000, sway: 0.6, shadow: true, far: false },
   { name: 'reeds', geo: blades(10, 1.1, 1.8, 0.035, 0.18, 41, [0.3, 0.38, 0.18], [0.62, 0.62, 0.36], (k) => k % 4 === 1,
     { colour: [0.36, 0.22, 0.11], width: 0.045, length: 0.14 }), range: 48, cap: 9000, sway: 0.45, shadow: false, far: false },
-  { name: 'heather', geo: heather(51), range: 42, cap: 7000, sway: 0, shadow: false, far: false },
+  { name: 'heather', geo: heather(51), range: 42, cap: 7000, sway: 0.5, shadow: false, far: false },
   { name: 'pebble', geo: rock(0.07, 0, 0.55, 61), range: 30, cap: 5000, sway: 0, shadow: false, far: false },
   { name: 'boulder', geo: rock(0.5, 1, 0.68, 71), range: 150, cap: 2500, sway: 0, shadow: true, far: true },
   { name: 'log', geo: fallenLog(), range: 130, cap: 500, sway: 0, shadow: true, far: true },
@@ -429,7 +421,7 @@ export class GroundCover {
         if (roll < acc) { put('grass', x, g.h - 0.02, z, yaw, rnd(r, 0.7, 1.3), col[0] * v, col[1] * v, col[2] * v, 0, rnd(r, 0.6, 1.25) * (zone === 'alpine' ? 0.55 : 1)); continue; }
         if (roll < (acc += cov.tall)) { put('tallgrass', x, g.h - 0.02, z, yaw, rnd(r, 0.8, 1.2), col[0] * v * 1.1, col[1] * v * 1.05, col[2] * v); continue; }
         if (roll < (acc += cov.fern)) { const f = rnd(r, 0.8, 1.15); put('fern', x, g.h - 0.03, z, yaw, rnd(r, 0.7, 1.3), f, f, f); continue; }
-        if (roll < (acc += cov.heather)) { const f = rnd(r, 0.8, 1.2); put('heather', x, g.h - 0.05, z, yaw, rnd(r, 0.45, 1.0), f, f, f); continue; }
+        if (roll < (acc += cov.heather)) { const f = rnd(r, 0.8, 1.2); put('heather', x, g.h - 0.02, z, yaw, rnd(r, 1.1, 1.8), f, f, f, 0, rnd(r, 0.8, 1.2)); continue; }
         if (roll < (acc += cov.flowers)) {
           const f = rnd(r, 0.85, 1.1);
           put(['flower_y', 'flower_w', 'flower_p'][Math.floor(r() * 3)], x, g.h - 0.01, z, yaw, rnd(r, 0.8, 1.2), f, f, f);

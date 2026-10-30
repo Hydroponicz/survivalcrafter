@@ -1,5 +1,6 @@
-// Tiny synthesized sound effects (no audio files): a chop's thunk, a glancing
-// knock, the creak of a tree starting to go, and the crash when it lands.
+// Sound: recordings listed in public/sounds/sounds.json where there are any,
+// otherwise small synthesized effects (a chop's thunk, a glancing knock, the
+// creak of a falling tree and its crash). Ambience only plays from recordings.
 
 export class Sound {
   private ctx: AudioContext | null = null;
@@ -14,6 +15,7 @@ export class Sound {
         this.master = this.ctx.createGain();
         this.master.gain.value = 0.55;
         this.master.connect(this.ctx.destination);
+        this.loadBank(this.ctx);
       } catch {
         return null;
       }
@@ -46,6 +48,7 @@ export class Sound {
   chop(strength = 1, vol = 1) {
     const ctx = this.ensure();
     if (!ctx) return;
+    if (this.playFile('chop', vol * (0.6 + 0.4 * strength))) return;
     const t = ctx.currentTime;
     // Woody knock: a quick low sine drop…
     const o = ctx.createOscillator();
@@ -70,6 +73,7 @@ export class Sound {
   glance(vol = 1) {
     const ctx = this.ensure();
     if (!ctx) return;
+    if (this.playFile('glance', vol)) return;
     const t = ctx.currentTime;
     const n = this.noise(ctx, 0.08);
     const f = ctx.createBiquadFilter();
@@ -84,6 +88,7 @@ export class Sound {
   clink(vol = 1) {
     const ctx = this.ensure();
     if (!ctx) return;
+    if (this.playFile('clink', vol)) return;
     const t = ctx.currentTime;
     const o = ctx.createOscillator();
     o.type = 'triangle';
@@ -99,6 +104,7 @@ export class Sound {
   creak(vol = 1) {
     const ctx = this.ensure();
     if (!ctx) return;
+    if (this.playFile('creak', vol)) return;
     const t = ctx.currentTime;
     const o = ctx.createOscillator();
     o.type = 'sawtooth';
@@ -129,6 +135,7 @@ export class Sound {
   crash(vol = 1) {
     const ctx = this.ensure();
     if (!ctx) return;
+    if (this.playFile('crash', vol)) return;
     const t = ctx.currentTime;
     const n = this.noise(ctx, 1.4);
     const f = ctx.createBiquadFilter();
@@ -155,182 +162,101 @@ export class Sound {
     rustle.start(t + 0.05);
   }
 
-  // ---------- ambience
-  private amb: { wind: GainNode; windFilter: BiquadFilterNode; water: GainNode; bands: BiquadFilterNode[]; out: GainNode } | null = null;
-  private babble = 0;
-  private gustPhase = Math.random() * 100;
-  private nextBird = 0;
-  private nextCricket = 0;
-  private nextFrog = 0;
+  // ---------- recorded sounds
+  /** Decoded recordings by name (each may have several variations). */
+  private bank = new Map<string, AudioBuffer[]>();
+  private bankRequested = false;
 
-  /** A looping buffer of soft noise (brown-ish), shared by the wind and water beds. */
-  private loopNoise(ctx: AudioContext, seconds: number, brown: boolean): AudioBufferSourceNode {
-    const len = Math.floor(ctx.sampleRate * seconds);
-    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
-    const d = buf.getChannelData(0);
-    let b = 0;
-    for (let i = 0; i < len; i++) {
-      const w = Math.random() * 2 - 1;
-      b = brown ? (b + w * 0.02) * 0.996 : w;
-      d[i] = brown ? b * 3 : w;
-    }
-    const fade = 2000;
-    for (let i = 0; i < fade; i++) { const k = i / fade; d[i] *= k; d[len - 1 - i] *= k; }
-    const src = ctx.createBufferSource();
-    src.buffer = buf;
-    src.loop = true;
-    return src;
+  /**
+   * Load the recordings listed in public/sounds/sounds.json. Anything not
+   * listed (or that fails to load) simply isn't there: ambience stays silent
+   * and effects fall back to their synthesised versions.
+   */
+  private loadBank(ctx: AudioContext) {
+    if (this.bankRequested) return;
+    this.bankRequested = true;
+    fetch('sounds/sounds.json')
+      .then((r) => (r.ok ? r.json() : {}))
+      .then((manifest: Record<string, string | string[]>) => {
+        for (const [name, files] of Object.entries(manifest)) {
+          if (name.startsWith('_')) continue;
+          for (const file of ([] as string[]).concat(files).filter(Boolean)) {
+            fetch(`sounds/${file}`)
+              .then((r) => { if (!r.ok) throw new Error(`${file}: ${r.status}`); return r.arrayBuffer(); })
+              .then((data) => ctx.decodeAudioData(data))
+              .then((buf) => { const list = this.bank.get(name) ?? []; list.push(buf); this.bank.set(name, list); })
+              .catch((e) => console.warn('Sound failed to load:', e));
+          }
+        }
+      })
+      .catch(() => { /* no manifest: everything stays synthesised or silent */ });
   }
+
+  /** Play a recording if there is one; returns false so the caller can fall back. */
+  private playFile(name: string, vol: number): boolean {
+    const ctx = this.ctx;
+    const list = this.bank.get(name);
+    if (!ctx || !list?.length) return false;
+    const src = ctx.createBufferSource();
+    src.buffer = list[Math.floor(Math.random() * list.length)];
+    src.playbackRate.value = 0.94 + Math.random() * 0.12; // a little variety
+    const g = ctx.createGain();
+    g.gain.value = vol;
+    src.connect(g);
+    g.connect(this.master!);
+    src.start();
+    return true;
+  }
+
+  // ---------- ambience
+  private loops = new Map<string, { gain: GainNode; src: AudioBufferSourceNode }>();
+  private ambOut: GainNode | null = null;
 
   /**
    * The world's background sound, called every frame with how much of each
-   * there should be (0..1): wind, running water, birdsong, crickets, frogs.
+   * there should be (0..1). Each is a looping recording (see
+   * public/sounds/README.md); missing ones are silent.
    */
-  ambience(lv: { wind: number; water: number; birds: number; crickets: number; frogs: number }, dt: number) {
+  ambience(lv: Record<AmbienceName, number>, _dt: number) {
     const ctx = this.ensure();
     if (!ctx) {
-      if (this.ctx && this.amb) this.amb.out.gain.setTargetAtTime(0, this.ctx.currentTime, 0.1);
+      if (this.ctx && this.ambOut) this.ambOut.gain.setTargetAtTime(0, this.ctx.currentTime, 0.1);
       return;
     }
-    if (!this.amb) {
-      const out = ctx.createGain();
-      out.gain.value = 0;
-      out.connect(this.master!);
-      const windSrc = this.loopNoise(ctx, 4, true);
-      const windFilter = ctx.createBiquadFilter();
-      windFilter.type = 'lowpass';
-      windFilter.frequency.value = 500;
-      const wind = ctx.createGain();
-      wind.gain.value = 0;
-      windSrc.connect(windFilter); windFilter.connect(wind); wind.connect(out);
-      windSrc.start();
-      // Running water: narrow bands of noise whose pitch wanders at random,
-      // which the ear hears as bubbling rather than a steady hiss.
-      const waterSrc = this.loopNoise(ctx, 3, false);
-      const water = ctx.createGain();
-      water.gain.value = 0;
-      const soften = ctx.createBiquadFilter(); soften.type = 'lowpass'; soften.frequency.value = 2200;
-      const bands: BiquadFilterNode[] = [];
-      for (const f of [500, 900, 1500]) {
-        const b = ctx.createBiquadFilter(); b.type = 'bandpass'; b.frequency.value = f; b.Q.value = 6;
-        waterSrc.connect(b); b.connect(soften);
-        bands.push(b);
-      }
-      soften.connect(water); water.connect(out);
-      waterSrc.start();
-      this.amb = { wind, windFilter, water, bands, out };
+    if (!this.ambOut) {
+      this.ambOut = ctx.createGain();
+      this.ambOut.connect(this.master!);
     }
     const t = ctx.currentTime;
-    const a = this.amb;
-    a.out.gain.setTargetAtTime(0.9, t, 0.5);
-    // Wind comes in gusts: two slow waves.
-    this.gustPhase += dt;
-    const gust = 0.55 + 0.3 * Math.sin(this.gustPhase * 0.31) + 0.15 * Math.sin(this.gustPhase * 0.83 + 1.7);
-    a.wind.gain.setTargetAtTime(0.2 * lv.wind * gust, t, 0.4);
-    a.windFilter.frequency.setTargetAtTime(280 + 700 * lv.wind * gust, t, 0.4);
-    a.water.gain.setTargetAtTime(0.22 * lv.water, t, 0.5);
-    // Bubbles: every few hundredths of a second each band jumps to a new pitch.
-    this.babble -= dt;
-    if (lv.water > 0.01 && this.babble <= 0) {
-      this.babble = 0.03 + Math.random() * 0.05;
-      a.bands.forEach((b, k) => b.frequency.setTargetAtTime([400, 800, 1300][k] * (0.7 + Math.random() * 0.9), t, 0.015));
+    this.ambOut.gain.setTargetAtTime(1, t, 0.5);
+    for (const name of AMBIENCE) {
+      const level = Math.max(0, Math.min(1, lv[name] ?? 0));
+      let loop = this.loops.get(name);
+      if (!loop) {
+        const buf = this.bank.get(name)?.[0];
+        if (!buf || level <= 0) continue;
+        const src = ctx.createBufferSource();
+        src.buffer = buf;
+        src.loop = true;
+        const gain = ctx.createGain();
+        gain.gain.value = 0;
+        src.connect(gain);
+        gain.connect(this.ambOut);
+        // Start somewhere random in the loop so it doesn't always open the same way.
+        src.start(0, Math.random() * buf.duration);
+        loop = { gain, src };
+        this.loops.set(name, loop);
+      }
+      loop.gain.gain.setTargetAtTime(AMBIENCE_VOLUME[name] * level, t, 0.8);
     }
-
-    const now = performance.now() / 1000;
-    if (lv.birds > 0.02 && now > this.nextBird) {
-      this.bird(lv.birds);
-      this.nextBird = now + (1.2 + Math.random() * 4) / (0.3 + lv.birds);
-    }
-    if (lv.crickets > 0.02 && now > this.nextCricket) {
-      this.cricket(lv.crickets);
-      this.nextCricket = now + 0.5 + Math.random() * 0.9;
-    }
-    if (lv.frogs > 0.02 && now > this.nextFrog) {
-      this.frog(lv.frogs);
-      this.nextFrog = now + (1.5 + Math.random() * 5) / (0.4 + lv.frogs);
-    }
-  }
-
-  /** Somewhere off to one side. */
-  private panned(ctx: AudioContext, gain: number): GainNode {
-    const g = ctx.createGain();
-    g.gain.value = gain;
-    const pan = ctx.createStereoPanner();
-    pan.pan.value = Math.random() * 1.6 - 0.8;
-    g.connect(pan);
-    pan.connect(this.amb?.out ?? this.master!);
-    return g;
-  }
-
-  /** A songbird: a few whistled notes, a trill or a falling call. */
-  private bird(level: number) {
-    const ctx = this.ctx!;
-    const out = this.panned(ctx, 0.05 * level * (0.4 + Math.random() * 0.6));
-    const t0 = ctx.currentTime + 0.02;
-    const kind = Math.floor(Math.random() * 3);
-    const base = 2400 + Math.random() * 2200;
-    const notes = kind === 1 ? 6 + Math.floor(Math.random() * 6) : 2 + Math.floor(Math.random() * 4);
-    let t = t0;
-    for (let n = 0; n < notes; n++) {
-      const o = ctx.createOscillator();
-      o.type = 'sine';
-      const g = ctx.createGain();
-      const len = kind === 1 ? 0.045 : 0.09 + Math.random() * 0.12;
-      const f = kind === 2 ? base * (1.25 - n * 0.08) : base * (0.85 + Math.random() * 0.4);
-      o.frequency.setValueAtTime(f, t);
-      o.frequency.exponentialRampToValueAtTime(f * (kind === 0 ? 1.25 : 0.85), t + len);
-      g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(1, t + 0.012);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + len);
-      o.connect(g); g.connect(out);
-      o.start(t); o.stop(t + len + 0.02);
-      t += len + (kind === 1 ? 0.015 : 0.04 + Math.random() * 0.08);
-    }
-  }
-
-  /** A cricket's pulsing chirp. */
-  private cricket(level: number) {
-    const ctx = this.ctx!;
-    const out = this.panned(ctx, 0.018 * level);
-    const t = ctx.currentTime + 0.01;
-    const o = ctx.createOscillator();
-    o.frequency.value = 4300 + Math.random() * 600;
-    const g = ctx.createGain();
-    g.gain.value = 0;
-    for (let p = 0; p < 3; p++) {
-      const s = t + p * 0.07;
-      g.gain.setValueAtTime(0, s);
-      g.gain.linearRampToValueAtTime(1, s + 0.01);
-      g.gain.linearRampToValueAtTime(0, s + 0.045);
-    }
-    o.connect(g); g.connect(out);
-    o.start(t); o.stop(t + 0.25);
-  }
-
-  /** A frog's croak: a low, buzzy pulse train. */
-  private frog(level: number) {
-    const ctx = this.ctx!;
-    const out = this.panned(ctx, 0.06 * level);
-    const t = ctx.currentTime + 0.01;
-    const o = ctx.createOscillator();
-    o.type = 'sawtooth';
-    o.frequency.setValueAtTime(140 + Math.random() * 90, t);
-    const f = ctx.createBiquadFilter();
-    f.type = 'lowpass';
-    f.frequency.value = 600;
-    const g = ctx.createGain();
-    g.gain.value = 0;
-    const pulses = 3 + Math.floor(Math.random() * 4);
-    for (let p = 0; p < pulses; p++) {
-      const s = t + p * 0.06;
-      g.gain.setValueAtTime(0, s);
-      g.gain.linearRampToValueAtTime(1, s + 0.012);
-      g.gain.linearRampToValueAtTime(0, s + 0.05);
-    }
-    o.connect(f); f.connect(g); g.connect(out);
-    o.start(t); o.stop(t + pulses * 0.06 + 0.1);
   }
 }
+
+/** Ambient loops, by the name used in public/sounds/sounds.json. */
+export const AMBIENCE = ['wind', 'river', 'birds', 'night', 'frogs'] as const;
+export type AmbienceName = typeof AMBIENCE[number];
+/** How loud each loop is at full strength (recordings vary; tune here). */
+const AMBIENCE_VOLUME: Record<AmbienceName, number> = { wind: 0.5, river: 0.6, birds: 0.5, night: 0.45, frogs: 0.5 };
 
 /** Volume falloff with distance (metres). */
 export const distVol = (d: number) => Math.max(0, Math.min(1, 1.2 - d / 30));

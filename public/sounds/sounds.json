@@ -1,0 +1,13 @@
+{
+  "_help": "List your recordings here (paths are relative to this folder). Leave a name empty to keep it silent (ambience) or synthesized (effects). Effects can list several files for variety. See README.md.",
+  "wind": "",
+  "river": "",
+  "birds": "",
+  "night": "",
+  "frogs": "",
+  "chop": [],
+  "glance": [],
+  "clink": [],
+  "creak": [],
+  "crash": []
+}

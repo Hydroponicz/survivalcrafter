@@ -1509,7 +1509,8 @@ export class Game {
     if (this.ambTimer <= 0) { this.ambTimer = 0.5; this.surroundings(); }
     this.groundCover.update(this.camera.position, this.elapsed, this.world.terrain.wind, this.amb.sway);
     this.fireflies.update(this.renderDt, this.elapsed, this.camera.position, this.world.terrain, this.amb.fireflies);
-    this.sound.ambience(this.amb, this.renderDt);
+    const a = this.amb;
+    this.sound.ambience({ wind: a.wind, river: a.water, birds: a.birds, night: a.crickets, frogs: a.frogs }, this.renderDt);
     this.view.syncAnimals(this.elapsed);
     this.view.updateFires(p.pos.x, p.pos.z, this.elapsed);
     this.renderer.render(this.scene, this.camera);
