@@ -56,6 +56,10 @@ Toggles are remembered per browser; a purple **DEV** badge shows while any cheat
   tool QL and material QL. Tools wear out and eventually break.
 - **The active item decides your options.** Activate a shovel and the action menu offers Dig, Flatten,
   Cultivate; a pickaxe offers Mine; bare hands forage.
+- **A living sky.** A physically based sky (Rayleigh and Mie scattering) with drifting clouds lights the
+  world: it's captured as an environment map so everything picks up skylight and water reflects it.
+  Distant hills fade into the real horizon colour, sunrise and sunset glow warm with long shadows, stars
+  come out at night, and mist pools in the valleys around dawn and lifts by midmorning.
 - **Weathered, eroded landscapes.** Each world is shaped by simulated rain: ~90,000 droplets run
   downhill, carving gullies into the mountains and laying sediment along valley floors. Soil is thick
   where sediment settled and thin where water stripped it; clay lines the well-watered valley bottoms.

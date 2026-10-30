@@ -1481,7 +1481,7 @@ export class Game {
   private render() {
     const p = this.player;
     this.view.treeFx.update(this.renderDt);
-    this.sky.update(this.world.dayFraction, p.pos, this.elapsed);
+    this.sky.update(this.world.dayFraction, p.pos, this.elapsed, this.renderer, this.camera, this.renderDt);
     this.view.syncAnimals(this.elapsed);
     this.view.updateFires(p.pos.x, p.pos.z, this.elapsed);
     this.renderer.render(this.scene, this.camera);
