@@ -114,6 +114,8 @@ export class Game {
   private renderDt = 1 / 60;
   /** Felled trees whose logs haven't landed yet. */
   private pendingDrops: PendingDrop[] = [];
+  private screeTimer = 0;
+  private steepTipShown = false;
   readonly sound = new Sound();
   private viewModel = new ViewModel();
   private saveTimer = 0;
@@ -690,6 +692,26 @@ export class Game {
     this.repeatBlocked = false;
   }
 
+  /** Pebbles, dust and scraping when you slide or can't get up a slope, plus a one-time tip. */
+  private slopeFeedback(dt: number) {
+    const p = this.player;
+    if (p.slope !== 'blocked' && p.slope !== 'sliding') { this.screeTimer = 0; return; }
+    this.screeTimer -= dt;
+    if (this.screeTimer > 0) return;
+    this.screeTimer = p.slope === 'sliding' ? 0.12 : 0.28;
+    const t = this.world.terrain;
+    const mat = t.materialAt(p.pos.x, p.pos.y - 0.1, p.pos.z);
+    const colour = mat === Mat.Rock || mat === Mat.Iron ? 0x8d8a85 : mat === Mat.Sand ? 0xcdbb88 : 0x6e5638;
+    const n = t.normalAt(p.pos.x, p.pos.y - 0.05, p.pos.z);
+    const hl = Math.hypot(n.x, n.z) || 1;
+    this.view.treeFx.scree(p.pos.x, p.pos.y, p.pos.z, n.x / hl, n.z / hl, colour, p.slope === 'sliding' ? 3 : 2);
+    this.sound.scree(p.slope === 'sliding' ? 0.9 : 0.5);
+    if (!this.steepTipShown) {
+      this.steepTipShown = true;
+      this.msg('Too steep to climb here. Find a gentler way up, or cut steps into the slope with a shovel or pickaxe.', 'warn');
+    }
+  }
+
   /** Turn the body toward what you're working on (third person). */
   private faceToward(t: Target): number | null {
     const p = this.player.pos;
@@ -1164,6 +1186,7 @@ export class Game {
       this.cancelAction('You moved and stopped what you were doing.');
     }
     p.updateCamera(this.camera, this.world.terrain);
+    this.slopeFeedback(dt);
 
     // --- targeting
     this.target = inp.locked || this.placing ? this.raycast() : this.target;
@@ -1235,7 +1258,8 @@ export class Game {
     const p = this.player;
     const uiOpen = this.ui.anyWindowOpen();
     // --- survival
-    const busy = !!this.action || !!this.working || p.sprinting;
+    // Hauling yourself up a steep slope is exertion too: no catching your breath.
+    const busy = !!this.action || !!this.working || p.sprinting || p.slope === 'steep' || p.slope === 'blocked';
     p.food = Math.max(0, p.food - dt * 0.05);
     p.water = Math.max(0, p.water - dt * 0.08);
     const fx = p.effects;

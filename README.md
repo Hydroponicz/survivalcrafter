@@ -73,6 +73,10 @@ Toggles are remembered per browser; a purple **DEV** badge shows while any cheat
   ("red spotted mushroom"). Recognise them as you pick (Herbalism), **Study** them, or learn by handling
   enough. Some are poisonous — eating an unknown one is a gamble; a yarrow poultice draws out poison.
   Mint tea and hearty stew reward knowing your plants. The field journal (**J**) records it all.
+- **Slopes with feedback.** Gentle hills are just tiring; steep ones slow you and drain stamina; slopes
+  over about 42° can't be climbed. Pushing into them sends pebbles and dust skittering down and your
+  character scrabbles; standing on one, you slide down on your heels. You can always walk across or down
+  — dig steps with a shovel or pickaxe to make your own way up.
 - **Chopping trees you can feel.** Every swing is a blow: wind up, drive the axe in, and the hit lands
   at the bottom of the stroke with a thunk, flying chips, falling leaves, camera shake and a shudder
   through the tree. A V-notch deepens with each hit (and stays if you walk away). When it's through,

@@ -95,6 +95,21 @@ export class Sound {
     this.glance(vol * 0.8);
   }
 
+  /** Gravel skittering underfoot: sliding, or scrabbling at a slope that's too steep. */
+  scree(vol = 1) {
+    const ctx = this.ensure();
+    if (!ctx) return;
+    const t = ctx.currentTime;
+    const n = this.noise(ctx, 0.3);
+    const f = ctx.createBiquadFilter();
+    f.type = 'bandpass';
+    f.frequency.value = 900 + Math.random() * 900;
+    f.Q.value = 0.7;
+    n.connect(f);
+    f.connect(this.env(ctx, vol, 0.28, 0.26, 0.02));
+    n.start(t);
+  }
+
   /** The long groaning creak as a tree starts to topple. */
   creak(vol = 1) {
     const ctx = this.ensure();

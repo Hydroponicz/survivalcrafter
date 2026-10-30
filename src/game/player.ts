@@ -12,6 +12,10 @@ const HEIGHT = 1.8;
 /** Highest ledge you can walk straight up onto (stairs, floor edges). */
 const STEP = 0.55;
 const GRAVITY = 22;
+/** Ground steeper than this (degrees) is hard going; steeper than TOO_STEEP can't be climbed and you slide. */
+const STEEP = 28;
+const TOO_STEEP = 42;
+const MAX_SLIDE = 8;
 const RING = [[1, 0], [-1, 0], [0, 1], [0, -1], [0.7, 0.7], [-0.7, 0.7], [0.7, -0.7], [-0.7, -0.7]];
 
 export type CameraMode = 'first' | 'third';
@@ -26,6 +30,10 @@ export class Player {
   cameraMode: CameraMode = 'first';
   camDist = 4.5;
   moving = false;
+  /** How the ground under you is treating you, for feedback: fine, hard going, too steep to climb, or sliding. */
+  slope: 'ok' | 'steep' | 'blocked' | 'sliding' = 'ok';
+  /** Downhill slide velocity (m/s, x/z). */
+  slide = new THREE.Vector2();
   /** Set while placing a building piece, so the wheel rotates it instead of zooming. */
   wheelCaptured = false;
   sprinting = false;
@@ -136,6 +144,18 @@ export class Player {
     return { y: g, piece };
   }
 
+  /** Terrain normal under the feet, averaged over a small patch so single voxels don't jolt it. */
+  private groundNormal(world: World, x: number, y: number, z: number): THREE.Vector3 {
+    const t = world.terrain;
+    const n = new THREE.Vector3();
+    const tmp = new THREE.Vector3();
+    for (const [ox, oz] of [[0, 0], [0.35, 0], [-0.35, 0], [0, 0.35], [0, -0.35]]) {
+      const gy = ox || oz ? t.groundBelow(x + ox, y + 0.6, z + oz) : y;
+      n.add(t.normalAt(x + ox, (Number.isFinite(gy) ? gy : y) - 0.05, z + oz, tmp));
+    }
+    return n.normalize();
+  }
+
   /**
    * How much a body standing with its feet at (x, y, z) overlaps solid things:
    * terrain samples inside the ground, plus how deep it sits in trees and pieces.
@@ -227,19 +247,69 @@ export class Player {
       dz = (-mx * s + mz * c) * speed;
     }
 
-    // Slopes: walking uphill is slow and tiring; very steep ground can't be walked up at all.
-    if (len > 0 && !this.swimming && this.onGround) {
-      const step = Math.hypot(dx, dz) * 0.15;
+    // Slopes. Gentle ground is just tiring; steep ground slows you and drains
+    // stamina; ground that's too steep can't be climbed at all: the uphill part
+    // of your movement is lost (you can still go sideways or down) and you slide.
+    this.slope = 'ok';
+    let slideAccel = 0;
+    let downhill: THREE.Vector2 | null = null;
+    if (!this.swimming && this.onGround) {
       const here = this.groundAt(world, this.pos.x, this.pos.y, this.pos.z);
-      const ahead = this.groundAt(world, this.pos.x + dx * 0.15, this.pos.y, this.pos.z + dz * 0.15);
-      const grade = (ahead.y - here.y) / Math.max(0.01, step);
-      if (!ahead.piece && grade > 1.3) { dx = 0; dz = 0; }
-      else if (grade > 0.35 && !ahead.piece) {
-        const f = Math.max(0.25, 1 - (grade - 0.35) * 0.7);
-        dx *= f; dz *= f;
-        this.stamina -= dt * 4 * (grade - 0.35);
+      if (!here.piece && Number.isFinite(here.y)) {
+        const n = this.groundNormal(world, this.pos.x, here.y, this.pos.z);
+        const angle = Math.acos(Math.min(1, Math.max(-1, n.y))) * 180 / Math.PI;
+        const hl = Math.hypot(n.x, n.z);
+        if (hl > 1e-3) downhill = new THREE.Vector2(n.x / hl, n.z / hl);
+        if (downhill && angle > STEEP) {
+          // How hard you're pushing uphill (m/s).
+          const up = -(dx * downhill.x + dz * downhill.y);
+          const tooSteep = angle > TOO_STEEP || this.stamina <= 0;
+          if (tooSteep) {
+            if (up > 0) { dx += up * downhill.x; dz += up * downhill.y; this.slope = 'blocked'; }
+            slideAccel = 9.8 * (Math.sin(angle * Math.PI / 180) - 0.55 * Math.cos(angle * Math.PI / 180));
+          } else if (up > 0) {
+            // Climbable but hard going: keep only part of the uphill effort.
+            const k = (angle - STEEP) / (TOO_STEEP - STEEP);
+            const keep = 1 - 0.7 * k;
+            dx += up * (1 - keep) * downhill.x;
+            dz += up * (1 - keep) * downhill.y;
+            this.stamina -= dt * (3 + 9 * k);
+            this.slope = 'steep';
+          }
+        }
+      }
+      // A cliff face just ahead (a sharp rise the feet can't step up): turn the
+      // push into movement along the face rather than stopping dead.
+      if ((dx || dz) && this.slope !== 'blocked' && Number.isFinite(here.y)) {
+        const ax = this.pos.x + dx * 0.15, az = this.pos.z + dz * 0.15;
+        const ahead = this.groundAt(world, ax, this.pos.y, az);
+        const rise = ahead.y - here.y;
+        const run = Math.hypot(dx, dz) * 0.15;
+        if (!ahead.piece && Number.isFinite(ahead.y) && rise / Math.max(0.01, run) > Math.tan(TOO_STEEP * Math.PI / 180)) {
+          const n = this.groundNormal(world, ax, ahead.y, az);
+          const hl = Math.hypot(n.x, n.z);
+          if (hl > 1e-3) {
+            const ux = n.x / hl, uz = n.z / hl;
+            const up = -(dx * ux + dz * uz);
+            if (up > 0) { dx += up * ux; dz += up * uz; }
+          }
+          this.slope = 'blocked';
+        }
       }
     }
+    // Sliding: pick up speed down a too-steep slope; friction stops you once it levels out.
+    if (slideAccel > 0 && downhill) {
+      this.slide.x += downhill.x * slideAccel * dt;
+      this.slide.y += downhill.y * slideAccel * dt;
+      const sp = this.slide.length();
+      if (sp > MAX_SLIDE) this.slide.multiplyScalar(MAX_SLIDE / sp);
+    } else {
+      this.slide.multiplyScalar(Math.exp(-(this.onGround ? 7 : 0.5) * dt));
+      if (this.slide.length() < 0.15) this.slide.set(0, 0);
+    }
+    if (this.slide.length() > 0.6) this.slope = 'sliding';
+    dx += this.slide.x;
+    dz += this.slide.y;
 
     this.vel.x = dx;
     this.vel.z = dz;
@@ -326,7 +396,11 @@ export class Player {
     this.shakeAmt = Math.min(1, Math.max(this.shakeAmt, amount));
   }
 
+  private scramble = 0;
+
   private animate(dt: number) {
+    if (this.slope === 'blocked') this.scramble += dt; else this.scramble = 0;
+    if (this.slope === 'sliding') this.shake(0.18);
     const speed = Math.hypot(this.vel.x, this.vel.z);
     if (speed > 0.1 && this.onGround) this.walkPhase += dt * speed * 2.2;
     else this.walkPhase *= 0.9;
@@ -360,6 +434,22 @@ export class Player {
         p.armR.rotation.set(-0.6 - drive * 0.9, 0, 0.1);
         p.upper.rotation.set(drive * 0.25, 0, 0);
       }
+    } else if (this.slope === 'sliding') {
+      // Skidding down on your heels: lean back, legs braced forward, arms out for balance.
+      p.upper.rotation.set(-0.4, 0, 0);
+      p.legL.rotation.x = -0.65;
+      p.legR.rotation.x = -0.35;
+      p.armL.rotation.set(-0.5, 0, -1.1 + Math.sin(this.walkPhase * 3) * 0.15);
+      p.armR.rotation.set(-0.5, 0, 1.1 - Math.sin(this.walkPhase * 3) * 0.15);
+      p.upper.position.y = 0.72;
+    } else if (this.slope === 'blocked') {
+      // Scrabbling at a slope you can't get up: hunched forward, legs churning, hands grasping.
+      const k = Math.sin(this.scramble * 14);
+      p.upper.rotation.set(0.45, 0, 0);
+      p.legL.rotation.x = 0.5 * k - 0.2;
+      p.legR.rotation.x = -0.5 * k - 0.2;
+      p.armL.rotation.set(-2.2 + 0.4 * k, 0, -0.2);
+      p.armR.rotation.set(-2.2 - 0.4 * k, 0, 0.2);
     } else if (this.swing > 0) {
       p.armR.rotation.x = -1.2 - Math.sin(this.swing * Math.PI * 2) * 0.9;
     } else if (this.heldKind) {

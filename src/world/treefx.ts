@@ -72,6 +72,7 @@ export class TreeFx {
   private chipGeo = new THREE.BoxGeometry(0.06, 0.02, 0.035);
   private leafGeo = new THREE.PlaneGeometry(0.12, 0.09);
   private dustGeo = new THREE.IcosahedronGeometry(0.25, 0);
+  private pebbleGeo = new THREE.DodecahedronGeometry(0.035, 0);
 
   constructor(private terrain: Terrain, private leafGeoFor: (s: Species) => THREE.BufferGeometry, private leafColor: (t: TreeObj) => THREE.Color) {}
 
@@ -249,6 +250,19 @@ export class TreeFx {
       this.stumps.set(key, m);
     }
     for (const [k, m] of this.stumps) if (!live.has(k)) { this.group.remove(m); this.stumps.delete(k); }
+  }
+
+  /** Pebbles and dust kicked loose on a slope, tumbling downhill (dx, dz). */
+  scree(x: number, y: number, z: number, dx: number, dz: number, colour: number, n = 3) {
+    for (let k = 0; k < n; k++) {
+      const v = new THREE.Vector3(dx * (1.5 + Math.random() * 2) + (Math.random() - 0.5), 0.6 + Math.random() * 1.2, dz * (1.5 + Math.random() * 2) + (Math.random() - 0.5));
+      const at = new THREE.Vector3(x + (Math.random() - 0.5) * 0.4, y + 0.05, z + (Math.random() - 0.5) * 0.4);
+      this.spawn(this.pebbleGeo, colour, at, v, 1.6, 9.8, 0.6, true);
+    }
+    if (Math.random() < 0.6) {
+      const at = new THREE.Vector3(x, y + 0.15, z);
+      this.spawn(this.dustGeo, 0xa89a7c, at, new THREE.Vector3(dx * 0.6, 0.4, dz * 0.6), 1.0, 0.1, 1.5, false, 0.35, 1.2);
+    }
   }
 
   private spawn(geo: THREE.BufferGeometry, color: number, at: THREE.Vector3, vel: THREE.Vector3, life: number, gravity: number, drag: number, settle: boolean, opacity = 1, grow?: number) {

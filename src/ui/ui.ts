@@ -329,6 +329,9 @@ export class UI {
     const w = g.inv.weight();
     if (w > CARRY_CAPACITY) status.push(`<span class="warn">Overloaded ${w.toFixed(0)}/${CARRY_CAPACITY} kg</span>`);
     if (p.swimming) status.push('Swimming');
+    if (p.slope === 'blocked') status.push('<span class="warn">Too steep to climb</span>');
+    else if (p.slope === 'sliding') status.push('<span class="warn">Sliding!</span>');
+    else if (p.slope === 'steep') status.push('Steep — hard going');
     if (p.effects.poisoned) status.push(`<span class="bad">Poisoned ${Math.ceil(p.effects.poisoned.t)}s</span>`);
     if (p.effects.nauseous) status.push('<span class="warn">Nauseous</span>');
     if (p.effects.refreshed) status.push('<span class="good-text">Refreshed</span>');
