@@ -927,25 +927,26 @@ export class Game {
           break;
         }
       }
+      // Keep out of water; one that's in it anyway (an older save) heads for shore, even when resting.
+      const inWater = t.heightAt(a.x, a.z) < t.waterAt(a.x, a.z) + 0.2;
+      if (inWater && a.state !== 'attack' && (a.state === 'idle' || !(this.elapsed < (a.shoreAt ?? 0)))) {
+        // Head for the nearest dry ground (re-aiming now and then, so a turn away from a steep bank sticks).
+        let best = Infinity;
+        for (let k = 0; k < 16; k++) {
+          const ang = (k / 16) * Math.PI * 2, cx = Math.cos(ang), cz = Math.sin(ang);
+          for (let r = 2; r < 40 && r < best; r += 2) {
+            const x = a.x + cx * r, z = a.z + cz * r;
+            if (t.heightAt(x, z) >= t.waterAt(x, z) + 0.3) { best = r; a.dirX = cx; a.dirZ = cz; break; }
+          }
+        }
+        a.state = 'wander'; a.timer = Math.max(a.timer, 3); a.speed = 1.1;
+        a.shoreAt = this.elapsed + 2.5;
+      }
       if (a.speed > 0) {
         const nx = a.x + a.dirX * a.speed * dt;
         const nz = a.z + a.dirZ * a.speed * dt;
         const h = t.heightAt(nx, nz);
-        // Keep out of water, but one that's already in (an old save) may wade out.
-        const inWater = t.heightAt(a.x, a.z) < t.waterAt(a.x, a.z) + 0.2;
-        if (inWater && a.state !== 'attack') {
-          // Head for the nearest dry ground.
-          let best = Infinity;
-          for (let k = 0; k < 16; k++) {
-            const ang = (k / 16) * Math.PI * 2, cx = Math.cos(ang), cz = Math.sin(ang);
-            for (let r = 2; r < 40 && r < best; r += 2) {
-              const x = a.x + cx * r, z = a.z + cz * r;
-              if (t.heightAt(x, z) >= t.waterAt(x, z) + 0.3) { best = r; a.dirX = cx; a.dirZ = cz; break; }
-            }
-          }
-          a.state = 'wander'; a.timer = Math.max(a.timer, 1); a.speed = 1.1;
-        }
-        if ((!inWater && h < t.waterAt(nx, nz) + 0.2) || nx < 2 || nz < 2 || nx > maxXZ || nz > maxXZ || w.blockedAt(nx, h + 0.6, nz) ||
+        if ((!inWater && h < t.waterAt(nx, nz) + 0.2) || nx < 2 || nz < 2 || nx > maxXZ || nz > maxXZ || (!inWater && w.blockedAt(nx, h + 0.6, nz)) ||
           (!inWater && Math.abs(h - t.heightAt(a.x, a.z)) > a.speed * dt * 1.5)) {
           // turn away from water or walls
           const ang = Math.atan2(a.dirZ, a.dirX) + Math.PI * (0.5 + Math.random());

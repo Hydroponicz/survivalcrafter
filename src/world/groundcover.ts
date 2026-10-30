@@ -27,6 +27,16 @@ interface Kind {
 
 interface TileData { m: Float32Array; c: Float32Array; n: number }
 
+/** Ground a log or boulder covers (a capsule from a to b), so plants don't grow through it. */
+interface Obstacle { ax: number; az: number; bx: number; bz: number; r: number }
+
+const inside = (o: Obstacle, x: number, z: number) => {
+  const dx = o.bx - o.ax, dz = o.bz - o.az;
+  const len2 = dx * dx + dz * dz;
+  const t = len2 > 0 ? Math.max(0, Math.min(1, ((x - o.ax) * dx + (z - o.az) * dz) / len2)) : 0;
+  return Math.hypot(x - (o.ax + dx * t), z - (o.az + dz * t)) < o.r;
+};
+
 const rnd = (r: () => number, a: number, b: number) => a + (b - a) * r();
 
 // ---------- geometry
@@ -269,6 +279,8 @@ export class GroundCover {
   private kinds: Kind[];
   private byName: Record<string, number> = {};
   private cache = [new Map<number, TileData[]>(), new Map<number, TileData[]>()];
+  /** Logs and boulders per far tile, kept for the near tiles' plants to avoid. */
+  private obstacles = new Map<number, Obstacle[]>();
   private centre = [NaN, NaN];
   private dirty = true;
   private seed: number;
@@ -293,7 +305,7 @@ export class GroundCover {
   invalidate(x: number, z: number, r: number) {
     for (const cache of this.cache) {
       for (let tz = Math.floor((z - r) / TILE); tz <= Math.floor((z + r) / TILE); tz++) {
-        for (let tx = Math.floor((x - r) / TILE); tx <= Math.floor((x + r) / TILE); tx++) cache.delete(tz * 1000 + tx);
+        for (let tx = Math.floor((x - r) / TILE); tx <= Math.floor((x + r) / TILE); tx++) { cache.delete(tz * 1000 + tx); this.obstacles.delete(tz * 1000 + tx); }
       }
     }
     this.dirty = true;
@@ -327,7 +339,7 @@ export class GroundCover {
       // Drop tiles well out of range so memory doesn't grow.
       for (const k of cache.keys()) {
         const x = k % 1000, z = Math.floor(k / 1000);
-        if (Math.abs(x - tx) > r + 2 || Math.abs(z - tz) > r + 2) cache.delete(k);
+        if (Math.abs(x - tx) > r + 2 || Math.abs(z - tz) > r + 2) { cache.delete(k); if (far) this.obstacles.delete(k); }
       }
     }
     this.rebuild(tx, tz);
@@ -382,6 +394,19 @@ export class GroundCover {
     };
     const blocked = (x: number, y: number, z: number) => pieces.length > 0 && this.world.blockedAt(x, y + 0.12, z);
 
+    // Logs and boulders lying here (they can reach in from the next tile, too).
+    const obs: Obstacle[] = [];
+    if (!far) {
+      for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+        const x = tx + dx, z = tz + dz;
+        if (x < 0 || z < 0 || x * TILE >= WORLD_SIZE || z * TILE >= WORLD_SIZE) continue;
+        const key = z * 1000 + x;
+        if (!this.obstacles.has(key)) this.cache[1].set(key, this.generate(x, z, true));
+        obs.push(...(this.obstacles.get(key) ?? []));
+      }
+    }
+    const covered = (x: number, z: number) => obs.length > 0 && obs.some((o) => inside(o, x, z));
+
     if (!far) {
       // Zones change slowly: look them up on a 4 m grid.
       const zones: Zone[] = [];
@@ -390,6 +415,7 @@ export class GroundCover {
       const samples = TILE * TILE * 3;
       for (let k = 0; k < samples; k++) {
         const x = tx * TILE + r() * TILE, z = tz * TILE + r() * TILE;
+        if (covered(x, z)) continue;
         const g = probe(x, z);
         const water = t.waterAt(x, z);
         const zone = zoneAt(x, z);
@@ -443,14 +469,20 @@ export class GroundCover {
           const v = rnd(r, 0.75, 1.05) * 1.5;
           const sc = rnd(r, 0.35, 1.5);
           put('boulder', x, g.h - sc * 0.15, z, r() * 6.28, sc, col[0] * v, col[1] * v, col[2] * v, rnd(r, -0.2, 0.2));
+          obs.push({ ax: x, az: z, bx: x, bz: z, r: 0.55 * sc });
           continue;
         }
         if ((zone === 'broadleaf' || zone === 'conifer') && g.mat === Mat.Grass && g.slope < 0.5 && r() < 0.06) {
           const f = rnd(r, 0.75, 1.05);
-          put('log', x, g.h - 0.05, z, r() * 6.28, rnd(r, 0.7, 1.15), f, f, f, Math.atan(g.slope) * 0.5);
+          const yaw = r() * 6.28, sc = rnd(r, 0.7, 1.15);
+          put('log', x, g.h - 0.05, z, yaw, sc, f, f, f, Math.atan(g.slope) * 0.5);
+          // The trunk runs 2 m either way along its local X.
+          const hx = Math.cos(yaw) * 2 * sc, hz = -Math.sin(yaw) * 2 * sc;
+          obs.push({ ax: x - hx, az: z - hz, bx: x + hx, bz: z + hz, r: 0.32 * sc });
         }
       }
     }
+    if (far) this.obstacles.set(tz * 1000 + tx, obs);
     return lists.map((L) => ({ m: new Float32Array(L.m), c: new Float32Array(L.c), n: L.c.length / 3 }));
   }
 }

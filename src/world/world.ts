@@ -54,6 +54,8 @@ export interface AnimalObj {
   state: 'wander' | 'idle' | 'flee' | 'attack';
   timer: number; speed: number; dirX: number; dirZ: number;
   attackCooldown: number;
+  /** When an animal stranded in water next re-aims for the shore. */
+  shoreAt?: number;
 }
 
 /** Crops grow on 1 m cells of tilled ground. */
