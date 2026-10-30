@@ -9,7 +9,9 @@ import { forageHeight, forageScale } from '../world/forageProps';
 import { buildPieceMesh, WorldView } from '../world/view';
 import { GroundCover } from '../world/groundcover';
 import { Fireflies } from '../world/fireflies';
-import { DistantLand } from '../world/lod';
+import { DistantLand, LOD_TILES } from '../world/lod';
+import { WorkerTiles } from '../world/tilesource';
+import { TILE, tileOf } from '../world/worldgen';
 import {
   ANIMALS, pointInPiece, toLocal, toWorld, World, type AnimalObj, type ForageObj, type PileObj, type StructureObj, type TreeObj, type WorldObj,
 } from '../world/world';
@@ -35,9 +37,10 @@ const REACH = 4.5;
 /** Skill above a task's difficulty needed to do it the quick way. */
 export const QUICK_MARGIN = 10;
 const BUILD_REACH = 8;
-const SAVE_KEY = 'survivalcrafter.save.v4';
+const SAVE_KEY = 'survivalcrafter.save.v5';
 /** Saves from older world generators, which can't be loaded into the current one, and why. */
 export const OLD_SAVES: [string, string][] = [
+  ['survivalcrafter.save.v4', 'The world now goes on forever, so worlds from before can no longer be loaded. Start a new world to play.'],
   ['survivalcrafter.save.v3', 'The world is now a vast open continent that streams in as you explore, so worlds from before can no longer be loaded. Start a new world to play.'],
   ['survivalcrafter.save.v2', 'Worlds are now shaped by erosion, so worlds from before the change can no longer be loaded. Start a new world to play.'],
   ['survivalcrafter.save.v1', 'The world is now made of voxels, so worlds from the old tile terrain can no longer be loaded. Start a new world to play.'],
@@ -138,6 +141,8 @@ export class Game {
   /** Grass, plants, rocks and logs around you (visual only). */
   groundCover!: GroundCover;
   private distant!: DistantLand;
+  private tileWorkers?: WorkerTiles;
+  private tileTimer = 0;
   private fireflies = new Fireflies();
   /** What the surroundings sound and look like right now, refreshed a couple of times a second. */
   private amb = { wind: 0.3, water: 0, birds: 0, crickets: 0, frogs: 0, fireflies: 0, sway: 0.4 };
@@ -168,12 +173,20 @@ export class Game {
     this.scene.add(this.markers);
     this.scene.add(this.view.group);
     this.scene.add(this.player.model);
-    this.sky = new Sky(this.scene, world.terrain.size);
+    this.sky = new Sky(this.scene);
     // Rivers and lakes share the sea's water material (and its ripples).
     world.terrain.waterMaterial = this.sky.water.material as THREE.Material;
-    // The rest of the world, out to the horizon.
-    this.distant = new DistantLand(world.terrain.gen, this.sky.water.material as THREE.Material);
+    // The rest of the world, out to the horizon: map tiles are made in the
+    // background as you travel, and each becomes distant land when it arrives.
+    const gen = world.terrain.gen;
+    this.distant = new DistantLand(this.sky.water.material as THREE.Material);
     this.scene.add(this.distant.group);
+    gen.onTile = (d, lod) => this.distant.addTile(d, lod);
+    gen.forEachTile((d) => this.distant.addTile(d));
+    try {
+      this.tileWorkers = new WorkerTiles(gen.seed, (d, lod) => gen.addTile(d, lod), TILE);
+      gen.useSource(this.tileWorkers);
+    } catch { /* no workers: tiles are made on the main thread when needed */ }
     this.groundCover = new GroundCover(world);
     this.scene.add(this.groundCover.group, this.fireflies.points);
     this.view.onStructure = (o) => this.groundCover.invalidate(o.x, o.z, 3);
@@ -887,7 +900,6 @@ export class Game {
 
   private updateAnimals(dt: number) {
     const w = this.world, t = w.terrain, p = this.player.pos;
-    const maxXZ = t.size - 2;
     for (const a of w.animals) {
       const d = ANIMALS[a.species];
       const toP = Math.hypot(p.x - a.x, p.z - a.z);
@@ -955,7 +967,7 @@ export class Game {
         const nx = a.x + a.dirX * a.speed * dt;
         const nz = a.z + a.dirZ * a.speed * dt;
         const h = t.heightAt(nx, nz);
-        if ((!inWater && h < t.waterAt(nx, nz) + 0.2) || nx < 2 || nz < 2 || nx > maxXZ || nz > maxXZ || (!inWater && w.blockedAt(nx, h + 0.6, nz)) ||
+        if ((!inWater && h < t.waterAt(nx, nz) + 0.2) || (!inWater && w.blockedAt(nx, h + 0.6, nz)) ||
           (!inWater && Math.abs(h - t.heightAt(a.x, a.z)) > a.speed * dt * 1.5)) {
           // turn away from water or walls
           const ang = Math.atan2(a.dirZ, a.dirX) + Math.PI * (0.5 + Math.random());
@@ -1514,6 +1526,8 @@ export class Game {
     this.ambTimer -= this.renderDt;
     if (this.ambTimer <= 0) { this.ambTimer = 0.5; this.surroundings(); }
     this.groundCover.update(this.camera.position, this.elapsed, this.world.terrain.wind, this.amb.sway);
+    this.tileTimer -= this.renderDt;
+    if (this.tileTimer <= 0) { this.tileTimer = 0.5; this.keepTiles(); }
     const mc = this.world.terrain.meshCentre;
     this.distant.setHole(mc.x, mc.z, Number.isFinite(mc.x) ? Math.max(0, this.world.terrain.readyRadius - 6) : 0);
     this.fireflies.update(this.renderDt, this.elapsed, this.camera.position, this.world.terrain, this.amb.fireflies);
@@ -1559,6 +1573,25 @@ export class Game {
     } catch (e) {
       console.warn('Save failed', e);
     }
+  }
+
+  /** Ask for the map tiles around you (nearest first) and let far ones go. */
+  private keepTiles() {
+    const p = this.player.pos, gen = this.world.terrain.gen;
+    if (this.tileWorkers) this.tileWorkers.focus = { x: p.x, z: p.z };
+    const tx = tileOf(p.x), tz = tileOf(p.z);
+    const want: [number, number, number][] = [];
+    for (let dz = -LOD_TILES; dz <= LOD_TILES; dz++) for (let dx = -LOD_TILES; dx <= LOD_TILES; dx++) {
+      if (!this.distant.has(tx + dx, tz + dz)) want.push([tx + dx, tz + dz, dx * dx + dz * dz]);
+    }
+    want.sort((a, b) => a[2] - b[2]);
+    // Without workers, make at most one a go (each takes a moment).
+    for (const [x, z] of this.tileWorkers ? want : want.slice(0, 1)) {
+      if (gen.hasTile(x, z)) this.distant.addTile(gen.tileData(x, z)!);
+      else gen.want(x, z);
+    }
+    this.distant.prune(p.x, p.z);
+    gen.forget(p.x, p.z, (LOD_TILES + 1) * TILE);
   }
 
   /**

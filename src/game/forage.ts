@@ -1,6 +1,6 @@
 import { FORAGE, FORAGE_SPECIES, LEARN_BY_HANDLING, type Biome } from '../data/forage';
 import { isIdentified, knownSpecies, learnSpecies, setKnownSpecies } from '../data/items';
-import { Mat, WORLD_SIZE } from '../world/terrain';
+import { Mat } from '../world/terrain';
 import { REGION, type ForageObj, type RegionHook, type World } from '../world/world';
 
 // Foraging reads the land: plants, fungi, branches and pebbles lie on the ground
@@ -69,7 +69,6 @@ function pickSpecies(biome: Biome, r: number): string | undefined {
 /** Try to grow one find at a spot. Returns it, or undefined if the spot isn't suitable. */
 function trySpawn(world: World, x: number, z: number, rnd: () => number, id?: number): ForageObj | undefined {
   const t = world.terrain;
-  if (x < 2 || z < 2 || x > WORLD_SIZE - 2 || z > WORLD_SIZE - 2) return undefined;
   const y = t.heightAt(x, z);
   if (y < t.waterAt(x, z) + 0.15) return undefined;
   // Nothing settles on a cliff face (steeper than about 45°). Heights, not voxels: this runs for whole regions.

@@ -1,7 +1,7 @@
 import { type Item } from '../data/items';
 import { pieceBoxes, STRUCTURES, type V3 } from '../data/structures';
 import { mulberry32, Simplex } from './noise';
-import { Mat, Terrain, WORLD_SIZE } from './terrain';
+import { Mat, Terrain } from './terrain';
 import type { Zone } from './climate';
 
 export type Species = 'oak' | 'birch' | 'pine';
@@ -76,15 +76,17 @@ export const DAY_LENGTH = 20 * 60; // seconds per in-game day
 export const CROP_STAGE_TIME = 120; // seconds per growth stage
 export const CROP_STAGES = 5;
 const CELL = 2; // spatial hash cell size in metres
-const GRID = WORLD_SIZE / CELL;
+// Unbounded keys: grid cells and crop squares within about ±33,000 km.
+const GOFF = 2 ** 24, GSPAN = 2 ** 25;
+const cellKey = (cx: number, cz: number) => (cz + GOFF) * GSPAN + cx + GOFF;
 
 export const ANIMALS: Record<AnimalSpecies, { name: string; hp: number; speed: number; aggressive: boolean; meat: number; damage: number }> = {
   deer: { name: 'Deer', hp: 35, speed: 4.5, aggressive: false, meat: 3, damage: 0 },
   boar: { name: 'Wild boar', hp: 40, speed: 3.6, aggressive: true, meat: 4, damage: 4 },
 };
 
-export const cropKey = (x: number, z: number) => Math.floor(z) * WORLD_SIZE + Math.floor(x);
-export const cropPos = (key: number) => ({ x: (key % WORLD_SIZE) + 0.5, z: Math.floor(key / WORLD_SIZE) + 0.5 });
+export const cropKey = (x: number, z: number) => cellKey(Math.floor(x), Math.floor(z));
+export const cropPos = (key: number) => ({ x: (key % GSPAN) - GOFF + 0.5, z: Math.floor(key / GSPAN) - GOFF + 0.5 });
 
 // ---------- piece geometry helpers
 
@@ -123,7 +125,11 @@ const VEGETATION: Record<Zone, { trees: number; oak: number; birch: number; pine
 
 /** Wild things are generated a region at a time around you. */
 export const REGION = 64;
-const NR = WORLD_SIZE / REGION;
+// Region keys: regions within about ±2,000 km of the origin.
+const ROFF = 2 ** 15, RSPAN = 2 ** 16;
+const regionKey = (rx: number, rz: number) => (rz + ROFF) * RSPAN + rx + ROFF;
+const regionX = (r: number) => (r % RSPAN) - ROFF;
+const regionZ = (r: number) => Math.floor(r / RSPAN) - ROFF;
 /** Generated objects get ids from here up (region * 4096 + index), so they're the same every visit. */
 export const GEN_BASE = 100_000_000;
 const LOAD_R = 220;
@@ -153,7 +159,7 @@ export class World {
   private loadedRegions = new Set<number>();
   regionHooks: RegionHook[] = [];
   /** Where things are happening (the player): slow processes run around here. */
-  focus = { x: WORLD_SIZE / 2, z: WORLD_SIZE / 2 };
+  focus = { x: 0, z: 0 };
 
   constructor(seed: number) {
     this.terrain = new Terrain(seed);
@@ -161,9 +167,7 @@ export class World {
 
   // ---------- spatial hash
   private key(x: number, z: number) {
-    const cx = Math.max(0, Math.min(GRID - 1, Math.floor(x / CELL)));
-    const cz = Math.max(0, Math.min(GRID - 1, Math.floor(z / CELL)));
-    return cz * GRID + cx;
+    return cellKey(Math.floor(x / CELL), Math.floor(z / CELL));
   }
 
   add<T extends WorldObj>(o: Omit<T, 'id'> & { id?: number }): T {
@@ -214,10 +218,10 @@ export class World {
     const r0x = Math.floor((px - LOAD_R) / REGION), r1x = Math.floor((px + LOAD_R) / REGION);
     const r0z = Math.floor((pz - LOAD_R) / REGION), r1z = Math.floor((pz + LOAD_R) / REGION);
     const want: [number, number, number][] = [];
-    for (let rz = Math.max(0, r0z); rz <= Math.min(NR - 1, r1z); rz++) {
-      for (let rx = Math.max(0, r0x); rx <= Math.min(NR - 1, r1x); rx++) {
+    for (let rz = r0z; rz <= r1z; rz++) {
+      for (let rx = r0x; rx <= r1x; rx++) {
         const d = this.regionDist(rx, rz, px, pz);
-        if (d <= LOAD_R && !this.loadedRegions.has(rz * NR + rx)) want.push([rx, rz, d]);
+        if (d <= LOAD_R && !this.loadedRegions.has(regionKey(rx, rz))) want.push([rx, rz, d]);
       }
     }
     want.sort((a, b) => a[2] - b[2]);
@@ -229,16 +233,16 @@ export class World {
       made++;
     }
     for (const r of [...this.loadedRegions]) {
-      if (this.regionDist(r % NR, Math.floor(r / NR), px, pz) > UNLOAD_R) this.unloadRegion(r);
+      if (this.regionDist(regionX(r), regionZ(r), px, pz) > UNLOAD_R) this.unloadRegion(r);
     }
     return made;
   }
 
   /** Are all regions within `r` of a point loaded? */
   regionsReady(px: number, pz: number, r = LOAD_R): boolean {
-    for (let rz = Math.max(0, Math.floor((pz - r) / REGION)); rz <= Math.min(NR - 1, Math.floor((pz + r) / REGION)); rz++) {
-      for (let rx = Math.max(0, Math.floor((px - r) / REGION)); rx <= Math.min(NR - 1, Math.floor((px + r) / REGION)); rx++) {
-        if (this.regionDist(rx, rz, px, pz) <= r && !this.loadedRegions.has(rz * NR + rx)) return false;
+    for (let rz = Math.floor((pz - r) / REGION); rz <= Math.floor((pz + r) / REGION); rz++) {
+      for (let rx = Math.floor((px - r) / REGION); rx <= Math.floor((px + r) / REGION); rx++) {
+        if (this.regionDist(rx, rz, px, pz) <= r && !this.loadedRegions.has(regionKey(rx, rz))) return false;
       }
     }
     return true;
@@ -251,7 +255,7 @@ export class World {
 
   /** Grow a region's trees, bushes and the rest (the same every time), minus what you've taken. */
   private loadRegion(rx: number, rz: number) {
-    const r = rz * NR + rx;
+    const r = regionKey(rx, rz);
     this.loadedRegions.add(r);
     const st = this.regions.get(r);
     let k = 0;
@@ -304,7 +308,7 @@ export class World {
   /** Let go of a far region: its wild things are regenerated (with your changes) when you come back. */
   private unloadRegion(r: number) {
     this.loadedRegions.delete(r);
-    const rx = r % NR, rz = Math.floor(r / NR);
+    const rx = regionX(r), rz = regionZ(r);
     for (const o of this.near((rx + 0.5) * REGION, (rz + 0.5) * REGION, REGION * 0.75)) {
       if (Math.floor(o.x / REGION) !== rx || Math.floor(o.z / REGION) !== rz) continue;
       // Wild things go (their changes are kept in the region's state), and so does regrown forage.
@@ -315,11 +319,11 @@ export class World {
   /** Objects anchored within the cells overlapping a radius. */
   near(x: number, z: number, r: number): WorldObj[] {
     const out: WorldObj[] = [];
-    const c0x = Math.max(0, Math.floor((x - r) / CELL)), c1x = Math.min(GRID - 1, Math.floor((x + r) / CELL));
-    const c0z = Math.max(0, Math.floor((z - r) / CELL)), c1z = Math.min(GRID - 1, Math.floor((z + r) / CELL));
+    const c0x = Math.floor((x - r) / CELL), c1x = Math.floor((x + r) / CELL);
+    const c0z = Math.floor((z - r) / CELL), c1z = Math.floor((z + r) / CELL);
     for (let cz = c0z; cz <= c1z; cz++) {
       for (let cx = c0x; cx <= c1x; cx++) {
-        const set = this.grid.get(cz * GRID + cx);
+        const set = this.grid.get(cellKey(cx, cz));
         if (set) for (const o of set) out.push(o);
       }
     }
@@ -352,7 +356,6 @@ export class World {
    */
   findSpawn() {
     const g = this.terrain.gen;
-    const c = WORLD_SIZE / 2;
     const ok = (x: number, z: number, maxH: number) => {
       const h = g.height(x, z);
       if (h < 3 || h > maxH || !Number.isNaN(g.water(x, z, h))) return false;
@@ -365,16 +368,22 @@ export class World {
       const zone = g.zone(x, z, h);
       return (zone === 'meadow' || zone === 'broadleaf' || zone === 'heath') && g.soil(x, z, h, 0).top === 'grass';
     };
-    for (const maxH of [40, 90, 200]) {
-      for (let r = 0; r < c - 200; r += 24) {
-        for (let a = 0; a < 32; a++) {
-          const x = c + Math.cos((a / 32) * Math.PI * 2 + r) * r;
-          const z = c + Math.sin((a / 32) * Math.PI * 2 + r) * r;
-          if (ok(x, z, maxH)) { this.spawn = { x, z }; return; }
+    // Look outward from the origin, first on the cheap raw land (inland, low and
+    // gentle), then check the real ground there.
+    const b = g.base;
+    for (let r = 0; r < 20000; r += 40) {
+      const n = Math.max(1, Math.round((r * Math.PI * 2) / 80));
+      for (let a = 0; a < n; a++) {
+        const x = Math.cos((a / n) * Math.PI * 2 + r) * r, z = Math.sin((a / n) * Math.PI * 2 + r) * r;
+        if (b.land(x, z) < 0.95) continue;
+        const h = b.height(x, z);
+        if (h < 4 || h > 45 || Math.abs(b.height(x + 20, z) - h) > 6 || Math.abs(b.height(x, z + 20) - h) > 6) continue;
+        for (const [ox, oz] of [[0, 0], [12, 0], [0, 12], [-12, 0], [0, -12], [24, 24]]) {
+          if (ok(x + ox, z + oz, 60)) { this.spawn = { x: x + ox, z: z + oz }; return; }
         }
       }
     }
-    this.spawn = { x: c, z: c };
+    this.spawn = { x: 0, z: 0 };
   }
 
   /** Keep a few animals about: new ones appear out of sight around you, far-off ones wander away. */
@@ -384,7 +393,6 @@ export class World {
     for (let tries = 0; tries < 6 && this.animals.length < want; tries++) {
       const a = Math.random() * Math.PI * 2, r = 70 + Math.random() * 150;
       const x = px + Math.cos(a) * r, z = pz + Math.sin(a) * r;
-      if (x < 8 || z < 8 || x > WORLD_SIZE - 8 || z > WORLD_SIZE - 8) continue;
       const h = g.height(x, z);
       if (h < 1 || !Number.isNaN(g.water(x, z, h)) || g.temperature(x, h, z) < 0.25) continue;
       this.spawnAnimal(Math.random() < 0.65 ? 'deer' : 'boar', x, z);

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { hash2, mulberry32 } from './noise';
-import { isRock, Mat, WORLD_SIZE } from './terrain';
+import { isRock, Mat } from './terrain';
 import type { Zone } from './climate';
 import type { World } from './world';
 
@@ -328,7 +328,6 @@ export class GroundCover {
       const want: [number, number, number][] = [];
       for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) {
         const x = tx + dx, z = tz + dz;
-        if (x < 0 || z < 0 || x * TILE >= WORLD_SIZE || z * TILE >= WORLD_SIZE) continue;
         if (!cache.has(z * 1000 + x)) want.push([x, z, dx * dx + dz * dz]);
       }
       want.sort((a, b) => a[2] - b[2]);
@@ -399,7 +398,6 @@ export class GroundCover {
     if (!far) {
       for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
         const x = tx + dx, z = tz + dz;
-        if (x < 0 || z < 0 || x * TILE >= WORLD_SIZE || z * TILE >= WORLD_SIZE) continue;
         const key = z * 1000 + x;
         if (!this.obstacles.has(key)) this.cache[1].set(key, this.generate(x, z, true));
         obs.push(...(this.obstacles.get(key) ?? []));

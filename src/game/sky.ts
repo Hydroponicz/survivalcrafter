@@ -112,7 +112,7 @@ export class Sky {
   private skyGain = { value: SKY_EXPOSURE };
   private nightHaze = new THREE.Color(0.006, 0.009, 0.018);
 
-  constructor(private scene: THREE.Scene, worldSize: number) {
+  constructor(private scene: THREE.Scene) {
     patchFog();
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
@@ -166,19 +166,21 @@ export class Sky {
 
     this.waterTex = makeWaterNormal();
     this.waterTex.wrapS = this.waterTex.wrapT = THREE.RepeatWrapping;
-    this.waterTex.repeat.set(worldSize / 8, worldSize / 8);
+    // One UV unit is 960 m everywhere (rivers too); the ripples repeat every 24 m.
+    this.waterTex.repeat.set(40, 40);
     const wm = new THREE.MeshStandardMaterial({
       color: 0x1f4f68, transparent: true, opacity: 0.82, roughness: 0.06, metalness: 0.25,
       normalMap: this.waterTex, normalScale: new THREE.Vector2(0.3, 0.3),
     });
-    // The sea runs out past the view distance; UVs keep the same ripple size per metre as the rivers.
-    const seaSize = Math.max(4000, worldSize * 3);
+    // The sea reaches past the view distance and follows you (in whole ripple
+    // repeats, so the pattern stays put on the water).
+    const seaSize = 16000;
     const seaGeo = new THREE.PlaneGeometry(seaSize, seaSize);
-    const uv = seaGeo.attributes.uv;
-    for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * seaSize / (worldSize * 3), uv.getY(i) * seaSize / (worldSize * 3));
+    const uv = seaGeo.attributes.uv, sp = seaGeo.attributes.position;
+    for (let i = 0; i < uv.count; i++) uv.setXY(i, sp.getX(i) / 960, sp.getY(i) / 960);
     this.water = new THREE.Mesh(seaGeo, wm);
     this.water.rotation.x = -Math.PI / 2;
-    this.water.position.set(worldSize / 2, WATER_LEVEL - 0.05, worldSize / 2);
+    this.water.position.set(0, WATER_LEVEL - 0.05, 0);
     this.water.receiveShadow = true;
     scene.add(this.water);
   }
@@ -193,7 +195,11 @@ export class Sky {
       d.material.uniforms.sunPosition.value.copy(dir);
       d.material.uniforms.time.value = time;
     }
-    if (camera) this.dome.position.copy(camera.position);
+    if (camera) {
+      this.dome.position.copy(camera.position);
+      this.water.position.x = Math.round(camera.position.x / 960) * 960;
+      this.water.position.z = Math.round(camera.position.z / 960) * 960;
+    }
     this.skyGain.value = SKY_EXPOSURE * Math.pow(NOON_SKY / Math.max(skySun(elev), 0.03), 0.75);
 
     // Sunlight warms and weakens as it nears the horizon.

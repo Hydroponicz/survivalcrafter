@@ -37,7 +37,27 @@ export interface Climate {
 /** Temperature at a height, from a column's base. */
 export const tempAt = (base: number, y: number) => base - Math.max(0, y) * LAPSE;
 
-export function climate(H: Float32Array, w: number, seed: number, sea: number): Climate {
+/**
+ * How rain (as the march below produces it on an 8 m map) is spread over
+ * land: [rain, share of land with less]. Wetness is judged against this fixed
+ * curve rather than per map, so neighbouring map tiles agree.
+ */
+const RAIN_CURVE: [number, number][] = [[0.0212, 0.05], [0.0225, 0.2], [0.0254, 0.5], [0.0319, 0.8], [3.34, 0.95], [12, 1]];
+const RAIN_MID = 0.0254;
+function rainRank(r: number): number {
+  if (r <= RAIN_CURVE[0][0]) return RAIN_CURVE[0][1] * Math.max(0, r / RAIN_CURVE[0][0]);
+  for (let k = 1; k < RAIN_CURVE.length; k++) {
+    const [r1, p1] = RAIN_CURVE[k], [r0, p0] = RAIN_CURVE[k - 1];
+    if (r <= r1) return p0 + (p1 - p0) * (Math.log(r / r0) / Math.log(r1 / r0));
+  }
+  return 1;
+}
+
+/**
+ * Climate for a `w`×`w` map whose first cell sits at world (ox, oz), `cell`
+ * metres apart. Wind and the patchy variations are fixed in world space.
+ */
+export function climate(H: Float32Array, w: number, seed: number, sea: number, ox = 0, oz = 0, cell = 1): Climate {
   const n = w * w;
   const rand = mulberry32(seed ^ 0xc11a7e);
   const noise = new Simplex(seed + 4242);
@@ -93,26 +113,15 @@ export function climate(H: Float32Array, w: number, seed: number, sea: number): 
     return out;
   };
   const r1 = blur(blur(rain, 5), 5);
-  let mean = 0, cnt = 0, max = 0;
-  for (let i = 0; i < n; i++) if (H[i] > sea) { mean += r1[i]; cnt++; max = Math.max(max, r1[i]); }
-  mean = mean / Math.max(1, cnt) || 1;
-  // Wetness ranks each spot's rain against the rest of the island, so every
-  // island has its wet side and its dry side whatever the absolute amounts.
-  const land: number[] = [];
-  for (let i = 0; i < n; i++) if (H[i] > sea) land.push(r1[i]);
-  land.sort((p, q) => p - q);
-  const rank = (v: number) => {
-    let lo = 0, hi = land.length;
-    while (lo < hi) { const m = (lo + hi) >> 1; if (land[m] < v) lo = m + 1; else hi = m; }
-    return lo / Math.max(1, land.length);
-  };
   const moist = new Float32Array(n), base = new Float32Array(n);
   for (let i = 0; i < n; i++) {
-    const x = i % w, z = (i / w) | 0;
-    moist[i] = Math.max(0, Math.min(1, 0.15 + 0.75 * rank(r1[i]) + noise.fbm(x * 0.012, z * 0.012, 3) * 0.12));
-    r1[i] = Math.max(0.15, r1[i] / mean);
-    // A gentle north-south gradient and patchy variation.
-    base[i] = 0.8 + (z / w - 0.5) * 0.12 + noise.fbm(x * 0.008 + 50, z * 0.008, 2) * 0.06;
+    const x = ox + (i % w) * cell, z = oz + ((i / w) | 0) * cell;
+    // Wetness: how this spot's rain compares with typical rain (dry heath at the
+    // low end, soaked woodland at the high), with some patchy variation.
+    moist[i] = Math.max(0, Math.min(1, 0.15 + 0.75 * rainRank(r1[i]) + noise.fbm(x / 650, z / 650, 3) * 0.12));
+    r1[i] = Math.max(0.15, Math.min(8, r1[i] / RAIN_MID));
+    // Slow warm and cool spells across the land, and patchy variation.
+    base[i] = 0.8 + Math.sin(z / 9000) * 0.04 + noise.fbm(x / 1000 + 50, z / 1000, 2) * 0.06;
   }
   return { base, moist, rain: r1, wind: [wx, wz] };
 }

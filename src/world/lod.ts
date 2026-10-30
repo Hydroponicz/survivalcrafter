@@ -1,106 +1,116 @@
 import * as THREE from 'three';
-import { SNOW_TEMP } from './climate';
-import { CELL, MAP_N, SEA, type WorldGen } from './worldgen';
-import { LIN, Mat } from './terrain';
+import { CELL, LOD_N, PAD, TILE, TN, tileLodColors, type TileData } from './worldgen';
 
-// The distant land: the whole world map as one low-detail mesh (8 m grid),
-// coloured from the same climate and materials as the near terrain, so the
-// mountain ranges kilometres away are always there on the horizon. Near you
-// the detailed voxel terrain takes over: this mesh cuts a hole where it's
-// loaded, and sits a little lower so the two never fight at the seam.
+// The distant land: every map tile near enough to see becomes one low-detail
+// mesh (its core, at the 8 m map grid), coloured from the same climate and
+// materials as the near terrain, so mountain ranges kilometres away are on
+// the horizon wherever you go. Skirts hang down from each tile's edges so the
+// joins never show gaps. Near you the detailed voxel terrain takes over: these
+// meshes cut a hole where it's loaded, and sit a little lower so the two never
+// fight at the seam.
 
-const lerp3 = (a: number[], b: number[], t: number) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
-const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
-const lin = (c: [number, number, number]) => c.map((v) => Math.pow(v, 2.2));
-const SNOW = lin([0.93, 0.95, 0.98]);
-const FOREST = lin([0.12, 0.24, 0.1]);
-const PINES = lin([0.09, 0.19, 0.11]);
-const DRY = lin([0.6, 0.55, 0.27]), LUSH = lin([0.22, 0.47, 0.16]), COLD = lin([0.27, 0.4, 0.27]);
+/** How far (in tiles) distant land is drawn around you. */
+export const LOD_TILES = 3;
+const SKIRT = 30;
 
 export class DistantLand {
   readonly group = new THREE.Group();
   private hole = { value: new THREE.Vector3(0, 0, 0) }; // x, z, radius
+  private material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95 });
+  private waterMaterial: THREE.Material;
+  private index: THREE.BufferAttribute;
+  private tiles = new Map<string, THREE.Group>();
 
-  constructor(gen: WorldGen, waterMaterial: THREE.Material) {
-    const N = MAP_N;
-    const pos = new Float32Array(N * N * 3), col = new Float32Array(N * N * 3);
-    const H = gen.H;
-    for (let iz = 0; iz < N; iz++) {
-      for (let ix = 0; ix < N; ix++) {
-        const i = iz * N + ix;
-        const x = ix * CELL, z = iz * CELL, h = H[i];
-        pos[i * 3] = x; pos[i * 3 + 1] = h - 1.2; pos[i * 3 + 2] = z;
-        const hx = (H[Math.min(N * N - 1, i + 1)] - H[Math.max(0, i - 1)]) / (2 * CELL);
-        const hz = (H[Math.min(N * N - 1, i + N)] - H[Math.max(0, i - N)]) / (2 * CELL);
-        const slope = Math.hypot(hx, hz);
-        const temp = gen.temperature(x, h, z);
-        const moist = gen.moist[i];
-        let c: number[];
-        if (h < SEA + 1.4) c = LIN[Mat.Sand];
-        else if (slope > 1.25) c = LIN[Mat.Rock];
-        else {
-          c = LIN[Mat.Grass];
-          c = lerp3(c, DRY, clamp01((0.42 - moist) / 0.3) * 0.85);
-          c = lerp3(c, LUSH, clamp01((moist - 0.55) / 0.3) * 0.7);
-          c = lerp3(c, COLD, clamp01((0.45 - temp) / 0.2) * 0.8);
-          // Woods show as darker canopy from afar.
-          const zone = gen.zone(x, z, h, slope);
-          if (zone === 'broadleaf') c = lerp3(c, FOREST, 0.65);
-          else if (zone === 'conifer') c = lerp3(c, PINES, 0.75);
-          // Bare rock shows through on steeper ground.
-          c = lerp3(c, LIN[Mat.Rock], clamp01((slope - 0.75) / 0.5));
-        }
-        // Snow clings to all but the sheerest faces.
-        c = lerp3(c, SNOW, clamp01((SNOW_TEMP + 0.04 - temp) / 0.06) * clamp01((1.6 - slope) / 0.5));
-        col[i * 3] = c[0]; col[i * 3 + 1] = c[1]; col[i * 3 + 2] = c[2];
+  constructor(waterMaterial: THREE.Material) {
+    this.patch(this.material);
+    this.waterMaterial = (waterMaterial as THREE.MeshStandardMaterial).clone();
+    this.patch(this.waterMaterial);
+    // One index for every tile: the grid, then the skirt around its edge.
+    const N = LOD_N;
+    const idx: number[] = [];
+    for (let z = 0; z < N - 1; z++) {
+      for (let x = 0; x < N - 1; x++) {
+        const a = z * N + x, b = a + 1, c = a + N, d = c + 1;
+        idx.push(a, c, b, b, c, d);
       }
     }
-    const idx = new Uint32Array((N - 1) * (N - 1) * 6);
-    let k = 0;
-    for (let iz = 0; iz < N - 1; iz++) {
-      for (let ix = 0; ix < N - 1; ix++) {
-        const a = iz * N + ix, b = a + 1, c = a + N, d = c + 1;
-        idx[k++] = a; idx[k++] = c; idx[k++] = b; idx[k++] = b; idx[k++] = c; idx[k++] = d;
+    const edge = this.edgeLoop();
+    const base = N * N;
+    for (let k = 0; k < edge.length; k++) {
+      const a = edge[k], b = edge[(k + 1) % edge.length];
+      const sa = base + k, sb = base + ((k + 1) % edge.length);
+      idx.push(a, sa, b, b, sa, sb);
+    }
+    this.index = new THREE.BufferAttribute(new Uint32Array(idx), 1);
+  }
+
+  /** The grid points around a tile's edge, in order. */
+  private edgeLoop(): number[] {
+    const N = LOD_N, out: number[] = [];
+    for (let x = 0; x < N - 1; x++) out.push(x);
+    for (let z = 0; z < N - 1; z++) out.push(z * N + N - 1);
+    for (let x = N - 1; x > 0; x--) out.push((N - 1) * N + x);
+    for (let z = N - 1; z > 0; z--) out.push(z * N);
+    return out;
+  }
+
+  /** A tile's map is ready: build its distant land (colours may come from the worker). */
+  addTile(d: TileData, lod?: Float32Array) {
+    const key = `${d.tx},${d.tz}`;
+    if (this.tiles.has(key)) return;
+    const N = LOD_N, off = PAD / CELL;
+    const cols = lod ?? tileLodColors(d);
+    const edge = this.edgeLoop();
+    const pos = new Float32Array((N * N + edge.length) * 3);
+    const col = new Float32Array((N * N + edge.length) * 3);
+    const x0 = d.tx * TILE, z0 = d.tz * TILE;
+    for (let lz = 0; lz < N; lz++) {
+      for (let lx = 0; lx < N; lx++) {
+        const k = lz * N + lx;
+        pos[k * 3] = x0 + lx * CELL;
+        pos[k * 3 + 1] = d.H[(lz + off) * TN + lx + off] - 1.2;
+        pos[k * 3 + 2] = z0 + lz * CELL;
       }
+    }
+    col.set(cols);
+    for (let k = 0; k < edge.length; k++) {
+      const e = edge[k], s = N * N + k;
+      pos[s * 3] = pos[e * 3]; pos[s * 3 + 1] = pos[e * 3 + 1] - SKIRT; pos[s * 3 + 2] = pos[e * 3 + 2];
+      col[s * 3] = cols[e * 3]; col[s * 3 + 1] = cols[e * 3 + 1]; col[s * 3 + 2] = cols[e * 3 + 2];
     }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
-    geo.setIndex(new THREE.BufferAttribute(idx, 1));
+    geo.setIndex(this.index);
     geo.computeVertexNormals();
-    const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95 });
-    this.patch(mat);
-    const land = new THREE.Mesh(geo, mat);
-    land.frustumCulled = false;
-    land.receiveShadow = false;
-    this.group.add(land);
+    geo.computeBoundingSphere();
+    const group = new THREE.Group();
+    const land = new THREE.Mesh(geo, this.material);
+    group.add(land);
 
     // Lakes, as flat sheets at their surface.
     const wpos: number[] = [], widx: number[] = [], wuv: number[] = [];
     const vid = new Map<number, number>();
-    const v = (ix: number, iz: number, s: number) => {
-      const key = iz * N + ix;
-      let id = vid.get(key);
+    const v = (lx: number, lz: number, s: number) => {
+      const key2 = lz * (N + 1) + lx;
+      let id = vid.get(key2);
       if (id === undefined) {
         id = wpos.length / 3;
-        vid.set(key, id);
-        wpos.push(ix * CELL, s - 0.6, iz * CELL);
-        wuv.push((ix * CELL) / 960, (iz * CELL) / 960);
+        vid.set(key2, id);
+        const x = x0 + lx * CELL, z = z0 + lz * CELL;
+        wpos.push(x, s - 0.6, z);
+        wuv.push(x / 960, z / 960);
       }
       return id;
     };
-    for (let iz = 0; iz < N - 1; iz++) {
-      for (let ix = 0; ix < N - 1; ix++) {
-        const i = iz * N + ix;
-        if (gen.kind[i] !== 2) continue;
-        const s = gen.S[i];
-        // A cell and its neighbours, so the sheet reaches the shore.
-        for (const [ox, oz] of [[0, 0], [-1, 0], [0, -1], [-1, -1]]) {
-          const jx = ix + ox, jz = iz + oz;
-          if (jx < 0 || jz < 0) continue;
-          const a = v(jx, jz, s), b = v(jx + 1, jz, s), c = v(jx, jz + 1, s), d = v(jx + 1, jz + 1, s);
-          widx.push(a, c, b, b, c, d);
-        }
+    for (let lz = 0; lz < N - 1; lz++) {
+      for (let lx = 0; lx < N - 1; lx++) {
+        const i = (lz + off) * TN + lx + off;
+        if (d.kind[i] !== 2 && d.kind[i + 1] !== 2 && d.kind[i + TN] !== 2 && d.kind[i + TN + 1] !== 2) continue;
+        let s = NaN;
+        for (const j of [i, i + 1, i + TN, i + TN + 1]) if (d.kind[j] === 2) { s = d.S[j]; break; }
+        const a = v(lx, lz, s), b = v(lx + 1, lz, s), c = v(lx, lz + 1, s), dd = v(lx + 1, lz + 1, s);
+        widx.push(a, c, b, b, c, dd);
       }
     }
     if (widx.length) {
@@ -109,13 +119,25 @@ export class DistantLand {
       wg.setAttribute('uv', new THREE.Float32BufferAttribute(wuv, 2));
       wg.setIndex(widx);
       wg.computeVertexNormals();
-      const wm = (waterMaterial as THREE.MeshStandardMaterial).clone();
-      this.patch(wm);
-      const lakes = new THREE.Mesh(wg, wm);
-      lakes.frustumCulled = false;
-      this.group.add(lakes);
+      group.add(new THREE.Mesh(wg, this.waterMaterial));
+    }
+    group.userData = { tx: d.tx, tz: d.tz };
+    this.tiles.set(key, group);
+    this.group.add(group);
+  }
+
+  /** Drop distant land too far from a point to see. */
+  prune(x: number, z: number) {
+    for (const [key, g] of this.tiles) {
+      const { tx, tz } = g.userData as { tx: number; tz: number };
+      if (Math.max(Math.abs((tx + 0.5) * TILE - x), Math.abs((tz + 0.5) * TILE - z)) <= (LOD_TILES + 1.5) * TILE) continue;
+      for (const m of g.children) (m as THREE.Mesh).geometry.dispose();
+      this.group.remove(g);
+      this.tiles.delete(key);
     }
   }
+
+  has(tx: number, tz: number) { return this.tiles.has(`${tx},${tz}`); }
 
   /** Cut a hole where the detailed terrain is (x, z, radius). */
   setHole(x: number, z: number, r: number) {

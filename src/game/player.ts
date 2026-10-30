@@ -208,7 +208,6 @@ export class Player {
       for (let i = 0; i < n; i++) {
         const a = (i / n) * Math.PI * 2;
         const x = this.pos.x + Math.cos(a) * r, z = this.pos.z + Math.sin(a) * r;
-        if (x < 1 || z < 1 || x > t.size - 1 || z > t.size - 1) continue;
         const y = t.heightAt(x, z);
         if (y < t.waterAt(x, z)) continue;
         if (this.penetration(world, x, y + 0.05, z) === 0) return new THREE.Vector3(x, y + 0.05, z);
@@ -218,7 +217,6 @@ export class Player {
   }
 
   update(dt: number, input: Input, world: World, busy: boolean, overweight: number, allowMove: boolean, fly = false) {
-    const t = world.terrain;
     if (input.locked) {
       this.yaw -= input.mouseDX * 0.0022;
       this.pitch -= input.mouseDY * 0.0022;
@@ -326,9 +324,6 @@ export class Player {
       else if (this.canMove(world, here, nx, this.pos.z)) this.pos.x = nx;
       else if (this.canMove(world, here, this.pos.x, nz)) this.pos.z = nz;
     }
-    const max = t.size - 0.5;
-    this.pos.x = Math.max(0.5, Math.min(max, this.pos.x));
-    this.pos.z = Math.max(0.5, Math.min(max, this.pos.z));
 
     // Vertical
     let ground = this.groundAt(world, this.pos.x, this.pos.y, this.pos.z).y;
@@ -374,7 +369,7 @@ export class Player {
   }
 
   /** Dev fly mode: free movement, no gravity or collisions. */
-  private flyUpdate(dt: number, k: Set<string>, world: World, allowMove: boolean) {
+  private flyUpdate(dt: number, k: Set<string>, _world: World, allowMove: boolean) {
     let mx = 0, mz = 0, my = 0;
     if (allowMove) {
       if (k.has('KeyW')) mz -= 1;
@@ -388,10 +383,7 @@ export class Player {
     const s = Math.sin(this.yaw), c = Math.cos(this.yaw);
     this.vel.set((mx * c + mz * s) * speed, my * speed, (-mx * s + mz * c) * speed);
     this.pos.addScaledVector(this.vel, dt);
-    const max = world.terrain.size - 0.5;
-    this.pos.x = Math.max(0.5, Math.min(max, this.pos.x));
-    this.pos.z = Math.max(0.5, Math.min(max, this.pos.z));
-    this.pos.y = Math.max(Y_MIN + 1, Math.min(200, this.pos.y));
+    this.pos.y = Math.max(Y_MIN + 1, Math.min(600, this.pos.y));
     this.moving = mx !== 0 || mz !== 0 || my !== 0;
     this.sprinting = false;
     this.swimming = false;

@@ -70,12 +70,13 @@ Toggles are remembered per browser; a purple **DEV** badge shows while any cheat
   world: it's captured as an environment map so everything picks up skylight and water reflects it.
   Distant hills fade into the real horizon colour, sunrise and sunset glow warm with long shadows, stars
   come out at night, and mist pools in the valleys around dawn and lifts by midmorning.
-- **A vast, open continent.** Each world is a 4 km × 4 km landmass with mountain ranges up to ~480 m,
-  snow-capped peaks, big inland lakes and river networks running to the sea. The detailed, diggable
-  voxel terrain streams in around you as you explore (16 m chunks generated from the world map and
-  forgotten again when you leave, unless you changed them), while the rest of the land stays visible
-  to the horizon as low-detail distant terrain. Trees, bushes, forage and animals are generated region
-  by region as you approach; saves keep only what you changed, so they stay small.
+- **An endless world.** The land goes on forever in every direction: continents, coastlines, seas
+  and islands, mountain ranges up to ~480 m with snow-capped peaks, big lakes and river networks. The
+  map is made in 1 km tiles as you travel (each weathered by simulated rain, drained by rivers and given
+  a climate, with a wide overlap so neighbouring tiles join seamlessly), in background workers so the
+  game never stalls. The detailed, diggable voxel terrain streams in around you in 16 m chunks; beyond
+  it the land stays visible to the horizon as low-detail distant terrain. Trees, bushes, forage and
+  animals are generated region by region as you approach; saves keep only what you changed.
 - **Trees at real scale.** Full-grown trees stand 12–20 m (with the odd giant), mixed with younger
   trees and saplings, in stands and clearings set by the climate. Big trees take longer to fell and
   give more logs.

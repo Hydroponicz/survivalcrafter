@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { hash2, Simplex } from './noise';
 import { SNOW_TEMP, type Zone } from './climate';
 import { Rock, Strata } from './geology';
-import { SEA, WORLD_SIZE, WorldGen, type SoilTop } from './worldgen';
+import { SEA, WorldGen, type SoilTop } from './worldgen';
 
 // Voxel terrain, streamed. Density lives on a 1 m grid of points (0..255,
 // solid at >= 128) and is meshed with Surface Nets, so the ground is smooth
@@ -13,7 +13,6 @@ import { SEA, WORLD_SIZE, WorldGen, type SoilTop } from './worldgen';
 // anything touches them, meshed while they're near you and forgotten again
 // when you leave, unless you changed them. Only changed chunks are saved.
 
-export { WORLD_SIZE };
 export const Y_MIN = -64;
 export const Y_MAX = 512;
 export const WATER_LEVEL = SEA;
@@ -22,7 +21,6 @@ export const ISO = 128;
 /** How far around you the voxel terrain is meshed (beyond it the distant terrain takes over). */
 export const MESH_RADIUS = 128;
 
-const NC = WORLD_SIZE / CH;
 const NCY = (Y_MAX - Y_MIN) / CH;
 
 export enum Mat { Air = 0, Grass = 1, Dirt = 2, Sand = 3, Clay = 4, Rock = 5, Iron = 6, Field = 7, Sandstone = 8, Shale = 9, Gravel = 10 }
@@ -86,13 +84,19 @@ interface ColInfo {
 }
 const CI = CH + 2;
 
-const chunkId = (cx: number, cy: number, cz: number) => (cy * NC + cz) * NC + cx;
-const colKey = (cx: number, cz: number) => cz * NC + cx;
-const cOf = (v: number) => Math.max(0, Math.min(NC - 1, Math.floor(v / CH)));
+// Chunk and column keys pack unbounded coordinates into one safe integer:
+// columns within about ±16,000 km of the origin, and the chunk's level above.
+const OFF = 2 ** 20, SPAN = 2 ** 21, LEVEL = SPAN * SPAN;
+const colKey = (cx: number, cz: number) => (cz + OFF) * SPAN + cx + OFF;
+const chunkId = (cx: number, cy: number, cz: number) => cy * LEVEL + colKey(cx, cz);
+const keyCx = (key: number) => (key % LEVEL) % SPAN - OFF;
+const keyCz = (key: number) => Math.floor((key % LEVEL) / SPAN) - OFF;
+const keyCy = (id: number) => Math.floor(id / LEVEL);
+const colOf = (id: number) => id % LEVEL;
+const cOf = (v: number) => Math.floor(v / CH);
 const cyOf = (y: number) => Math.max(0, Math.min(NCY - 1, Math.floor((y - Y_MIN) / CH)));
 
 export class Terrain {
-  readonly size = WORLD_SIZE;
   seed: number;
   gen!: WorldGen;
   group = new THREE.Group();
@@ -225,8 +229,6 @@ export class Terrain {
   d(x: number, y: number, z: number): number {
     if (y < Y_MIN) return 255;
     if (y >= Y_MAX) return 0;
-    x = x < 0 ? 0 : x >= WORLD_SIZE ? WORLD_SIZE - 1 : x;
-    z = z < 0 ? 0 : z >= WORLD_SIZE ? WORLD_SIZE - 1 : z;
     const yi = y - Y_MIN;
     const c = this.chunk(x >> 4, yi >> 4, z >> 4);
     return c.d[((yi & 15) * CH + (z & 15)) * CH + (x & 15)];
@@ -235,8 +237,6 @@ export class Terrain {
   m(x: number, y: number, z: number): Mat {
     if (y < Y_MIN) return Mat.Rock;
     if (y >= Y_MAX) return Mat.Air;
-    x = x < 0 ? 0 : x >= WORLD_SIZE ? WORLD_SIZE - 1 : x;
-    z = z < 0 ? 0 : z >= WORLD_SIZE ? WORLD_SIZE - 1 : z;
     const yi = y - Y_MIN;
     const c = this.chunk(x >> 4, yi >> 4, z >> 4);
     return c.m[((yi & 15) * CH + (z & 15)) * CH + (x & 15)];
@@ -277,8 +277,6 @@ export class Terrain {
 
   /** Surface height at an integer point (your changes, else the generator's). */
   private ph(x: number, z: number): number {
-    x = x < 0 ? 0 : x >= WORLD_SIZE ? WORLD_SIZE - 1 : x;
-    z = z < 0 ? 0 : z >= WORLD_SIZE ? WORLD_SIZE - 1 : z;
     const cx = x >> 4, cz = z >> 4;
     const ed = this.heightEdits.get(colKey(cx, cz));
     if (ed) return ed[(z & 15) * CH + (x & 15)];
@@ -287,8 +285,6 @@ export class Terrain {
 
   /** Height of the topmost surface (ignores caves), bilinear between points. */
   heightAt(x: number, z: number): number {
-    x = Math.max(0, Math.min(WORLD_SIZE - 1.001, x));
-    z = Math.max(0, Math.min(WORLD_SIZE - 1.001, z));
     const x0 = Math.floor(x), z0 = Math.floor(z);
     const fx = x - x0, fz = z - z0;
     const a = this.ph(x0, z0), b = this.ph(x0 + 1, z0), c = this.ph(x0, z0 + 1), e = this.ph(x0 + 1, z0 + 1);
@@ -302,7 +298,7 @@ export class Terrain {
   }
 
   private freshWater(x: number, z: number): number {
-    const ix = Math.max(0, Math.min(WORLD_SIZE - 1, Math.round(x))), iz = Math.max(0, Math.min(WORLD_SIZE - 1, Math.round(z)));
+    const ix = Math.round(x), iz = Math.round(z);
     return this.colInfo(ix >> 4, iz >> 4).water[((iz & 15) + 1) * CI + (ix & 15) + 1];
   }
 
@@ -359,7 +355,7 @@ export class Terrain {
 
   /** The top layer at a point as generated (or as you've left it, where you've dug). Cheap. */
   topAt(x: number, z: number): Mat {
-    const ix = Math.max(0, Math.min(WORLD_SIZE - 1, Math.round(x))), iz = Math.max(0, Math.min(WORLD_SIZE - 1, Math.round(z)));
+    const ix = Math.round(x), iz = Math.round(z);
     if (this.heightEdits.has(colKey(ix >> 4, iz >> 4))) return this.surfaceMaterial(x, z);
     const ci = this.colInfo(ix >> 4, iz >> 4);
     const k = ((iz & 15) + 1) * CI + (ix & 15) + 1;
@@ -418,8 +414,8 @@ export class Terrain {
 
   /** Re-measure the surface at points you've changed. */
   private updateHeights(x0: number, z0: number, x1: number, z1: number) {
-    for (let z = Math.max(0, z0); z <= Math.min(WORLD_SIZE - 1, z1); z++) {
-      for (let x = Math.max(0, x0); x <= Math.min(WORLD_SIZE - 1, x1); x++) {
+    for (let z = z0; z <= z1; z++) {
+      for (let x = x0; x <= x1; x++) {
         const key = colKey(x >> 4, z >> 4);
         let ed = this.heightEdits.get(key);
         if (!ed) {
@@ -448,9 +444,9 @@ export class Terrain {
 
   // ---------- editing
   private forPoints(cx: number, cy: number, cz: number, r: number, fn: (c: Chunk, i: number, x: number, y: number, z: number, dist: number) => void) {
-    const x0 = Math.max(0, Math.floor(cx - r)), x1 = Math.min(WORLD_SIZE - 1, Math.ceil(cx + r));
+    const x0 = Math.floor(cx - r), x1 = Math.ceil(cx + r);
     const y0 = Math.max(Y_MIN + 1, Math.floor(cy - r)), y1 = Math.min(Y_MAX - 1, Math.ceil(cy + r));
-    const z0 = Math.max(0, Math.floor(cz - r)), z1 = Math.min(WORLD_SIZE - 1, Math.ceil(cz + r));
+    const z0 = Math.floor(cz - r), z1 = Math.ceil(cz + r);
     for (let y = y0; y <= y1; y++) {
       for (let z = z0; z <= z1; z++) {
         for (let x = x0; x <= x1; x++) {
@@ -524,8 +520,8 @@ export class Terrain {
     const cuts: [Chunk, number, number][] = [];
     const adds: [Chunk, number, number][] = [];
     let cutTotal = 0, addTotal = 0, offBy = 0;
-    const x0 = Math.max(0, Math.floor(cx - r)), x1 = Math.min(WORLD_SIZE - 1, Math.ceil(cx + r));
-    const z0 = Math.max(0, Math.floor(cz - r)), z1 = Math.min(WORLD_SIZE - 1, Math.ceil(cz + r));
+    const x0 = Math.floor(cx - r), x1 = Math.ceil(cx + r);
+    const z0 = Math.floor(cz - r), z1 = Math.ceil(cz + r);
     let ylo = Infinity, yhi = -Infinity;
     for (let z = z0; z <= z1; z++) {
       for (let x = x0; x <= x1; x++) {
@@ -604,9 +600,8 @@ export class Terrain {
   }
 
   /** Slowly regrow grass on bare dirt next to grass, somewhere near (px, pz). */
-  randomTick(px = WORLD_SIZE / 2, pz = WORLD_SIZE / 2) {
+  randomTick(px = 0, pz = 0) {
     const x = Math.round(px + (Math.random() - 0.5) * 120), z = Math.round(pz + (Math.random() - 0.5) * 120);
-    if (x < 1 || z < 1 || x >= WORLD_SIZE - 1 || z >= WORLD_SIZE - 1) return;
     // Only where you've changed things (untouched ground already has its grass).
     if (!this.heightEdits.has(colKey(x >> 4, z >> 4))) return;
     const h = this.ph(x, z);
@@ -649,7 +644,7 @@ export class Terrain {
     const pcx = Math.floor(px / CH), pcz = Math.floor(pz / CH), pcy = cyOf(py);
     const editedCols = new Map<number, number[]>();
     for (const id of this.edited) {
-      const cx = id % NC, cz = Math.floor(id / NC) % NC, cy = Math.floor(id / (NC * NC));
+      const cx = keyCx(id), cz = keyCz(id), cy = keyCy(id);
       const k = colKey(cx, cz);
       const list = editedCols.get(k) ?? [];
       list.push(cy);
@@ -658,7 +653,6 @@ export class Terrain {
     for (let dz = -r; dz <= r; dz++) {
       for (let dx = -r; dx <= r; dx++) {
         const cx = pcx + dx, cz = pcz + dz;
-        if (cx < 0 || cz < 0 || cx >= NC || cz >= NC) continue;
         const ccx = (cx + 0.5) * CH, ccz = (cz + 0.5) * CH;
         const dist = Math.hypot(ccx - px, ccz - pz);
         if (dist > MESH_RADIUS + CH) continue;
@@ -707,10 +701,10 @@ export class Terrain {
     }
     // Rivers and lakes for meshed columns.
     for (const { id } of this.wanted) {
-      const key = colKey(id % NC, Math.floor(id / NC) % NC);
+      const key = colOf(id);
       if (this.waterMeshes.has(key)) continue;
       if (performance.now() - start > budgetMs) break;
-      this.buildWater(id % NC, Math.floor(id / NC) % NC);
+      this.buildWater(keyCx(id), keyCz(id));
     }
     ready = Math.min(ready, this.skipDist);
     this.readyRadius = Number.isFinite(ready) ? Math.max(0, ready - CH) : MESH_RADIUS;
@@ -724,23 +718,23 @@ export class Terrain {
   private unload(px: number, pz: number) {
     const far = (cx: number, cz: number, extra: number) => Math.hypot((cx + 0.5) * CH - px, (cz + 0.5) * CH - pz) > MESH_RADIUS + CH + extra;
     for (const [id, mesh] of this.meshes) {
-      if (!far(id % NC, Math.floor(id / NC) % NC, 24)) continue;
+      if (!far(keyCx(id), keyCz(id), 24)) continue;
       this.group.remove(mesh);
       mesh.geometry.dispose();
       this.meshes.delete(id);
     }
     for (const [key, mesh] of this.waterMeshes) {
-      if (!far(key % NC, Math.floor(key / NC), 24)) continue;
+      if (!far(keyCx(key), keyCz(key), 24)) continue;
       this.group.remove(mesh);
       mesh.geometry.dispose();
       this.waterMeshes.delete(key);
     }
-    for (const id of this.empty) if (far(id % NC, Math.floor(id / NC) % NC, 24)) this.empty.delete(id);
+    for (const id of this.empty) if (far(keyCx(id), keyCz(id), 24)) this.empty.delete(id);
     // Forget generated data you can't reach any more (what you changed stays).
     for (const id of this.chunks.keys()) {
-      if (!this.edited.has(id) && far(id % NC, Math.floor(id / NC) % NC, 96)) this.chunks.delete(id);
+      if (!this.edited.has(id) && far(keyCx(id), keyCz(id), 96)) this.chunks.delete(id);
     }
-    for (const key of this.cols.keys()) if (far(key % NC, Math.floor(key / NC), 160)) this.cols.delete(key);
+    for (const key of this.cols.keys()) if (far(keyCx(key), keyCz(key), 160)) this.cols.delete(key);
   }
 
   /**
@@ -776,7 +770,7 @@ export class Terrain {
 
   // ---------- meshing
   private buildChunk(id: number) {
-    const cx = id % NC, cz = Math.floor(id / NC) % NC, cy = Math.floor(id / (NC * NC));
+    const cx = keyCx(id), cz = keyCz(id), cy = keyCy(id);
     const x0 = cx * CH, z0 = cz * CH, y0 = Y_MIN + cy * CH;
     const S = CH + 1;
     const old = this.meshes.get(id);
@@ -804,13 +798,11 @@ export class Terrain {
     let nv = 0;
     for (let lz = 0; lz < S; lz++) {
       const gz = z0 + lz - 1;
-      if (gz < 0 || gz >= WORLD_SIZE) continue;
       for (let ly = 0; ly < S; ly++) {
         const gy = y0 + ly - 1;
         if (gy < Y_MIN || gy >= Y_MAX) continue;
         for (let lx = 0; lx < S; lx++) {
           const gx = x0 + lx - 1;
-          if (gx < 0 || gx >= WORLD_SIZE) continue;
           let mask = 0;
           for (let k = 0; k < 8; k++) {
             c[k] = this.d(gx + (k & 1), gy + ((k >> 1) & 1), gz + ((k >> 2) & 1));
@@ -964,7 +956,7 @@ export class Terrain {
   serialize() {
     const chunks: [number, string, string][] = [];
     for (const id of this.edited) {
-      const cx = id % NC, cz = Math.floor(id / NC) % NC, cy = Math.floor(id / (NC * NC));
+      const cx = keyCx(id), cz = keyCz(id), cy = keyCy(id);
       const c = this.chunk(cx, cy, cz);
       chunks.push([id, rle(c.d), rle(c.m)]);
     }
@@ -978,11 +970,11 @@ export class Terrain {
       if (dd.length !== CH * CH * CH || mm.length !== CH * CH * CH) continue;
       this.chunks.set(id, new Chunk(dd, mm));
       this.edited.add(id);
-      cols.add(colKey(id % NC, Math.floor(id / NC) % NC));
+      cols.add(colOf(id));
     }
     // Re-measure the surface wherever you'd changed it.
     for (const key of cols) {
-      const cx = key % NC, cz = Math.floor(key / NC);
+      const cx = keyCx(key), cz = keyCz(key);
       this.updateHeights(cx * CH, cz * CH, cx * CH + CH - 1, cz * CH + CH - 1);
     }
   }
