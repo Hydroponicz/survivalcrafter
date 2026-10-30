@@ -70,7 +70,16 @@ Toggles are remembered per browser; a purple **DEV** badge shows while any cheat
   world: it's captured as an environment map so everything picks up skylight and water reflects it.
   Distant hills fade into the real horizon colour, sunrise and sunset glow warm with long shadows, stars
   come out at night, and mist pools in the valleys around dawn and lifts by midmorning.
-- **Weathered, eroded landscapes.** Each world is shaped by simulated rain: ~90,000 droplets run
+- **A vast, open continent.** Each world is a 4 km × 4 km landmass with mountain ranges up to ~480 m,
+  snow-capped peaks, big inland lakes and river networks running to the sea. The detailed, diggable
+  voxel terrain streams in around you as you explore (16 m chunks generated from the world map and
+  forgotten again when you leave, unless you changed them), while the rest of the land stays visible
+  to the horizon as low-detail distant terrain. Trees, bushes, forage and animals are generated region
+  by region as you approach; saves keep only what you changed, so they stay small.
+- **Trees at real scale.** Full-grown trees stand 12–20 m (with the odd giant), mixed with younger
+  trees and saplings, in stands and clearings set by the climate. Big trees take longer to fell and
+  give more logs.
+- **Weathered, eroded landscapes.** Each world is shaped by simulated rain: ~170,000 droplets run
   downhill, carving gullies into the mountains and laying sediment along valley floors. Soil is thick
   where sediment settled and thin where water stripped it; clay lines the well-watered valley bottoms.
 - **Climate and vegetation zones.** A prevailing wind brings rain in off the sea; it falls on windward
@@ -79,11 +88,11 @@ Toggles are remembered per browser; a purple **DEV** badge shows while any cheat
   the lee, marsh by the water, stunted alpine pines near the tree line and snow on the peaks. Grass is lush
   or straw-coloured with the rain, and rivers run bigger on the wet side. Examine the ground to read it.
 - **Geology you can read.** Beneath the soil, grey granite, tan sandstone and dark shale lie in beds
-  that tilt and fold gently across the island, so the same band runs along a cliff and across a gully.
+  that tilt and fold gently across the land, so the same band runs along a cliff and across a gully.
   Iron comes as rusty ironstone seams near the base of certain shale beds (plus a few deep veins in the
   granite): find an outcrop and follow it. Soil is thin on ridges and deep in hollows, fast rivers run
   over gravel, and scree piles up below cliffs.
-- **Rivers and lakes.** Drainage is worked out for the whole island: streams start where enough rain
+- **Rivers and lakes.** Drainage is worked out for the whole continent: streams start where enough rain
   gathers, join into rivers that carve their channels down to the sea, and basins fill into lakes deep
   enough to swim in. River beds are sand and grit, lake beds silty clay, and the banks are where you dig
   clay. Drink from any of them; wading through a stream slows you down.

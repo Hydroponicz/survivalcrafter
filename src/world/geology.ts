@@ -8,7 +8,7 @@ import { hash2, mulberry32, Simplex } from './noise';
 export const enum Rock { Granite, Sandstone, Shale, Ironstone }
 
 /** Average thickness of one bed (metres). */
-const BED = 3.4;
+const BED = 5;
 
 export class Strata {
   private fold: Simplex;
@@ -21,18 +21,23 @@ export class Strata {
     const rand = mulberry32(seed ^ 0x6e01);
     this.fold = new Simplex(seed + 777);
     this.seam = new Simplex(seed + 778);
-    const a = rand() * Math.PI * 2, dip = 0.03 + rand() * 0.05;
+    const a = rand() * Math.PI * 2, dip = 0.01 + rand() * 0.025;
     this.dipX = Math.cos(a) * dip;
     this.dipZ = Math.sin(a) * dip;
     this.seed = seed;
   }
 
-  /** Which rock is at a point. */
-  at(x: number, y: number, z: number): Rock {
-    // Bedding "height": tilted and folded, so beds rise and fall across the island.
-    const v = y + x * this.dipX + z * this.dipZ + this.fold.fbm(x * 0.008, z * 0.008, 2) * 7;
+  /** How much the beds are pushed up or down at a column (the same all the way down). */
+  foldAt(x: number, z: number): number {
+    return x * this.dipX + z * this.dipZ + this.fold.fbm(x * 0.004, z * 0.004, 2) * 18;
+  }
+
+  /** Which rock is at a point; pass `fold` from foldAt() when sampling a whole column. */
+  at(x: number, y: number, z: number, fold = this.foldAt(x, z)): Rock {
+    // Bedding "height": tilted and folded, so beds rise and fall across the land.
+    const v = y + fold;
     // Deep down is the granite basement.
-    if (v < -8) return Rock.Granite;
+    if (v < -20) return Rock.Granite;
     const L = Math.floor(v / BED);
     const r = hash2(L, 31, this.seed);
     const kind = r < 0.4 ? Rock.Granite : r < 0.68 ? Rock.Sandstone : Rock.Shale;

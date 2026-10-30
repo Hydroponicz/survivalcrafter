@@ -4,6 +4,7 @@ import { pieceBoxes, STRUCTURES } from '../data/structures';
 import { buildToolMesh, swingPose, type SwingKind } from './tools';
 import { Y_MIN, type Terrain } from '../world/terrain';
 import { toLocal, type World } from '../world/world';
+import { treeScale, TRUNK } from '../world/treefx';
 import type { Input } from './input';
 
 const RADIUS = 0.3;
@@ -172,7 +173,8 @@ export class Player {
     }
     for (const o of world.near(x, z, 2.5)) {
       if (o.kind === 'tree') {
-        if (o.age > 0.35) score += Math.max(0, RADIUS + 0.12 + 0.18 * o.age - Math.hypot(x - o.x, z - o.z)) * 10;
+        // The trunk, as thick as this tree really is.
+        if (o.age > 0.35) score += Math.max(0, RADIUS + TRUNK[o.species].r0 * treeScale(o).s * 0.9 - Math.hypot(x - o.x, z - o.z)) * 10;
         continue;
       }
       if (o.kind !== 'structure' || !o.built) continue;

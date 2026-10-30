@@ -1,8 +1,7 @@
 import { FORAGE, FORAGE_SPECIES, LEARN_BY_HANDLING, type Biome } from '../data/forage';
 import { isIdentified, knownSpecies, learnSpecies, setKnownSpecies } from '../data/items';
-import { mulberry32 } from '../world/noise';
 import { Mat, WORLD_SIZE } from '../world/terrain';
-import type { ForageObj, World } from '../world/world';
+import { REGION, type ForageObj, type RegionHook, type World } from '../world/world';
 
 // Foraging reads the land: plants, fungi, branches and pebbles lie on the ground
 // where they would really grow. Picking one removes it; new ones sprout over
@@ -68,14 +67,14 @@ function pickSpecies(biome: Biome, r: number): string | undefined {
 }
 
 /** Try to grow one find at a spot. Returns it, or undefined if the spot isn't suitable. */
-function trySpawn(world: World, x: number, z: number, rnd: () => number): ForageObj | undefined {
+function trySpawn(world: World, x: number, z: number, rnd: () => number, id?: number): ForageObj | undefined {
   const t = world.terrain;
   if (x < 2 || z < 2 || x > WORLD_SIZE - 2 || z > WORLD_SIZE - 2) return undefined;
   const y = t.heightAt(x, z);
   if (y < t.waterAt(x, z) + 0.15) return undefined;
-  const n = t.normalAt(x, y - 0.05, z);
-  if (n.y < 0.7) return undefined; // nothing settles on a cliff face
-  const mat = t.materialAt(x, y - 0.05, z);
+  // Nothing settles on a cliff face (steeper than about 45°). Heights, not voxels: this runs for whole regions.
+  if (Math.abs(t.heightAt(x + 0.5, z) - t.heightAt(x - 0.5, z)) > 1 || Math.abs(t.heightAt(x, z + 0.5) - t.heightAt(x, z - 0.5)) > 1) return undefined;
+  const mat = t.topAt(x, z);
   const biome = biomeAt(world, x, y, z, mat);
   if (rnd() > DENSITY[biome] * 4) return undefined;
   const species = pickSpecies(biome, rnd());
@@ -87,19 +86,21 @@ function trySpawn(world: World, x: number, z: number, rnd: () => number): Forage
     if ((o.kind === 'tree' || o.kind === 'bush') && Math.hypot(o.x - x, o.z - z) < 0.8) return undefined;
   }
   if (crowd >= LOCAL_CAP) return undefined;
-  return world.add<ForageObj>({ kind: 'forage', species, x, y, z, rot: rnd() * Math.PI * 2 });
+  return world.add<ForageObj>({ id, kind: 'forage', species, x, y, z, rot: rnd() * Math.PI * 2 });
 }
 
-/** Scatter finds across a fresh world. */
-export function populateForage(world: World) {
-  const rnd = mulberry32(world.terrain.seed + 77);
-  for (let z = 4; z < WORLD_SIZE - 4; z += 4) {
-    for (let x = 4; x < WORLD_SIZE - 4; x += 4) {
+/** Scatter finds across a region of the world as it's first generated (a World region hook). */
+export const forageRegion: RegionHook = (world, x0, z0, rnd, id) => {
+  for (let z = z0; z < z0 + REGION; z += 4) {
+    for (let x = x0; x < x0 + REGION; x += 4) {
       // DENSITY is per sample; trySpawn scales by 4, so sample with a quarter chance.
-      if (rnd() < 0.25) trySpawn(world, x + rnd() * 4, z + rnd() * 4, rnd);
+      const roll = rnd(), ox = rnd() * 4, oz = rnd() * 4;
+      if (roll >= 0.25) continue;
+      const slot = id();
+      if (slot >= 0) trySpawn(world, x + ox, z + oz, rnd, slot);
     }
   }
-}
+};
 
 /** World seconds between regrowth attempts near the player. */
 const REGROW_EVERY = 10;

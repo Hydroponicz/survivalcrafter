@@ -9,6 +9,7 @@ import {
 } from '../world/world';
 import { FORAGE, IDENTIFY } from '../data/forage';
 import { BIOMES, biomeAt, type Biome } from './forage';
+import { treeScale } from '../world/treefx';
 import { ZONE_NAMES } from '../world/climate';
 import type { Game } from './game';
 import type { SwingKind } from './tools';
@@ -414,7 +415,7 @@ export const ACTIONS: ActionDef[] = [
       c.g.consumeActive();
       if (!o.success) return c.g.msg('The sprout wilts as you plant it.', 'fail');
       const species = label.includes('pine') ? 'pine' : label.includes('birch') ? 'birch' : 'oak';
-      c.g.world.add<TreeObj>({ kind: 'tree', species, x: c.t.point.x, z: c.t.point.z, age: 0.03, branches: 0 });
+      c.g.world.add<TreeObj>({ kind: 'tree', species, x: c.t.point.x, z: c.t.point.z, age: 0.03, branches: 0, growing: true });
       c.g.msg(`You plant the ${species} sprout. Give it time to grow.`, 'good');
     },
   },
@@ -479,7 +480,8 @@ export const ACTIONS: ActionDef[] = [
       // The notch opens on the side you first chop from.
       if (t.notchDir === undefined) t.notchDir = Math.atan2(p.x - t.x, p.z - t.z);
       const power = c.tool ? itemDef(c.tool.type).toolPower ?? 1 : 0.5;
-      const hardness = { pine: 0.9, oak: 1.25, birch: 1.0 }[t.species] * (0.6 + 0.6 * t.age);
+      // Bigger trees take longer: hardness grows with the trunk.
+      const hardness = { pine: 0.9, oak: 1.25, birch: 1.0 }[t.species] * (0.35 + 0.3 * treeScale(t).s);
       const bite = (0.13 + 0.08 * power + g.skills.get('woodcutting') / 300) / hardness;
       // A glancing blow still takes a little out.
       const gained = o.success ? bite * (0.85 + Math.random() * 0.3) : bite * 0.45;
@@ -491,7 +493,7 @@ export const ACTIONS: ActionDef[] = [
       if (!o.success && Math.random() < 0.35) g.msg('Your hatchet glances off the trunk.', 'fail');
       if (t.chop < 1) return;
       const ql = t.chopQl ?? o.ql;
-      const logs = Math.max(1, Math.round(t.age * 3.2));
+      const logs = Math.max(1, Math.round(treeScale(t).s * 1.4));
       const items = [];
       for (let i = 0; i < logs; i++) items.push(makeItem('log', ql * (0.75 + t.age * 0.35), `${t.species} log`));
       for (let i = 0; i < 1 + Math.floor(Math.random() * 3); i++) items.push(makeItem('branch', ql));

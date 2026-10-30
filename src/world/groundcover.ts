@@ -390,7 +390,7 @@ export class GroundCover {
       const h = t.heightAt(x, z);
       const gx = t.heightAt(x + 0.5, z) - t.heightAt(x - 0.5, z), gz = t.heightAt(x, z + 0.5) - t.heightAt(x, z - 0.5);
       const slope = Math.hypot(gx, gz);
-      return { h, slope, mat: t.materialAt(x, h - 0.08, z) };
+      return { h, slope, mat: t.topAt(x, z) };
     };
     const blocked = (x: number, y: number, z: number) => pieces.length > 0 && this.world.blockedAt(x, y + 0.12, z);
 
@@ -422,7 +422,7 @@ export class GroundCover {
         const cov = COVER[zone];
         const roll = r() * 3; // three samples per m²: compare densities against this
         const yaw = r() * Math.PI * 2;
-        const wet = t.freshWaterAt(x, z) || t.nearWater[Math.round(z) * (WORLD_SIZE + 1) + Math.round(x)];
+        const wet = t.freshWaterAt(x, z) || t.nearWaterAt(x, z);
         // Reeds: along banks and standing in the shallows.
         if (wet && (g.mat === Mat.Grass || g.mat === Mat.Clay || g.mat === Mat.Sand || g.mat === Mat.Gravel) && g.h > water - 0.7 && g.slope < 0.8) {
           if (roll < (g.h < water ? 1.4 : 0.9) && !blocked(x, g.h, z)) {
@@ -464,7 +464,7 @@ export class GroundCover {
         const pBoulder = rocky ? 0.35 : zone === 'alpine' || zone === 'heath' ? 0.12 : zone === 'meadow' || zone === 'conifer' ? 0.04 : 0.02;
         if (r() < pBoulder) {
           // Coloured like the bedrock it broke from.
-          const below = t.materialAt(x, g.h - 1.2, z);
+          const below = t.bedrockAt(x, g.h - 1.2, z);
           t.surfaceColor(isRock(below) ? below : Mat.Rock, x, g.h, z, 0, col);
           const v = rnd(r, 0.75, 1.05) * 1.5;
           const sc = rnd(r, 0.35, 1.5);

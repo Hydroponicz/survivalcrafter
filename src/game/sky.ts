@@ -172,7 +172,7 @@ export class Sky {
       normalMap: this.waterTex, normalScale: new THREE.Vector2(0.3, 0.3),
     });
     // The sea runs out past the view distance; UVs keep the same ripple size per metre as the rivers.
-    const seaSize = 4000;
+    const seaSize = Math.max(4000, worldSize * 3);
     const seaGeo = new THREE.PlaneGeometry(seaSize, seaSize);
     const uv = seaGeo.attributes.uv;
     for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * seaSize / (worldSize * 3), uv.getY(i) * seaSize / (worldSize * 3));
@@ -214,7 +214,8 @@ export class Sky {
     this.stars.visible = starAlpha > 0.01;
 
     // Hazier at dawn and dusk; mist pools in the valleys around sunrise and lifts by midmorning.
-    this.haze.density = THREE.MathUtils.lerp(0.0042, 0.003, THREE.MathUtils.clamp(elev * 2, 0, 1));
+    // Thin enough to see mountains kilometres away, thicker at dawn and dusk.
+    this.haze.density = THREE.MathUtils.lerp(0.0013, 0.0008, THREE.MathUtils.clamp(elev * 2, 0, 1));
     const dawn = Math.exp(-(((dayFraction - 0.27) / 0.06) ** 2));
     const nightMist = dayFraction < 0.2 || dayFraction > 0.85 ? 0.25 : 0;
     this.haze.mist = Math.max(0.75 * dawn, nightMist, 0.08);

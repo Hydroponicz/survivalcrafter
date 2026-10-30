@@ -15,6 +15,8 @@ export interface TreeObj {
   chop?: number;
   notchDir?: number;
   chopQl?: number;
+  /** Planted by you: grows up over time (wild trees stay the size they are). */
+  growing?: boolean;
 }
 
 /** What's left after felling a tree. Scenery only. */
@@ -109,15 +111,31 @@ export function pointInPiece(s: StructureObj, x: number, y: number, z: number, m
 
 /** What grows in each climate zone: tree density per 4 m², species mix, stature, berry bushes. */
 const VEGETATION: Record<Zone, { trees: number; oak: number; birch: number; pine: number; stature: number; bushes: number }> = {
-  broadleaf: { trees: 0.32, oak: 6, birch: 3, pine: 1, stature: 1, bushes: 0.04 },
-  conifer: { trees: 0.34, oak: 0.5, birch: 1.5, pine: 8, stature: 1, bushes: 0.02 },
-  meadow: { trees: 0.025, oak: 6, birch: 2, pine: 1, stature: 1, bushes: 0.05 },
-  heath: { trees: 0.015, oak: 1, birch: 3, pine: 4, stature: 0.75, bushes: 0.03 },
-  marsh: { trees: 0.05, oak: 0, birch: 8, pine: 1, stature: 0.85, bushes: 0.02 },
-  alpine: { trees: 0.035, oak: 0, birch: 1, pine: 9, stature: 0.65, bushes: 0.01 },
-  beach: { trees: 0.008, oak: 0, birch: 1, pine: 3, stature: 0.8, bushes: 0 },
+  broadleaf: { trees: 0.11, oak: 6, birch: 3, pine: 1, stature: 1, bushes: 0.04 },
+  conifer: { trees: 0.14, oak: 0.5, birch: 1.5, pine: 8, stature: 1, bushes: 0.02 },
+  meadow: { trees: 0.012, oak: 6, birch: 2, pine: 1, stature: 1, bushes: 0.05 },
+  heath: { trees: 0.008, oak: 1, birch: 3, pine: 4, stature: 0.75, bushes: 0.03 },
+  marsh: { trees: 0.03, oak: 0, birch: 8, pine: 1, stature: 0.85, bushes: 0.02 },
+  alpine: { trees: 0.03, oak: 0, birch: 1, pine: 9, stature: 0.6, bushes: 0.01 },
+  beach: { trees: 0.004, oak: 0, birch: 1, pine: 3, stature: 0.8, bushes: 0 },
   snow: { trees: 0, oak: 0, birch: 0, pine: 1, stature: 0.5, bushes: 0 },
 };
+
+/** Wild things are generated a region at a time around you. */
+export const REGION = 64;
+const NR = WORLD_SIZE / REGION;
+/** Generated objects get ids from here up (region * 4096 + index), so they're the same every visit. */
+export const GEN_BASE = 100_000_000;
+const LOAD_R = 220;
+const UNLOAD_R = 290;
+export const isGenerated = (id: number) => id >= GEN_BASE;
+const regionOfId = (id: number) => Math.floor((id - GEN_BASE) / 4096);
+
+/** What you've done to a region's wild things: removed some, changed others. */
+interface RegionState { removed: Set<number>; changed: Map<number, WorldObj> }
+
+/** Something that adds more generated things to a region (the game adds forage). */
+export type RegionHook = (world: World, x0: number, z0: number, rnd: () => number, id: () => number) => void;
 
 export class World {
   terrain: Terrain;
@@ -131,6 +149,11 @@ export class World {
   private tickTimer = 0;
   listener?: WorldListener;
   spawn = { x: 0, z: 0 };
+  private regions = new Map<number, RegionState>();
+  private loadedRegions = new Set<number>();
+  regionHooks: RegionHook[] = [];
+  /** Where things are happening (the player): slow processes run around here. */
+  focus = { x: WORLD_SIZE / 2, z: WORLD_SIZE / 2 };
 
   constructor(seed: number) {
     this.terrain = new Terrain(seed);
@@ -146,7 +169,7 @@ export class World {
   add<T extends WorldObj>(o: Omit<T, 'id'> & { id?: number }): T {
     const obj = o as T;
     if (!obj.id) obj.id = this.nextId++;
-    else this.nextId = Math.max(this.nextId, obj.id + 1);
+    else if (!isGenerated(obj.id)) this.nextId = Math.max(this.nextId, obj.id + 1);
     this.objects.set(obj.id, obj);
     const k = this.key(obj.x, obj.z);
     let set = this.grid.get(k);
@@ -157,13 +180,136 @@ export class World {
   }
 
   remove(o: WorldObj) {
+    this.detach(o);
+    if (isGenerated(o.id)) {
+      const st = this.regionState(regionOfId(o.id));
+      st.removed.add(o.id);
+      st.changed.delete(o.id);
+    }
+  }
+
+  /** Take an object out of the live world without forgetting it (region unloading). */
+  private detach(o: WorldObj) {
     this.objects.delete(o.id);
     this.grid.get(this.key(o.x, o.z))?.delete(o);
     this.listener?.removed(o);
   }
 
+  /** Something about an object changed: redraw it, and remember it if it's a wild thing. */
   changed(o: WorldObj) {
     this.listener?.changed(o);
+    if (isGenerated(o.id)) this.regionState(regionOfId(o.id)).changed.set(o.id, o);
+  }
+
+  private regionState(r: number): RegionState {
+    let st = this.regions.get(r);
+    if (!st) this.regions.set(r, (st = { removed: new Set(), changed: new Map() }));
+    return st;
+  }
+
+  // ---------- regions
+  /** Load the regions around a point and let go of distant ones. Returns how many were generated. */
+  stream(px: number, pz: number, maxNew = 1): number {
+    let made = 0;
+    const r0x = Math.floor((px - LOAD_R) / REGION), r1x = Math.floor((px + LOAD_R) / REGION);
+    const r0z = Math.floor((pz - LOAD_R) / REGION), r1z = Math.floor((pz + LOAD_R) / REGION);
+    const want: [number, number, number][] = [];
+    for (let rz = Math.max(0, r0z); rz <= Math.min(NR - 1, r1z); rz++) {
+      for (let rx = Math.max(0, r0x); rx <= Math.min(NR - 1, r1x); rx++) {
+        const d = this.regionDist(rx, rz, px, pz);
+        if (d <= LOAD_R && !this.loadedRegions.has(rz * NR + rx)) want.push([rx, rz, d]);
+      }
+    }
+    want.sort((a, b) => a[2] - b[2]);
+    for (const [rx, rz] of want) {
+      if (made >= maxNew) break;
+      // Work out the ground a few columns a frame first; generate once it's all known.
+      if (maxNew < 10 && this.terrain.prepare(rx * REGION, rz * REGION, REGION, 3) > 0) break;
+      this.loadRegion(rx, rz);
+      made++;
+    }
+    for (const r of [...this.loadedRegions]) {
+      if (this.regionDist(r % NR, Math.floor(r / NR), px, pz) > UNLOAD_R) this.unloadRegion(r);
+    }
+    return made;
+  }
+
+  /** Are all regions within `r` of a point loaded? */
+  regionsReady(px: number, pz: number, r = LOAD_R): boolean {
+    for (let rz = Math.max(0, Math.floor((pz - r) / REGION)); rz <= Math.min(NR - 1, Math.floor((pz + r) / REGION)); rz++) {
+      for (let rx = Math.max(0, Math.floor((px - r) / REGION)); rx <= Math.min(NR - 1, Math.floor((px + r) / REGION)); rx++) {
+        if (this.regionDist(rx, rz, px, pz) <= r && !this.loadedRegions.has(rz * NR + rx)) return false;
+      }
+    }
+    return true;
+  }
+
+  private regionDist(rx: number, rz: number, px: number, pz: number) {
+    const cx = Math.max(rx * REGION, Math.min(px, (rx + 1) * REGION)), cz = Math.max(rz * REGION, Math.min(pz, (rz + 1) * REGION));
+    return Math.hypot(cx - px, cz - pz);
+  }
+
+  /** Grow a region's trees, bushes and the rest (the same every time), minus what you've taken. */
+  private loadRegion(rx: number, rz: number) {
+    const r = rz * NR + rx;
+    this.loadedRegions.add(r);
+    const st = this.regions.get(r);
+    let k = 0;
+    const nextId = () => GEN_BASE + r * 4096 + k++;
+    const place = <T extends WorldObj>(o: Omit<T, 'id'>) => {
+      const id = nextId();
+      if (st?.removed.has(id)) return;
+      const kept = st?.changed.get(id);
+      this.add<T>((kept ?? { ...o, id }) as T);
+    };
+    const t = this.terrain;
+    const rng = mulberry32(this.terrain.seed * 31 + r * 7919);
+    const forest = this.forestNoise ??= new Simplex(t.seed + 1234);
+    const x0 = rx * REGION, z0 = rz * REGION;
+    for (let gz = 0; gz < REGION; gz += 2) {
+      for (let gx = 0; gx < REGION; gx += 2) {
+        const px = x0 + gx + rng() * 2, pz = z0 + gz + rng() * 2;
+        const roll = rng(), roll2 = rng(), roll3 = rng();
+        const h = t.heightAt(px, pz);
+        if (h < t.waterAt(px, pz) + 0.5) continue;
+        if (t.topAt(px, pz) !== Mat.Grass) continue;
+        // The climate zone sets what grows; patchy noise breaks it into stands and clearings.
+        const zone = VEGETATION[t.zoneAt(px, pz)];
+        const f = forest.fbm(px * 0.02, pz * 0.02, 3);
+        const density = zone.trees * Math.max(0.15, Math.min(1.8, 1 + f * 2.2));
+        if (roll < density) {
+          const sp = roll2 * (zone.oak + zone.birch + zone.pine);
+          const species: Species = sp < zone.oak ? 'oak' : sp < zone.oak + zone.birch ? 'birch' : 'pine';
+          // Mostly full-grown, with younger trees and saplings coming up between them;
+          // up high and in the dry, trees grow stunted.
+          const age = (roll3 < 0.1 ? 0.15 + roll3 * 1.5 : roll3 < 0.32 ? 0.35 + (roll3 - 0.1) * 1.6 : 0.75 + (roll3 - 0.32) * 0.37) * zone.stature;
+          place<TreeObj>({ kind: 'tree', species, x: px, z: pz, age, branches: 3 });
+        } else if (roll2 < zone.bushes) {
+          place<BushObj>({ kind: 'bush', x: px, z: pz, ripe: roll3 < 0.7, regrowAt: 0 });
+        }
+      }
+    }
+    // Everything else the game grows here (forage), numbered after the trees.
+    k = 1100;
+    for (const hook of this.regionHooks) {
+      hook(this, x0, z0, rng, () => {
+        const id = nextId();
+        return st?.removed.has(id) ? -1 : id;
+      });
+    }
+  }
+
+  private forestNoise?: Simplex;
+
+  /** Let go of a far region: its wild things are regenerated (with your changes) when you come back. */
+  private unloadRegion(r: number) {
+    this.loadedRegions.delete(r);
+    const rx = r % NR, rz = Math.floor(r / NR);
+    for (const o of this.near((rx + 0.5) * REGION, (rz + 0.5) * REGION, REGION * 0.75)) {
+      if (Math.floor(o.x / REGION) !== rx || Math.floor(o.z / REGION) !== rz) continue;
+      // Wild things go (their changes are kept in the region's state), and so does regrown forage.
+      if (isGenerated(o.id) || o.kind === 'forage') this.detach(o);
+    }
   }
 
   /** Objects anchored within the cells overlapping a radius. */
@@ -193,61 +339,37 @@ export class World {
   }
 
   // ---------- generation
+  /** Make the world map and pick where you start (wild things load as you approach). */
   generate() {
-    const t = this.terrain;
-    t.generate();
-    const rng = mulberry32(t.seed + 5);
-    const forest = new Simplex(t.seed + 1234);
-    for (let z = 4; z < WORLD_SIZE - 4; z += 2) {
-      for (let x = 4; x < WORLD_SIZE - 4; x += 2) {
-        const px = x + rng() * 2, pz = z + rng() * 2;
-        const h = t.heightAt(px, pz);
-        if (h < t.waterAt(px, pz) + 0.5) continue;
-        if (t.surfaceMaterial(px, pz) !== Mat.Grass) continue;
-        // The climate zone sets what grows; patchy noise breaks it into stands and clearings.
-        const zone = VEGETATION[t.zoneAt(px, pz)];
-        const f = forest.fbm(px * 0.02, pz * 0.02, 3);
-        const density = zone.trees * Math.max(0.15, Math.min(1.8, 1 + f * 2.2));
-        if (rng() < density) {
-          const r = rng() * (zone.oak + zone.birch + zone.pine);
-          const species: Species = r < zone.oak ? 'oak' : r < zone.oak + zone.birch ? 'birch' : 'pine';
-          // Up high and in the dry, trees grow stunted.
-          const age = (0.55 + rng() * 0.45) * zone.stature;
-          this.add<TreeObj>({ kind: 'tree', species, x: px, z: pz, age, branches: 3 });
-        } else if (rng() < zone.bushes) {
-          this.add<BushObj>({ kind: 'bush', x: px, z: pz, ripe: rng() < 0.7, regrowAt: 0 });
-        }
-      }
-    }
+    this.terrain.generate();
     this.findSpawn();
-    this.populateAnimals(28);
   }
 
   /**
-   * A gentle lowland meadow near the middle of the island: not a mountaintop,
-   * with walkable ground all around so a new character can head off any way.
+   * Somewhere gentle to start: lowland grass or woodland near the middle of
+   * the land, not a mountainside, with walkable ground all around. Searched on
+   * the world map directly (fast) rather than through the voxel terrain.
    */
   findSpawn() {
-    const t = this.terrain;
+    const g = this.terrain.gen;
     const c = WORLD_SIZE / 2;
     const ok = (x: number, z: number, maxH: number) => {
-      if (t.surfaceMaterial(x, z) !== Mat.Grass) return false;
-      const h = t.heightAt(x, z);
-      if (h < 1.5 || h > maxH) return false;
-      // Gentle in a 6 m radius, so you don't start on a ledge.
+      const h = g.height(x, z);
+      if (h < 3 || h > maxH || !Number.isNaN(g.water(x, z, h))) return false;
       for (let a = 0; a < 8; a++) {
-        for (const r of [2, 4, 6]) {
+        for (const r of [3, 6, 10]) {
           const nx = x + Math.cos((a / 8) * Math.PI * 2) * r, nz = z + Math.sin((a / 8) * Math.PI * 2) * r;
-          if (Math.abs(t.heightAt(nx, nz) - h) > r * 0.35) return false;
+          if (Math.abs(g.height(nx, nz) - h) > r * 0.3) return false;
         }
       }
-      return !this.near(x, z, 2).some((o) => Math.hypot(o.x - x, o.z - z) < 2);
+      const zone = g.zone(x, z, h);
+      return (zone === 'meadow' || zone === 'broadleaf' || zone === 'heath') && g.soil(x, z, h, 0).top === 'grass';
     };
-    for (const maxH of [10, 16, 40]) {
-      for (let r = 0; r < c - 12; r += 2) {
-        for (let a = 0; a < 24; a++) {
-          const x = c + Math.cos((a / 24) * Math.PI * 2) * r;
-          const z = c + Math.sin((a / 24) * Math.PI * 2) * r;
+    for (const maxH of [40, 90, 200]) {
+      for (let r = 0; r < c - 200; r += 24) {
+        for (let a = 0; a < 32; a++) {
+          const x = c + Math.cos((a / 32) * Math.PI * 2 + r) * r;
+          const z = c + Math.sin((a / 32) * Math.PI * 2 + r) * r;
           if (ok(x, z, maxH)) { this.spawn = { x, z }; return; }
         }
       }
@@ -255,14 +377,16 @@ export class World {
     this.spawn = { x: c, z: c };
   }
 
-  populateAnimals(n: number) {
-    const t = this.terrain;
-    let tries = 0;
-    while (this.animals.length < n && tries++ < n * 50) {
-      const x = 8 + Math.random() * (WORLD_SIZE - 16);
-      const z = 8 + Math.random() * (WORLD_SIZE - 16);
-      if (t.heightAt(x, z) < t.waterAt(x, z) + 1) continue;
-      if (Math.hypot(x - this.spawn.x, z - this.spawn.z) < 30) continue;
+  /** Keep a few animals about: new ones appear out of sight around you, far-off ones wander away. */
+  keepAnimals(px: number, pz: number, want = 24) {
+    this.animals = this.animals.filter((a) => Math.hypot(a.x - px, a.z - pz) < 320);
+    const g = this.terrain.gen;
+    for (let tries = 0; tries < 6 && this.animals.length < want; tries++) {
+      const a = Math.random() * Math.PI * 2, r = 70 + Math.random() * 150;
+      const x = px + Math.cos(a) * r, z = pz + Math.sin(a) * r;
+      if (x < 8 || z < 8 || x > WORLD_SIZE - 8 || z > WORLD_SIZE - 8) continue;
+      const h = g.height(x, z);
+      if (h < 1 || !Number.isNaN(g.water(x, z, h)) || g.temperature(x, h, z) < 0.25) continue;
       this.spawnAnimal(Math.random() < 0.65 ? 'deer' : 'boar', x, z);
     }
   }
@@ -315,11 +439,11 @@ export class World {
     this.tickTimer += dt;
     while (this.tickTimer > 0.25) {
       this.tickTimer -= 0.25;
-      this.terrain.randomTick();
+      this.terrain.randomTick(this.focus.x, this.focus.z);
     }
     for (const o of this.objects.values()) {
       if (o.kind === 'tree') {
-        if (o.age < 1) {
+        if (o.growing && o.age < 1) {
           o.age = Math.min(1, o.age + dt / 900);
           if (Math.random() < dt) this.changed(o);
         }
@@ -345,7 +469,11 @@ export class World {
   serialize() {
     return {
       terrain: this.terrain.serialize(),
-      objects: [...this.objects.values()],
+      // Your things, and what you've changed about the wild ones.
+      objects: [...this.objects.values()].filter((o) => !isGenerated(o.id) && o.kind !== 'forage'),
+      regions: [...this.regions.entries()]
+        .filter(([, st]) => st.removed.size || st.changed.size)
+        .map(([r, st]) => [r, [...st.removed], [...st.changed.values()]] as [number, number[], WorldObj[]]),
       crops: [...this.crops.entries()].map(([k, c]) => [k, { planted: c.planted, ql: c.ql, tended: c.tended }]),
       animals: this.animals.map((a) => ({ species: a.species, x: a.x, z: a.z, hp: a.hp })),
       time: this.time,
@@ -362,6 +490,9 @@ export class World {
       // Old saves planned anvils as buildings; they're placed equipment now.
       if (o.kind === 'structure' && STRUCTURES[o.type]?.item && !o.built) { o.built = true; o.ql = Math.max(o.ql, 10); }
       w.add(o);
+    }
+    for (const [r, removed, changed] of data.regions ?? []) {
+      w.regions.set(r, { removed: new Set(removed), changed: new Map(changed.map((o) => [o.id, o])) });
     }
     for (const [k, c] of data.crops as [number, Crop][]) w.crops.set(k, c);
     for (const a of data.animals) {

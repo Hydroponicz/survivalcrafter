@@ -9,6 +9,7 @@ import { forageHeight, forageScale } from '../world/forageProps';
 import { buildPieceMesh, WorldView } from '../world/view';
 import { GroundCover } from '../world/groundcover';
 import { Fireflies } from '../world/fireflies';
+import { DistantLand } from '../world/lod';
 import {
   ANIMALS, pointInPiece, toLocal, toWorld, World, type AnimalObj, type ForageObj, type PileObj, type StructureObj, type TreeObj, type WorldObj,
 } from '../world/world';
@@ -23,7 +24,7 @@ import { treeScale } from '../world/treefx';
 import { MinigameSession, minigameVerb, type MinigameSpec } from './minigames';
 import { TutorialProgress, tutorialKey } from './minigames/tutorials';
 import { FORAGE, type ForageCategory } from '../data/forage';
-import { ForageGrowth, Knowledge, noticeOf, populateForage } from './forage';
+import { ForageGrowth, forageRegion, Knowledge, noticeOf } from './forage';
 import { Input } from './input';
 import { CARRY_CAPACITY, Inventory } from './inventory';
 import { Player } from './player';
@@ -34,9 +35,10 @@ const REACH = 4.5;
 /** Skill above a task's difficulty needed to do it the quick way. */
 export const QUICK_MARGIN = 10;
 const BUILD_REACH = 8;
-const SAVE_KEY = 'survivalcrafter.save.v3';
+const SAVE_KEY = 'survivalcrafter.save.v4';
 /** Saves from older world generators, which can't be loaded into the current one, and why. */
 export const OLD_SAVES: [string, string][] = [
+  ['survivalcrafter.save.v3', 'The world is now a vast open continent that streams in as you explore, so worlds from before can no longer be loaded. Start a new world to play.'],
   ['survivalcrafter.save.v2', 'Worlds are now shaped by erosion, so worlds from before the change can no longer be loaded. Start a new world to play.'],
   ['survivalcrafter.save.v1', 'The world is now made of voxels, so worlds from the old tile terrain can no longer be loaded. Start a new world to play.'],
 ];
@@ -135,6 +137,7 @@ export class Game {
   readonly sound = new Sound();
   /** Grass, plants, rocks and logs around you (visual only). */
   groundCover!: GroundCover;
+  private distant!: DistantLand;
   private fireflies = new Fireflies();
   /** What the surroundings sound and look like right now, refreshed a couple of times a second. */
   private amb = { wind: 0.3, water: 0, birds: 0, crickets: 0, frogs: 0, fireflies: 0, sway: 0.4 };
@@ -145,29 +148,32 @@ export class Game {
   private elapsed = 0;
 
   constructor(canvas: HTMLCanvasElement, world: World) {
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+    // Log depth: the view runs out to kilometres without distant hills flickering.
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance', logarithmicDepthBuffer: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.0;
-    this.camera = new THREE.PerspectiveCamera(72, window.innerWidth / window.innerHeight, 0.08, 900);
+    this.camera = new THREE.PerspectiveCamera(72, window.innerWidth / window.innerHeight, 0.08, 7000);
     this.input = new Input(canvas);
 
     this.world = world;
-    world.terrain.buildMeshes();
     this.scene.add(world.terrain.group);
     this.view = new WorldView(world);
     this.knowledge.load(undefined);
     this.view.forageVisible = (o) => this.canSee(o);
-    if (![...world.objects.values()].some((o) => o.kind === 'forage')) populateForage(world);
+    world.regionHooks.push(forageRegion);
     this.scene.add(this.markers);
     this.scene.add(this.view.group);
     this.scene.add(this.player.model);
     this.sky = new Sky(this.scene, world.terrain.size);
     // Rivers and lakes share the sea's water material (and its ripples).
-    this.scene.add(world.terrain.waterMesh(this.sky.water.material as THREE.Material));
+    world.terrain.waterMaterial = this.sky.water.material as THREE.Material;
+    // The rest of the world, out to the horizon.
+    this.distant = new DistantLand(world.terrain.gen, this.sky.water.material as THREE.Material);
+    this.scene.add(this.distant.group);
     this.groundCover = new GroundCover(world);
     this.scene.add(this.groundCover.group, this.fireflies.points);
     this.view.onStructure = (o) => this.groundCover.invalidate(o.x, o.z, 3);
@@ -204,7 +210,10 @@ export class Game {
 
   start() {
     // Mesh the land around you before the first frame; the rest streams in.
-    this.world.terrain.update(this.player.pos.x, this.player.pos.z, 400);
+    const p = this.player.pos;
+    this.world.stream(p.x, p.z, 999);
+    this.world.keepAnimals(p.x, p.z);
+    this.world.terrain.buildNear(p.x, p.y, p.z, 40);
     this.renderer.setAnimationLoop((t) => this.frame(t));
   }
 
@@ -964,15 +973,8 @@ export class Game {
     // Keep the wilds stocked.
     this.respawnTimer -= dt;
     if (this.respawnTimer <= 0) {
-      this.respawnTimer = 45;
-      if (w.animals.length < 28) {
-        for (let i = 0; i < 20; i++) {
-          const x = 8 + Math.random() * (t.size - 16), z = 8 + Math.random() * (t.size - 16);
-          if (Math.hypot(x - p.x, z - p.z) < 50 || t.heightAt(x, z) < t.waterAt(x, z) + 1) continue;
-          w.spawnAnimal(Math.random() < 0.65 ? 'deer' : 'boar', x, z);
-          break;
-        }
-      }
+      this.respawnTimer = 20;
+      w.keepAnimals(p.x, p.z);
     }
   }
 
@@ -1019,7 +1021,7 @@ export class Game {
     switch (o.kind) {
       case 'tree': {
         const g = this.world.terrain.heightAt(o.x, o.z);
-        const s = 0.2 + 0.8 * o.age;
+        const { s } = treeScale(o);
         const y = p.y - g;
         if (y < 0 || y > 6.5 * s) return false;
         const r = y < 2.6 * s ? 0.2 + 0.3 * s : 1.5 * s;
@@ -1471,7 +1473,9 @@ export class Game {
     this.growth.update(this.world, p.pos.x, p.pos.z, dt * this.dev.timeScale);
     this.updateMarkers();
     this.updateAnimals(dt);
-    this.world.terrain.update(p.pos.x, p.pos.z, 6);
+    this.world.terrain.update(p.pos.x, p.pos.y, p.pos.z, 6);
+    this.world.focus = { x: p.pos.x, z: p.pos.z };
+    this.world.stream(p.pos.x, p.pos.z, 1);
 
     this.saveTimer += dt;
     if (this.saveTimer > 60) { this.saveTimer = 0; this.save(); }
@@ -1509,6 +1513,8 @@ export class Game {
     this.ambTimer -= this.renderDt;
     if (this.ambTimer <= 0) { this.ambTimer = 0.5; this.surroundings(); }
     this.groundCover.update(this.camera.position, this.elapsed, this.world.terrain.wind, this.amb.sway);
+    const mc = this.world.terrain.meshCentre;
+    this.distant.setHole(mc.x, mc.z, Number.isFinite(mc.x) ? Math.max(0, this.world.terrain.readyRadius - 6) : 0);
     this.fireflies.update(this.renderDt, this.elapsed, this.camera.position, this.world.terrain, this.amb.fireflies);
     const a = this.amb;
     this.sound.ambience({ wind: a.wind, river: a.water, birds: a.birds, night: a.crickets, frogs: a.frogs }, this.renderDt);

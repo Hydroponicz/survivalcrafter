@@ -18,8 +18,8 @@ export const ZONE_NAMES: Record<Zone, string> = {
   snow: 'Snowfield',
 };
 
-/** Air cools about this much (0..1 scale) per metre of height. */
-export const LAPSE = 1 / 42;
+/** Air cools about this much (0..1 scale) per metre of height: snow lies from roughly 240 m. */
+export const LAPSE = 1 / 380;
 /** Colder than this and snow lies. */
 export const SNOW_TEMP = 0.12;
 
