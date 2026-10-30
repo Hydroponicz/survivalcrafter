@@ -653,7 +653,13 @@ export class UI {
       tabs.appendChild(b);
     }
     body.appendChild(tabs);
-    body.appendChild(el('div', 'hint', 'Crafting takes time and can fail. Quality depends on your skill, your tool and your materials. Actions queue up — keep working while you wait.'));
+    body.appendChild(el('div', 'craft-intro', `
+      <b>Crafting is hands-on.</b> When you craft, the view moves to the workstation and you do the job yourself with the mouse — sawing, hammering, twisting, stirring.
+      <ul>
+        <li>The first time you try each kind of work you get a short guide and an extra-forgiving practice run.</li>
+        <li><b>How well you do</b> sets most of the quality. Your <b>skill</b> makes the work easier and limits how good the result can be; better <b>tools and materials</b> help too.</li>
+        <li><b>Right-click</b> stops working. Once you're skilled at something, <b>Quick ×5</b> skips the hands-on part for slightly lower quality.</li>
+      </ul>`));
     for (const r of RECIPES.filter((r) => r.category === this.craftCategory)) body.appendChild(this.recipeRow(r));
     this.frame('crafting', 'Crafting', body);
   }
@@ -826,6 +832,11 @@ export class UI {
   }
 
   private renderHelp() {
+    const replay = el('button', 'wide', 'Replay the crafting guides');
+    replay.addEventListener('click', () => {
+      this.g.tutorials.reset();
+      replay.textContent = 'Done \u2014 each kind of work will show its guide again';
+    });
     this.frame('help', 'Survival guide', `
       <h3>Controls</h3>
       <table class="keys">
@@ -861,5 +872,6 @@ export class UI {
         <li>Hunt deer and boar (careful — boars fight back), <b>butcher</b> them with a knife for meat and hides, and build a <b>bed</b> to set your home.</li>
       </ol>
       <p>Watch your <b>food</b> and <b>water</b>: drink from lakes (aim at water), and eat cooked food — higher QL food is more nourishing. Your game saves automatically.</p>`);
+    this.windows.get('help')!.querySelector('.window-body')!.appendChild(replay);
   }
 }

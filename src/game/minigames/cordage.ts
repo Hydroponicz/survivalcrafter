@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { benchMesh, clamp01, Minigame, type Meter, type MgInput } from './core';
+import type { Gesture } from './tutorials';
 
 // Two-ply cordage by reverse wrapping, the way it's really done by hand:
 // twist the upper strand tight, lay it over the lower one (the strands swap
@@ -220,19 +221,22 @@ export class CordageGame extends Minigame {
     this.buildLoose();
   }
 
-  /** A floating arrow by the strand's end saying what to do. */
-  hint(): { x: number; y: number; text: string } | null {
+  /** A coaching label by the strand's end saying what to do right now. */
+  hint(): { x: number; y: number; text: string; gesture?: Gesture } | null {
     const x = this.workX() + 0.34;
     if (this.phase === 'twist') {
       const p = this.toScreen(new THREE.Vector3(x, AXIS_Y + SPREAD, 0));
-      return { x: p.x + 20, y: p.y - 10, text: 'drag ➡ to twist' };
+      const at = { x: p.x + 20, y: p.y - 10 };
+      if (this.kinked) return { ...at, text: 'too tight: drag left to ease it', gesture: 'leftright' };
+      if (this.twist >= this.band[0] && this.twist <= this.band[1]) return { ...at, text: 'in the green: let go', gesture: 'release' };
+      return { ...at, text: 'hold and drag right to twist', gesture: 'right' };
     }
     if (this.phase === 'cross') {
       const p = this.toScreen(new THREE.Vector3(x, AXIS_Y + SPREAD * (1 - 2 * this.cross), 0.03));
-      return { x: p.x + 20, y: p.y, text: 'drag ⬇ to lay over' };
+      return { x: p.x + 20, y: p.y, text: 'hold and drag down to lay it over', gesture: 'down' };
     }
     const p = this.toScreen(this.bundleCentre);
-    return { x: p.x - 30, y: p.y + 30, text: 'click to splice' };
+    return { x: p.x - 30, y: p.y + 30, text: 'click the bundle to splice', gesture: 'click' };
   }
 
   meters(): Meter[] {

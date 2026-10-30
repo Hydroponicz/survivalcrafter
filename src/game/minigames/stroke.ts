@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { benchMesh, box, clamp01, cyl, fireMesh, logMesh, Minigame, type Meter, type MgInput } from './core';
+import type { Gesture } from './tutorials';
 
 /**
  * Saw a log into planks. Hold the left button and move the mouse up and down
@@ -50,6 +51,12 @@ export class SawGame extends Minigame {
 
   private placeGuide() {
     this.guide.position.set(this.cuts[this.cut], this.logY + this.R + 0.004, 0);
+  }
+
+  hint(): { x: number; y: number; text: string; gesture?: Gesture } | null {
+    const p = this.toScreen(this.saw.position);
+    if (this.stuck) return { x: p.x + 40, y: p.y - 40, text: 'it\u2019s binding: let go, then ease back in', gesture: 'release' };
+    return { x: p.x + 40, y: p.y - 40, text: 'hold and move up/down to saw; stay on the red line', gesture: 'updown' };
   }
 
   update(dt: number, i: MgInput) {
@@ -143,6 +150,11 @@ export class BowDrillGame extends Minigame {
     this.look([0.2, 0.7, 0.8], [0, 0.12, 0]);
   }
 
+  hint(): { x: number; y: number; text: string; gesture?: Gesture } | null {
+    const p = this.toScreen(this.bow.position);
+    return { x: p.x + 40, y: p.y - 50, text: 'hold and saw left/right in a steady rhythm', gesture: 'leftright' };
+  }
+
   update(dt: number, i: MgInput) {
     this.heat = Math.max(0, this.heat - dt * 0.09);
     if (i.down && i.dx !== 0) {
@@ -224,6 +236,16 @@ export class BellowsGame extends Minigame {
     this.bellows.userData = { top, leather };
     this.scene.add(this.bellows);
     this.look([0.55, 0.85, 1.25], [0.2, 0.05, 0]);
+  }
+
+  hint(): { x: number; y: number; text: string; gesture?: Gesture } | null {
+    const p = this.toScreen(this.bellows.position);
+    const at = { x: p.x - 60, y: p.y - 70 };
+    if (this.heat > this.band[1]) return { ...at, text: 'too hot: ease off and let it cool', gesture: 'wait' };
+    if (this.heat < this.band[0]) return this.squeeze > 0.9
+      ? { ...at, text: 'let the bellows refill: move up', gesture: 'up' }
+      : { ...at, text: 'hold and pull down to pump', gesture: 'down' };
+    return { ...at, text: 'in the green: keep it there', gesture: 'wait' };
   }
 
   update(dt: number, i: MgInput) {

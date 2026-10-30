@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { benchMesh, box, clamp01, cyl, fireMesh, logMesh, Minigame, ringMesh, type Meter, type MgInput } from './core';
+import type { Gesture } from './tutorials';
 
 /**
  * Carve along a line: hold the left button and draw the knife from left to
@@ -54,6 +55,13 @@ export class CarveGame extends Minigame {
     const k = Math.max(0, Math.min(39.999, ((x + 0.45) / 0.9) * 40));
     const a = this.path[Math.floor(k)], b = this.path[Math.floor(k) + 1];
     return a.z + (b.z - a.z) * (k - Math.floor(k));
+  }
+
+  hint(): { x: number; y: number; text: string; gesture?: Gesture } | null {
+    const k = Math.min(0.98, this.reached + 0.05);
+    const x = -0.45 + k * 0.9;
+    const p = this.toScreen(new THREE.Vector3(x, this.topY, this.pathZ(x)));
+    return { x: p.x + 30, y: p.y - 50, text: 'hold and draw the knife along the line', gesture: 'right' };
   }
 
   update(dt: number, i: MgInput) {
@@ -145,6 +153,15 @@ export class HeatGame extends Minigame {
   private heat() {
     // Hotter the lower you hold it; very low is fierce.
     return Math.max(0, 1.6 - this.height * 2.2);
+  }
+
+  hint(): { x: number; y: number; text: string; gesture?: Gesture } | null {
+    const p = this.toScreen(this.spit.position);
+    const at = { x: p.x + 90, y: p.y - 30 };
+    const band = 0.12 + 0.12 * this.ease;
+    if (this.doneness >= 1 - band) return { ...at, text: 'done: click to take it off!', gesture: 'click' };
+    if (this.heat() > 1.05) return { ...at, text: 'too close: move up', gesture: 'up' };
+    return { ...at, text: 'move up/down over the flame; wait for the green', gesture: 'updown' };
   }
 
   update(dt: number, i: MgInput) {
@@ -240,6 +257,13 @@ export class PlaceGame extends Minigame {
     this.look([0, 0.9, 1.1], [0, 0.2, 0]);
   }
 
+  hint(): { x: number; y: number; text: string; gesture?: Gesture } | null {
+    const s = this.slots[this.k];
+    if (!s) return null;
+    const p = this.toScreen(s);
+    return { x: p.x + 60, y: p.y - 40, text: 'line it up with the glowing slot, then click', gesture: 'click' };
+  }
+
   update(dt: number, i: MgInput) {
     if (this.dropping) {
       const d = this.dropping;
@@ -318,6 +342,11 @@ export class CenterGame extends Minigame {
       pts.push(new THREE.Vector2(Math.max(0.005, lump * (1 - t) + jar * t), y));
     }
     return new THREE.LatheGeometry(pts, 24);
+  }
+
+  hint(): { x: number; y: number; text: string; gesture?: Gesture } | null {
+    const p = this.toScreen(new THREE.Vector3(0, 0.2, 0));
+    return { x: p.x + 80, y: p.y - 40, text: 'hold to shape; steer against the wobble', gesture: 'hold' };
   }
 
   update(dt: number, i: MgInput) {

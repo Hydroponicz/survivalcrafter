@@ -18,6 +18,7 @@ import type { SwingKind } from './tools';
 import { ViewModel } from './viewmodel';
 import { treeScale } from '../world/treefx';
 import { MinigameSession, minigameVerb, type MinigameSpec } from './minigames';
+import { TutorialProgress, tutorialKey } from './minigames/tutorials';
 import { FORAGE, type ForageCategory } from '../data/forage';
 import { ForageGrowth, Knowledge, noticeOf, populateForage } from './forage';
 import { Input } from './input';
@@ -92,7 +93,9 @@ export class Game {
   private abandoned = false;
 
   /** Hands-on work in progress (a crafting or building minigame). */
-  working: { session: MinigameSession; def: ActionDef; ctx: Ctx } | null = null;
+  working: { session: MinigameSession; def: ActionDef; ctx: Ctx; key: string } | null = null;
+  /** How many times you've done each kind of hands-on work (for first-time guides). */
+  readonly tutorials = new TutorialProgress();
   /** Windows to reopen once the work is done. */
   private reopen: string[] = [];
 
@@ -584,13 +587,17 @@ export class Game {
     const tool = ctx.tool;
     const power = tool ? itemDef(tool.type).toolPower ?? 1 : 1;
     // Skill above the task's difficulty, and a good tool, make the work more forgiving.
-    const ease = Math.max(0.15, Math.min(1, 0.32 + (lvl - diff) / 50 + (power - 0.7) * 0.3 + (tool?.ql ?? 0) / 400));
+    // Your first go at a kind of work is a forgiving practice run with a guide.
+    const key = tutorialKey(spec);
+    const runs = this.tutorials.count(key);
+    const ease = Math.max(0.15, Math.min(1, 0.32 + (lvl - diff) / 50 + (power - 0.7) * 0.3 + (tool?.ql ?? 0) / 400 + (runs === 0 ? 0.3 : 0)));
     if (!this.working && !this.reopen.length) this.reopen = this.ui.closeAllWindows();
     const label = typeof def.label === 'function' ? def.label(ctx) : def.label;
-    const session = new MinigameSession(spec, ease, this.ui.root, (perf, secs) => this.endWork(perf, secs), label);
-    this.working = { session, def, ctx };
+    const session = new MinigameSession(spec, ease, this.ui.root, (perf, secs) => this.endWork(perf, secs), label,
+      { intro: runs === 0, coach: runs < 3 });
+    this.working = { session, def, ctx, key };
     this.lastAction = { def, recipe: ctx.recipe };
-    this.msg(`You set to work (${minigameVerb(spec)}). Right-click to stop.`, 'info');
+    if (runs > 0) this.msg(`You set to work (${minigameVerb(spec)}). Right-click to stop.`, 'info');
   }
 
   private endWork(perf: number | null, seconds: number) {
@@ -602,6 +609,7 @@ export class Game {
       this.queue = [];
       this.repeatBlocked = false;
     } else {
+      this.tutorials.record(w.key);
       this.complete(w.def, w.ctx, Math.max(2, seconds), perf);
     }
     if (!this.working && !this.action && this.reopen.length) {

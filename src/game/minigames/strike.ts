@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { box, clamp01, cyl, logMesh, Minigame, ringMesh, type Meter, type MgInput } from './core';
+import type { Gesture } from './tutorials';
 
 export type StrikeVariant = 'split' | 'knap' | 'forge' | 'nail';
 
@@ -132,6 +133,16 @@ export class StrikeGame extends Minigame {
   private ringScale() {
     // Ring closes from 3.2x to 0.4x the mark over one period.
     return 3.2 - (this.ringT / this.period) * 2.8;
+  }
+
+  hint(): { x: number; y: number; text: string; gesture?: Gesture } | null {
+    const t = this.targets[this.hit];
+    if (!t) return null;
+    const p = this.toScreen(t);
+    const close = Math.abs(this.ringScale() - 1) < 0.35;
+    return close
+      ? { x: p.x + 50, y: p.y - 20, text: 'NOW: click!', gesture: 'click' }
+      : { x: p.x + 50, y: p.y - 20, text: 'aim at the yellow mark, wait for the ring', gesture: 'hold' };
   }
 
   update(dt: number, i: MgInput) {

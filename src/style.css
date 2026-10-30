@@ -271,3 +271,50 @@ table.keys td:first-child { color: var(--accent); white-space: nowrap; font-fami
   animation: mg-hint-pulse 1s ease-in-out infinite alternate;
 }
 @keyframes mg-hint-pulse { from { opacity: 0.65; } to { opacity: 1; } }
+
+/* ---------- first-time guides */
+.mg-intro {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(560px, 92vw); z-index: 25;
+  background: var(--panel); border: 1px solid var(--accent); border-radius: 10px; padding: 18px 22px;
+  box-shadow: 0 12px 50px rgba(0,0,0,0.7); color: var(--ink); pointer-events: none;
+}
+.mg-intro-kicker { color: var(--skill); font-size: 12px; text-transform: uppercase; letter-spacing: 1px; }
+.mg-intro h2 { margin: 2px 0 6px; color: var(--accent); font-size: 24px; }
+.mg-intro-what { margin: 0 0 10px; color: #e2d8c2; line-height: 1.4; }
+.mg-intro ol { list-style: none; padding: 0; margin: 0 0 10px; counter-reset: step; }
+.mg-intro li { display: flex; align-items: center; gap: 12px; padding: 7px 0; border-top: 1px solid rgba(255,255,255,0.07); counter-increment: step; line-height: 1.35; }
+.mg-intro li::before { content: counter(step); color: var(--accent); font-weight: bold; width: 14px; }
+.mg-intro-quality { margin: 6px 0; color: #e2d8c2; font-size: 13px; }
+.mg-intro-practice { margin: 4px 0 12px; color: var(--good); font-size: 13px; }
+.mg-intro-go { text-align: center; color: var(--muted); font-size: 14px; animation: mg-hint-pulse 1s ease-in-out infinite alternate; }
+.mg-intro-go b { color: var(--accent); }
+.mg-hint { display: none; align-items: center; gap: 14px; padding: 4px 10px 4px 12px; }
+.mg-hint .mg-mouse { margin: 0 2px; }
+.craft-intro { background: rgba(232, 181, 98, 0.08); border: 1px solid rgba(232, 181, 98, 0.3); border-radius: 6px; padding: 8px 10px; margin: 4px 0 10px; font-size: 12px; color: #e2d8c2; line-height: 1.4; }
+.craft-intro ul { margin: 4px 0 0; padding-left: 18px; }
+
+/* Animated mouse demonstrating a gesture. */
+.mg-mouse {
+  position: relative; display: inline-block; flex: none; width: 18px; height: 26px; border: 2px solid var(--ink);
+  border-radius: 9px; box-sizing: border-box; animation-duration: 1.2s; animation-iteration-count: infinite; animation-timing-function: ease-in-out;
+}
+.mg-mouse::after { content: ''; position: absolute; left: 50%; top: 0; bottom: 55%; width: 2px; margin-left: -1px; background: var(--ink); }
+.mg-mouse-btn { position: absolute; left: 0; top: 0; width: 50%; height: 45%; border-radius: 7px 0 0 0; background: transparent; }
+.mg-mouse.held .mg-mouse-btn { background: var(--accent); }
+.mg-mouse.g-click .mg-mouse-btn { animation: mg-click 0.9s steps(1) infinite; }
+.mg-mouse.g-right { animation-name: mg-right; }
+.mg-mouse.g-down { animation-name: mg-down; }
+.mg-mouse.g-up { animation-name: mg-up; }
+.mg-mouse.g-updown { animation-name: mg-updown; }
+.mg-mouse.g-leftright { animation-name: mg-leftright; }
+.mg-mouse.g-circle { animation-name: mg-circle; animation-timing-function: linear; }
+.mg-mouse.g-release .mg-mouse-btn { animation: mg-release 1.2s steps(1) infinite; }
+.mg-mouse.g-wait { opacity: 0.7; }
+@keyframes mg-right { 0% { transform: translateX(-6px); } 70% { transform: translateX(10px); } 100% { transform: translateX(-6px); } }
+@keyframes mg-down { 0% { transform: translateY(-6px); } 70% { transform: translateY(8px); } 100% { transform: translateY(-6px); } }
+@keyframes mg-up { 0% { transform: translateY(8px); } 70% { transform: translateY(-6px); } 100% { transform: translateY(8px); } }
+@keyframes mg-updown { 0%, 100% { transform: translateY(-7px); } 50% { transform: translateY(7px); } }
+@keyframes mg-leftright { 0%, 100% { transform: translateX(-8px); } 50% { transform: translateX(8px); } }
+@keyframes mg-circle { from { transform: rotate(0deg) translateX(7px) rotate(0deg); } to { transform: rotate(360deg) translateX(7px) rotate(-360deg); } }
+@keyframes mg-click { 0% { background: var(--accent); } 25% { background: transparent; } }
+@keyframes mg-release { 0% { background: var(--accent); } 50% { background: transparent; } }

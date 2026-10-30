@@ -6,6 +6,7 @@ import { CarveGame, CenterGame, HeatGame, PlaceGame, type HeatVariant, type Plac
 import { StrikeGame, type StrikeVariant } from './strike';
 import { BellowsGame, BowDrillGame, SawGame } from './stroke';
 import type { Input } from '../input';
+import { gestureHtml, tutorialFor, type Tutorial } from './tutorials';
 
 export type MinigameSpec =
   | { kind: 'saw'; cuts: number }
@@ -118,8 +119,33 @@ export class MinigameSession {
   private shadeScene = new THREE.Scene();
   private shadeCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 
-  constructor(spec: MinigameSpec, ease: number, root: HTMLElement, private onEnd: (perf: number | null, seconds: number) => void, private label: string) {
+  /** Showing the first-time intro card; the work waits until you click. */
+  private intro: Tutorial | null;
+  private introEl: HTMLElement | null = null;
+  /** Coaching on: always for your first few attempts, otherwise only when you seem stuck. */
+  private coach: boolean;
+  private idle = 0;
+  private lastProgress = 0;
+
+  constructor(spec: MinigameSpec, ease: number, root: HTMLElement, private onEnd: (perf: number | null, seconds: number) => void, private label: string,
+    guide: { intro: boolean; coach: boolean } = { intro: false, coach: false }) {
     this.mg = createMinigame(spec, ease);
+    this.coach = guide.coach;
+    this.intro = guide.intro ? tutorialFor(spec) : null;
+    if (this.intro) {
+      const t = this.intro;
+      this.introEl = document.createElement('div');
+      this.introEl.className = 'mg-intro';
+      this.introEl.innerHTML = `
+        <div class="mg-intro-kicker">New skill</div>
+        <h2>${t.title}</h2>
+        <p class="mg-intro-what">${t.what}</p>
+        <ol>${t.steps.map((st) => `<li>${gestureHtml(st.gesture)}<span>${st.text}</span></li>`).join('')}</ol>
+        <p class="mg-intro-quality"><b>Quality:</b> ${t.quality}</p>
+        <p class="mg-intro-practice">This first attempt is a practice run: the work is extra forgiving.</p>
+        <div class="mg-intro-go"><b>Click</b> to start &nbsp;·&nbsp; right-click to cancel</div>`;
+      root.appendChild(this.introEl);
+    }
     this.shade = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.MeshBasicMaterial({ color: 0x0b0a08, transparent: true, opacity: 0.66, depthTest: false }));
     this.shade.position.z = -0.5; // inside the ortho camera's 0..1 depth range
     this.shadeScene.add(this.shade);
@@ -128,6 +154,7 @@ export class MinigameSession {
     root.appendChild(this.panel);
     this.pointer = document.createElement('div');
     this.pointer.className = 'ui-cursor';
+    this.pointer.style.display = 'none';
     root.appendChild(this.pointer);
     this.hintEl = document.createElement('div');
     this.hintEl.className = 'mg-hint';
@@ -139,6 +166,18 @@ export class MinigameSession {
     if (this.ended) return;
     const clicks = input.takeClicks();
     if (clicks.includes(2)) { this.end(null); return; }
+    if (this.intro) {
+      // Read the card first; the work starts when you click.
+      input.mouseDX = input.mouseDY = input.wheel = 0;
+      if (clicks.includes(0)) {
+        this.intro = null;
+        this.introEl?.remove();
+        this.introEl = null;
+        this.wasDown = true; // ignore the button still being held from that click
+      }
+      this.renderPanel();
+      return;
+    }
     this.elapsed += dt;
     const down = input.held.has(0);
     this.px = Math.max(0, Math.min(window.innerWidth - 1, this.px + input.mouseDX));
@@ -151,6 +190,9 @@ export class MinigameSession {
     };
     this.wasDown = down;
     input.mouseDX = input.mouseDY = input.wheel = 0;
+    // Stuck for a while? Bring the coaching back.
+    if (Math.abs(this.mg.progress - this.lastProgress) > 1e-3) { this.idle = 0; this.lastProgress = this.mg.progress; }
+    else this.idle += dt;
     if (this.endDelay >= 0) {
       // Let the last moment of the job show before returning to the world.
       this.mg.tick(dt, { ...i, down: false, pressed: false, dx: 0, dy: 0 });
@@ -175,6 +217,7 @@ export class MinigameSession {
     this.panel.remove();
     this.pointer.remove();
     this.hintEl.remove();
+    this.introEl?.remove();
     this.mg.dispose();
     this.onEnd(perf, this.elapsed);
   }
@@ -206,11 +249,13 @@ export class MinigameSession {
       ${meters}
       <div class="mg-foot"><span>Work: <b>${grade}</b></span><span>Right-click to stop</span></div>
       ${fb}`;
-    const h = m.hint();
-    this.hintEl.style.display = h ? 'block' : 'none';
+    this.panel.style.visibility = this.intro ? 'hidden' : 'visible';
+    const h = !this.intro && (this.coach || this.idle > 5) ? m.hint() : null;
+    this.hintEl.style.display = h ? 'flex' : 'none';
     if (h) {
-      this.hintEl.textContent = h.text;
-      this.hintEl.style.transform = `translate(${h.x}px, ${h.y}px)`;
+      const html = `${h.gesture ? gestureHtml(h.gesture) : ''}<span>${h.text}</span>`;
+      if (this.hintEl.innerHTML !== html) this.hintEl.innerHTML = html;
+      this.hintEl.style.transform = `translate(${Math.round(h.x)}px, ${Math.round(h.y)}px)`;
     }
   }
 }

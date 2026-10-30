@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { Gesture } from './tutorials';
 
 // Hands-on crafting, in the spirit of Schedule 1: the view closes in on the
 // workstation and you do the work yourself with the mouse. Each minigame is a
@@ -63,7 +64,7 @@ export abstract class Minigame {
   abstract update(dt: number, i: MgInput): void;
 
   /** A short label floating by the work, saying what to do next. */
-  hint(): { x: number; y: number; text: string } | null {
+  hint(): { x: number; y: number; text: string; gesture?: Gesture } | null {
     return null;
   }
 

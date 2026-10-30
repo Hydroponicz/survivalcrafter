@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { benchMesh, clamp01, cyl, Minigame, ringMesh, type Meter, type MgInput } from './core';
+import type { Gesture } from './tutorials';
 
 export type CrankVariant = 'grind' | 'stir' | 'pound';
 
@@ -68,6 +69,11 @@ export class CrankGame extends Minigame {
     if (this.product && variant === 'grind') this.scene.add(this.product);
     this.scene.add(this.spin, guide);
     this.look([0, 0.95, 0.9], [0, 0.12, 0]);
+  }
+
+  hint(): { x: number; y: number; text: string; gesture?: Gesture } | null {
+    const p = this.toScreen(this.centre);
+    return { x: p.x + 70, y: p.y - 60, text: 'hold and circle around at a steady pace', gesture: 'circle' };
   }
 
   update(dt: number, i: MgInput) {
