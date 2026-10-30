@@ -3,6 +3,7 @@ import { hash2, Simplex } from './noise';
 import { erode } from './erosion';
 import { hydrology } from './hydrology';
 import { climate, SNOW_TEMP, tempAt, zoneOf, type Zone } from './climate';
+import { Rock, Strata } from './geology';
 
 // Voxel terrain. Density lives on a 1 m grid of points (0..255, solid at >= 128)
 // and is meshed with Surface Nets, so the ground is smooth like Enshrouded but
@@ -22,15 +23,21 @@ const NCX = Math.ceil(WORLD_SIZE / CH);
 const NCY = Math.ceil((Y_MAX - Y_MIN) / CH);
 const NCZ = Math.ceil(WORLD_SIZE / CH);
 
-export enum Mat { Air = 0, Grass = 1, Dirt = 2, Sand = 3, Clay = 4, Rock = 5, Iron = 6, Field = 7 }
+export enum Mat { Air = 0, Grass = 1, Dirt = 2, Sand = 3, Clay = 4, Rock = 5, Iron = 6, Field = 7, Sandstone = 8, Shale = 9, Gravel = 10 }
 
 export const MAT_NAMES: Record<Mat, string> = {
   [Mat.Air]: 'Air', [Mat.Grass]: 'Grass', [Mat.Dirt]: 'Dirt', [Mat.Sand]: 'Sand', [Mat.Clay]: 'Clay',
-  [Mat.Rock]: 'Rock', [Mat.Iron]: 'Iron vein', [Mat.Field]: 'Field',
+  [Mat.Rock]: 'Granite', [Mat.Iron]: 'Ironstone', [Mat.Field]: 'Field',
+  [Mat.Sandstone]: 'Sandstone', [Mat.Shale]: 'Shale', [Mat.Gravel]: 'Gravel',
 };
 
+/** What each kind of bedrock is as a terrain material. */
+const ROCK_MAT: Record<Rock, Mat> = { [Rock.Granite]: Mat.Rock, [Rock.Sandstone]: Mat.Sandstone, [Rock.Shale]: Mat.Shale, [Rock.Ironstone]: Mat.Iron };
+
 /** Materials a shovel can move. Rock and ore need a pickaxe. */
-export const isSoft = (m: Mat) => m === Mat.Grass || m === Mat.Dirt || m === Mat.Sand || m === Mat.Clay || m === Mat.Field;
+export const isSoft = (m: Mat) => m === Mat.Grass || m === Mat.Dirt || m === Mat.Sand || m === Mat.Clay || m === Mat.Field || m === Mat.Gravel;
+/** Bedrock of any kind (needs a pickaxe). */
+export const isRock = (m: Mat) => m === Mat.Rock || m === Mat.Iron || m === Mat.Sandstone || m === Mat.Shale;
 
 const SRGB: Record<Mat, [number, number, number]> = {
   [Mat.Air]: [1, 0, 1],
@@ -41,6 +48,9 @@ const SRGB: Record<Mat, [number, number, number]> = {
   [Mat.Rock]: [0.52, 0.51, 0.49],
   [Mat.Iron]: [0.55, 0.36, 0.26],
   [Mat.Field]: [0.33, 0.23, 0.15],
+  [Mat.Sandstone]: [0.6, 0.54, 0.45],
+  [Mat.Shale]: [0.42, 0.42, 0.44],
+  [Mat.Gravel]: [0.6, 0.57, 0.52],
 };
 const lin = (c: [number, number, number]) => c.map((v) => Math.pow(v, 2.2));
 /** Grass in a dry spell, at its lushest, and up in the cold. */
@@ -350,47 +360,62 @@ export class Terrain {
     for (let i = 0; i < this.moist.length; i++) if (hyd.bank[i]) this.moist[i] = Math.min(1, this.moist[i] + 0.2);
     for (let i = 0; i < hyd.kind.length; i++) this.lake[i] = hyd.kind[i] === 2 ? 1 : 0;
     const hAt = (x: number, z: number) => H[Math.max(0, Math.min(PZ - 1, z)) * PX + Math.max(0, Math.min(PX - 1, x))];
+    const strata = new Strata(this.seed);
+    const slopeAt = (x: number, z: number) => Math.max(Math.abs(hAt(x + 1, z) - hAt(x - 1, z)), Math.abs(hAt(x, z + 1) - hAt(x, z - 1))) / 2;
+    const SL = new Float32Array(PX * PZ);
+    for (let z = 0; z < PZ; z++) for (let x = 0; x < PX; x++) SL[z * PX + x] = slopeAt(x, z);
     for (let z = 0; z < PZ; z++) {
       for (let x = 0; x < PX; x++) {
         const h = hAt(x, z);
         const i2 = z * PX + x;
-        const slope = Math.max(Math.abs(hAt(x + 1, z) - hAt(x - 1, z)), Math.abs(hAt(x, z + 1) - hAt(x, z - 1))) / 2;
+        const slope = SL[i2];
+        // Ridges shed soil and hollows collect it.
+        const hollow = (hAt(x + 3, z) + hAt(x - 3, z) + hAt(x, z + 3) + hAt(x, z - 3)) / 4 - h;
+        // Below a cliff, broken rock piles up as scree.
+        let cliffAbove = false;
+        for (let dz = -3; dz <= 3 && !cliffAbove; dz++) for (let dx = -3; dx <= 3; dx++) {
+          const j = Math.max(0, Math.min(PZ - 1, z + dz)) * PX + Math.max(0, Math.min(PX - 1, x + dx));
+          if (SL[j] > 1.2 && H[j] > h + 1.5) { cliffAbove = true; break; }
+        }
         const dep = deposit[i2];
         // How much water drains through here (log scale): gullies, then streams, then valley floors.
         const wet = Math.log1p(flow[i2]);
         // Soil is thick where sediment settled and thin where water stripped it.
         let soil = 1.5 + (n3.fbm(x * 0.03, z * 0.03, 2) + 1) * 1.2 + Math.max(0, dep) * 1.6 + Math.min(0, dep) * 0.8;
+        soil += Math.max(-1.5, Math.min(2, hollow * 1.2));
         if (h > 18) soil *= Math.max(0, 1 - (h - 18) / 6);
         if (slope > 1.1) soil = 0;
         else if (slope > 0.75) soil *= (1.1 - slope) / 0.35;
         let top: Mat = Mat.Grass;
         const wl = hyd.water[i2];
         if (!Number.isNaN(wl) && h < wl) {
-          // Lake beds are silty clay; river beds are washed sand and grit.
-          top = this.lake[i2] ? Mat.Clay : Mat.Sand;
+          // Lake beds are silty clay; rivers wash their beds to sand, and to gravel where they run strong or steep.
+          top = this.lake[i2] ? Mat.Clay : hyd.catchment[i2] > 1500 || slope > 0.35 ? Mat.Gravel : Mat.Sand;
           soil = Math.max(soil, 1.2);
         } else if (hyd.bank[i2] && slope < 0.9 && n2.noise(x * 0.15, z * 0.15) > 0.05) {
           // Clay along the banks: where you dig for pottery.
           top = Mat.Clay;
           soil = Math.max(soil, 1.2);
         } else if (soil < 0.4) top = Mat.Rock;
+        else if (cliffAbove && slope > 0.35 && slope < 1.1 && h > 1.5) top = Mat.Gravel;
         else if (h < 1.2) top = n2.noise(x * 0.06, z * 0.06) > 0.35 && h > -2 ? Mat.Clay : Mat.Sand;
         // Fine silt settles along well-watered valley floors: that's where clay is.
         else if (h < 8 && wet > CLAY_FLOW && dep > 0.15 && slope < 0.4) top = Mat.Clay;
         // Coarse sediment fans out where streams leave the hills.
         else if (h < 2.5 && dep > 2) top = Mat.Sand;
         else if (h < 3.5 && n3.noise(x * 0.05 + 40, z * 0.05) > 0.7) top = Mat.Clay;
-        const under = top === Mat.Sand || top === Mat.Clay ? top : Mat.Dirt;
+        const under = top === Mat.Sand || top === Mat.Clay || top === Mat.Gravel ? top : Mat.Dirt;
         for (let yi = 0; yi < PY; yi++) {
           const y = Y_MIN + yi;
           const depth = h - y;
           let dens = Math.max(0, Math.min(1, depth + 0.5));
           if (dens <= 0) break; // everything above is air (arrays start zeroed)
           let m: Mat;
-          if (depth < soil) m = depth < 1 ? top : under;
+          if (depth < soil && top !== Mat.Rock) m = depth < 1 ? top : under;
           else {
-            m = Mat.Rock;
-            if (depth < 14 && ore.noise3(x * 0.11, y * 0.11, z * 0.11) > 0.62) m = Mat.Iron;
+            m = ROCK_MAT[strata.at(x, y, z)];
+            // A few iron veins cut the granite deep down, too.
+            if (m === Mat.Rock && depth > 6 && ore.noise3(x * 0.09, y * 0.09, z * 0.09) > 0.72) m = Mat.Iron;
           }
           // Winding caves through the hills, above sea level so they stay dry.
           if (y > 2 && depth > 4) {

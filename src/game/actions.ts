@@ -3,7 +3,7 @@ import { isIdentified, itemDef, itemName, learnSpecies, makeItem, TOOL_NAMES, ty
 import { RECIPES, STATION_NAMES, type Recipe } from '../data/recipes';
 import { STRUCTURES, totalMaterials, type StructureDef } from '../data/structures';
 import type { SkillId } from '../data/skills';
-import { isSoft, Mat, MAT_NAMES, Y_MIN } from '../world/terrain';
+import { isRock, isSoft, Mat, MAT_NAMES, Y_MIN } from '../world/terrain';
 import {
   ANIMALS, CROP_STAGES, cropKey, type AnimalObj, type BushObj, type Crop, type ForageObj, type PileObj, type StructureObj, type TreeObj, type WorldObj,
 } from '../world/world';
@@ -151,7 +151,7 @@ export const ACTIONS: ActionDef[] = [
       const t = c.g.world.terrain;
       const temp = t.temperatureAt(p.x, p.y, p.z), wet = t.moistureAt(p.x, p.z);
       const feel = `${temp < 0.2 ? 'bitterly cold' : temp < 0.35 ? 'cold' : temp < 0.55 ? 'cool' : 'mild'} and ${wet < 0.3 ? 'dry' : wet < 0.55 ? 'fair' : wet < 0.75 ? 'damp' : 'wet'}`;
-      c.g.msg(`${MAT_NAMES[mat]} at ${p.y.toFixed(1)} m (${p.y >= 0 ? 'above' : 'below'} sea level), ${slope}° slope.${under} ${mat === Mat.Rock || mat === Mat.Iron ? 'Exposed rock' : ZONE_NAMES[t.zoneAt(p.x, p.z)]}, ${feel} here.`, 'info');
+      c.g.msg(`${MAT_NAMES[mat]} at ${p.y.toFixed(1)} m (${p.y >= 0 ? 'above' : 'below'} sea level), ${slope}° slope.${under} ${isRock(mat) ? 'Exposed rock' : ZONE_NAMES[t.zoneAt(p.x, p.z)]}, ${feel} here.`, 'info');
       const b = biome(c)!;
       c.g.msg(`${BIOMES[b].name}: ${BIOMES[b].hint}`, 'info');
       const { crop } = cropAt(c);
@@ -310,7 +310,7 @@ export const ACTIONS: ActionDef[] = [
     id: 'mine', label: 'Mine',
     show: (c) => toolIs(c, 'pickaxe') && isGround(c),
     check: (c) => (isGround(c) && c.t.point.y < Y_MIN + 3 ? 'You have reached bedrock.' : null),
-    time: 7, swing: 'chop', skill: 'mining', difficulty: (c) => (groundMat(c) === Mat.Iron ? 18 : 8),
+    time: 7, swing: 'chop', skill: 'mining', difficulty: (c) => ({ [Mat.Iron]: 18, [Mat.Shale]: 6, [Mat.Sandstone]: 7 } as Partial<Record<Mat, number>>)[groundMat(c) ?? Mat.Rock] ?? 8,
     stamina: 10, toolWear: 0.2,
     run: (c, o) => {
       if (!isGround(c)) return;

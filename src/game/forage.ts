@@ -24,7 +24,10 @@ export function biomeAt(world: World, x: number, y: number, z: number, mat: Mat)
   switch (mat) {
     case Mat.Rock:
     case Mat.Iron:
+    case Mat.Sandstone:
+    case Mat.Shale:
       return 'rocky';
+    case Mat.Gravel:
     case Mat.Sand:
       return 'shore';
     case Mat.Clay:

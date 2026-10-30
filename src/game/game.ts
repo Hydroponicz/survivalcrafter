@@ -4,7 +4,7 @@ import type { Recipe, StationKind } from '../data/recipes';
 import { SKILLS, Skills, type SkillId } from '../data/skills';
 import { pieceBoxes, STRUCTURES, type StructureDef, type V3 } from '../data/structures';
 import { anvilGrade } from './smithy';
-import { Mat, type Volumes } from '../world/terrain';
+import { isRock, Mat, type Volumes } from '../world/terrain';
 import { forageHeight, forageScale } from '../world/forageProps';
 import { buildPieceMesh, WorldView } from '../world/view';
 import {
@@ -43,6 +43,7 @@ export const OLD_SAVES: [string, string][] = [
 const EARTH_ITEMS: Partial<Record<Mat, string>> = {
   [Mat.Grass]: 'dirt', [Mat.Dirt]: 'dirt', [Mat.Field]: 'dirt', [Mat.Sand]: 'sand', [Mat.Clay]: 'clay',
   [Mat.Rock]: 'rock_shard', [Mat.Iron]: 'iron_ore',
+  [Mat.Sandstone]: 'rock_shard', [Mat.Shale]: 'rock_shard', [Mat.Gravel]: 'rock_shard',
 };
 
 export interface RunningAction {
@@ -770,7 +771,7 @@ export class Game {
     this.screeTimer = p.slope === 'sliding' ? 0.12 : 0.28;
     const t = this.world.terrain;
     const mat = t.materialAt(p.pos.x, p.pos.y - 0.1, p.pos.z);
-    const colour = mat === Mat.Rock || mat === Mat.Iron ? 0x8d8a85 : mat === Mat.Sand ? 0xcdbb88 : 0x6e5638;
+    const colour = isRock(mat) || mat === Mat.Gravel ? 0x8d8a85 : mat === Mat.Sand ? 0xcdbb88 : 0x6e5638;
     const n = t.normalAt(p.pos.x, p.pos.y - 0.05, p.pos.z);
     const hl = Math.hypot(n.x, n.z) || 1;
     this.view.treeFx.scree(p.pos.x, p.pos.y, p.pos.z, n.x / hl, n.z / hl, colour, p.slope === 'sliding' ? 3 : 2);
@@ -792,7 +793,7 @@ export class Game {
   /** Feedback for a blow that lands while mining or digging (the work itself resolves at the end). */
   private blowFx(ctx: Ctx, swing: SwingKind) {
     if (ctx.t.kind !== 'terrain') return;
-    const hard = ctx.t.mat === Mat.Rock || ctx.t.mat === Mat.Iron;
+    const hard = isRock(ctx.t.mat);
     if (swing === 'chop' && hard) this.sound.clink();
     else this.sound.glance(0.8);
     this.player.shake(hard ? 0.35 : 0.2);
