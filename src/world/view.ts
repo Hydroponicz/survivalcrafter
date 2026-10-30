@@ -284,7 +284,9 @@ export class WorldView implements WorldListener {
   /** Re-sync heights of everything after terrain changes near a point. */
   refreshNear(x: number, z: number, r = 4) {
     for (const o of this.world.near(x, z, r)) if (o.kind !== 'structure') this.changed(o);
-    for (const [k] of this.cropMeshes) {
+    // Snapshot the keys: cropsChanged re-inserts them, which would make a live
+    // iteration visit the same crop forever.
+    for (const k of [...this.cropMeshes.keys()]) {
       const c = cropPos(k);
       if (Math.abs(c.x - x) < r + 1 && Math.abs(c.z - z) < r + 1) this.cropsChanged(k);
     }
