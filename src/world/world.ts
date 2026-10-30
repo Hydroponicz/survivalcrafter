@@ -259,7 +259,7 @@ export class World {
     while (this.animals.length < n && tries++ < n * 50) {
       const x = 8 + Math.random() * (WORLD_SIZE - 16);
       const z = 8 + Math.random() * (WORLD_SIZE - 16);
-      if (t.heightAt(x, z) < 1) continue;
+      if (t.heightAt(x, z) < t.waterAt(x, z) + 1) continue;
       if (Math.hypot(x - this.spawn.x, z - this.spawn.z) < 30) continue;
       this.spawnAnimal(Math.random() < 0.65 ? 'deer' : 'boar', x, z);
     }

@@ -95,60 +95,6 @@ export class Sound {
     this.glance(vol * 0.8);
   }
 
-  private slideGain: GainNode | null = null;
-  private slideFilter: BiquadFilterNode | null = null;
-
-  /**
-   * Loose gravel shifting underfoot while you slide or scrabble at a slope:
-   * one continuous, soft loop whose volume follows `level` (0..1) smoothly,
-   * rather than a burst per step. Call every frame.
-   */
-  slide(level: number) {
-    if (!this.slideGain && level <= 0) return;
-    const ctx = this.ensure();
-    if (!ctx) {
-      if (this.ctx && this.slideGain) this.slideGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.05);
-      return;
-    }
-    if (!this.slideGain) {
-      // Three seconds of soft, low rumble with pebbles ticking at random
-      // (never evenly spaced, so it doesn't beat like a drum).
-      const len = ctx.sampleRate * 3;
-      const buf = ctx.createBuffer(1, len, ctx.sampleRate);
-      const d = buf.getChannelData(0);
-      let brown = 0;
-      for (let i = 0; i < len; i++) {
-        brown = (brown + (Math.random() * 2 - 1) * 0.02) * 0.995;
-        d[i] = brown * 2.2;
-      }
-      for (let k = 0; k < 45; k++) {
-        const at = Math.floor(Math.random() * (len - 2000));
-        const amp = 0.08 + Math.random() * 0.2;
-        const decay = 300 + Math.random() * 500;
-        for (let j = 0; j < 1500; j++) d[at + j] += (Math.random() * 2 - 1) * amp * Math.exp(-j / decay);
-      }
-      // Fade the loop's ends together so the seam doesn't click.
-      const fade = 2000;
-      for (let i = 0; i < fade; i++) { const w = i / fade; d[i] *= w; d[len - 1 - i] *= w; }
-      const src = ctx.createBufferSource();
-      src.buffer = buf;
-      src.loop = true;
-      this.slideFilter = ctx.createBiquadFilter();
-      this.slideFilter.type = 'lowpass';
-      this.slideFilter.frequency.value = 1200;
-      this.slideGain = ctx.createGain();
-      this.slideGain.gain.value = 0;
-      src.connect(this.slideFilter);
-      this.slideFilter.connect(this.slideGain);
-      this.slideGain.connect(this.master!);
-      src.start();
-    }
-    const t = ctx.currentTime;
-    this.slideGain.gain.setTargetAtTime(0.22 * Math.max(0, Math.min(1, level)), t, level > 0 ? 0.15 : 0.35);
-    // Faster sliding sounds a little brighter.
-    this.slideFilter!.frequency.setTargetAtTime(700 + 900 * level, t, 0.2);
-  }
-
   /** The long groaning creak as a tree starts to topple. */
   creak(vol = 1) {
     const ctx = this.ensure();
@@ -210,7 +156,8 @@ export class Sound {
   }
 
   // ---------- ambience
-  private amb: { wind: GainNode; windFilter: BiquadFilterNode; water: GainNode; out: GainNode } | null = null;
+  private amb: { wind: GainNode; windFilter: BiquadFilterNode; water: GainNode; bands: BiquadFilterNode[]; out: GainNode } | null = null;
+  private babble = 0;
   private gustPhase = Math.random() * 100;
   private nextBird = 0;
   private nextCricket = 0;
@@ -257,20 +204,21 @@ export class Sound {
       wind.gain.value = 0;
       windSrc.connect(windFilter); windFilter.connect(wind); wind.connect(out);
       windSrc.start();
-      // Babbling water: two bands of noise, gently fluttering.
+      // Running water: narrow bands of noise whose pitch wanders at random,
+      // which the ear hears as bubbling rather than a steady hiss.
       const waterSrc = this.loopNoise(ctx, 3, false);
-      const b1 = ctx.createBiquadFilter(); b1.type = 'bandpass'; b1.frequency.value = 900; b1.Q.value = 0.8;
-      const b2 = ctx.createBiquadFilter(); b2.type = 'bandpass'; b2.frequency.value = 2600; b2.Q.value = 1.2;
       const water = ctx.createGain();
       water.gain.value = 0;
-      const flutter = ctx.createOscillator(); flutter.frequency.value = 6.3;
-      const fg = ctx.createGain(); fg.gain.value = 0.25;
-      flutter.connect(fg);
-      const wmix = ctx.createGain(); wmix.gain.value = 0.7;
-      fg.connect(wmix.gain);
-      waterSrc.connect(b1); waterSrc.connect(b2); b1.connect(wmix); b2.connect(wmix); wmix.connect(water); water.connect(out);
-      waterSrc.start(); flutter.start();
-      this.amb = { wind, windFilter, water, out };
+      const soften = ctx.createBiquadFilter(); soften.type = 'lowpass'; soften.frequency.value = 2200;
+      const bands: BiquadFilterNode[] = [];
+      for (const f of [500, 900, 1500]) {
+        const b = ctx.createBiquadFilter(); b.type = 'bandpass'; b.frequency.value = f; b.Q.value = 6;
+        waterSrc.connect(b); b.connect(soften);
+        bands.push(b);
+      }
+      soften.connect(water); water.connect(out);
+      waterSrc.start();
+      this.amb = { wind, windFilter, water, bands, out };
     }
     const t = ctx.currentTime;
     const a = this.amb;
@@ -278,9 +226,15 @@ export class Sound {
     // Wind comes in gusts: two slow waves.
     this.gustPhase += dt;
     const gust = 0.55 + 0.3 * Math.sin(this.gustPhase * 0.31) + 0.15 * Math.sin(this.gustPhase * 0.83 + 1.7);
-    a.wind.gain.setTargetAtTime(0.35 * lv.wind * gust, t, 0.4);
+    a.wind.gain.setTargetAtTime(0.2 * lv.wind * gust, t, 0.4);
     a.windFilter.frequency.setTargetAtTime(280 + 700 * lv.wind * gust, t, 0.4);
-    a.water.gain.setTargetAtTime(0.16 * lv.water, t, 0.5);
+    a.water.gain.setTargetAtTime(0.22 * lv.water, t, 0.5);
+    // Bubbles: every few hundredths of a second each band jumps to a new pitch.
+    this.babble -= dt;
+    if (lv.water > 0.01 && this.babble <= 0) {
+      this.babble = 0.03 + Math.random() * 0.05;
+      a.bands.forEach((b, k) => b.frequency.setTargetAtTime([400, 800, 1300][k] * (0.7 + Math.random() * 0.9), t, 0.015));
+    }
 
     const now = performance.now() / 1000;
     if (lv.birds > 0.02 && now > this.nextBird) {

@@ -773,10 +773,9 @@ export class Game {
   /** Pebbles, dust and scraping when you slide or can't get up a slope, plus a one-time tip. */
   private slopeFeedback(dt: number) {
     const p = this.player;
-    // Gravel underfoot: a smooth continuous slide, louder the faster you go.
-    const slideLevel = p.slope === 'sliding' ? 0.5 + 0.5 * Math.min(1, p.slide.length() / 6) : p.slope === 'blocked' ? 0.25 : 0;
-    this.sound.slide(slideLevel);
-    if (p.slope !== 'blocked' && p.slope !== 'sliding') { this.screeTimer = 0; return; }
+    // Only while actually slipping, or pushing into a slope you can't climb (not standing on one).
+    const active = (p.slope === 'sliding' && p.slide.length() > 0.4) || (p.slope === 'blocked' && p.moving);
+    if (!active) { this.screeTimer = 0; return; }
     this.screeTimer -= dt;
     if (this.screeTimer > 0) return;
     this.screeTimer = p.slope === 'sliding' ? 0.12 : 0.28;
@@ -932,8 +931,22 @@ export class Game {
         const nx = a.x + a.dirX * a.speed * dt;
         const nz = a.z + a.dirZ * a.speed * dt;
         const h = t.heightAt(nx, nz);
-        if (h < w.terrain.waterAt(nx, nz) + 0.2 || nx < 2 || nz < 2 || nx > maxXZ || nz > maxXZ || w.blockedAt(nx, h + 0.6, nz) ||
-          Math.abs(h - t.heightAt(a.x, a.z)) > a.speed * dt * 1.5) {
+        // Keep out of water, but one that's already in (an old save) may wade out.
+        const inWater = t.heightAt(a.x, a.z) < t.waterAt(a.x, a.z) + 0.2;
+        if (inWater && a.state !== 'attack') {
+          // Head for the nearest dry ground.
+          let best = Infinity;
+          for (let k = 0; k < 16; k++) {
+            const ang = (k / 16) * Math.PI * 2, cx = Math.cos(ang), cz = Math.sin(ang);
+            for (let r = 2; r < 40 && r < best; r += 2) {
+              const x = a.x + cx * r, z = a.z + cz * r;
+              if (t.heightAt(x, z) >= t.waterAt(x, z) + 0.3) { best = r; a.dirX = cx; a.dirZ = cz; break; }
+            }
+          }
+          a.state = 'wander'; a.timer = Math.max(a.timer, 1); a.speed = 1.1;
+        }
+        if ((!inWater && h < t.waterAt(nx, nz) + 0.2) || nx < 2 || nz < 2 || nx > maxXZ || nz > maxXZ || w.blockedAt(nx, h + 0.6, nz) ||
+          (!inWater && Math.abs(h - t.heightAt(a.x, a.z)) > a.speed * dt * 1.5)) {
           // turn away from water or walls
           const ang = Math.atan2(a.dirZ, a.dirX) + Math.PI * (0.5 + Math.random());
           a.dirX = Math.cos(ang); a.dirZ = Math.sin(ang);
@@ -954,7 +967,7 @@ export class Game {
       if (w.animals.length < 28) {
         for (let i = 0; i < 20; i++) {
           const x = 8 + Math.random() * (t.size - 16), z = 8 + Math.random() * (t.size - 16);
-          if (Math.hypot(x - p.x, z - p.z) < 50 || t.heightAt(x, z) < 1) continue;
+          if (Math.hypot(x - p.x, z - p.z) < 50 || t.heightAt(x, z) < t.waterAt(x, z) + 1) continue;
           w.spawnAnimal(Math.random() < 0.65 ? 'deer' : 'boar', x, z);
           break;
         }
@@ -1273,7 +1286,6 @@ export class Game {
     this.renderDt = dt;
     this.elapsed += dt;
     if (!this.paused) this.update(dt);
-    if (this.paused || this.working) this.sound.slide(0);
     this.render();
     this.input.endFrame();
   }
@@ -1555,7 +1567,7 @@ export class Game {
     for (const o of this.world.near(p.x, p.z, 14)) if (o.kind === 'tree' && o.age > 0.4 && Math.hypot(o.x - p.x, o.z - p.z) < 14) trees++;
     let wd = Infinity;
     for (let dz = -16; dz <= 16; dz += 2) for (let dx = -16; dx <= 16; dx += 2) {
-      if (t.freshWaterAt(p.x + dx, p.z + dz)) wd = Math.min(wd, Math.hypot(dx, dz));
+      if (t.riverAt(p.x + dx, p.z + dz)) wd = Math.min(wd, Math.hypot(dx, dz));
     }
     const water = wd < 16 ? (1 - wd / 16) ** 1.5 : 0;
     const underground = t.heightAt(p.x, p.z) > p.y + 2.5;

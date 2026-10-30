@@ -175,6 +175,12 @@ export class Terrain {
     return Number.isNaN(w) ? WATER_LEVEL : Math.max(WATER_LEVEL, w);
   }
 
+  /** Is there running (river, not lake) water at this column? */
+  riverAt(x: number, z: number): boolean {
+    const i = Math.max(0, Math.min(PZ - 1, Math.round(z))) * PX + Math.max(0, Math.min(PX - 1, Math.round(x)));
+    return !Number.isNaN(this.water[i]) && !this.lake[i];
+  }
+
   /** Is there fresh (river or lake) water at this column? */
   freshWaterAt(x: number, z: number): boolean {
     const ix = Math.max(0, Math.min(PX - 1, Math.round(x))), iz = Math.max(0, Math.min(PZ - 1, Math.round(z)));
