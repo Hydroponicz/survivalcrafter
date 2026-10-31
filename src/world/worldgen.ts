@@ -62,7 +62,9 @@ const smooth = (a: number, b: number, v: number) => { const t = clamp01((v - a) 
 /** The raw land before weathering, anywhere: continents and seas, ranges, hills and plains. */
 export class BaseLand {
   private cont: Simplex; private warp: Simplex; private range: Simplex; private ridge: Simplex; private hill: Simplex; private low: Simplex;
+  private readonly seed: number;
   constructor(seed: number) {
+    this.seed = seed;
     this.cont = new Simplex(seed + 10);
     this.warp = new Simplex(seed + 11);
     this.range = new Simplex(seed + 12);
@@ -74,6 +76,50 @@ export class BaseLand {
   }
 
   private plain: Simplex;
+
+  /**
+   * How much a lake basin lowers ground of height h here (metres). Basins are
+   * hollows in low, gentle country (left by old glaciers and slumped ground),
+   * each filling into a pond or lake up to its rim. Their floors stay well
+   * above the sea (a hollow open to it would just be sea).
+   */
+  lakeDip(x: number, z: number, h: number): number {
+    if (h <= 4) return 0;
+    const land = this.land(x, z);
+    const range = smooth(-0.05, 0.45, this.range.fbm(x / 2400 + 3.1, z / 2400, 2));
+    const calm = smooth(0.45, 0.85, land) * (1 - smooth(0.25, 0.6, range));
+    if (calm <= 0) return 0;
+    return Math.min(this.basin(x, z) * calm, (h - 4) * 0.6);
+  }
+
+  /**
+   * How deep a lake basin dips the land here (metres; 0 outside any). Basins
+   * sit at jittered spots on a ~0.9 km grid (about two in three taken), 50 to
+   * 250 m across in radius, with wandering outlines.
+   */
+  basin(x: number, z: number): number {
+    const C = 900;
+    const cx = Math.floor(x / C), cz = Math.floor(z / C);
+    let dip = 0;
+    for (let oz = -1; oz <= 1; oz++) {
+      for (let ox = -1; ox <= 1; ox++) {
+        const gx = cx + ox, gz = cz + oz;
+        if (hash2(gx, gz, this.seed + 71) > 0.65) continue;
+        const px = (gx + 0.2 + 0.6 * hash2(gx, gz, this.seed + 72)) * C, pz = (gz + 0.2 + 0.6 * hash2(gx, gz, this.seed + 73)) * C;
+        const r = 50 + 200 * hash2(gx, gz, this.seed + 74) ** 1.5;
+        const d = Math.hypot(x - px, z - pz);
+        if (d > r * 1.6) continue;
+        // A ragged outline: the radius wanders with direction and place.
+        const rr = r * (1 + 0.3 * this.cliffs.fbm(x / (r * 0.8) + gx * 3.1, z / (r * 0.8) + gz * 1.7, 2));
+        const t = d / rr;
+        if (t >= 1.25) continue;
+        const depth = 5 + 9 * hash2(gx, gz, this.seed + 75);
+        // Deepest in the middle, shelving gently up to the shore and beyond.
+        dip = Math.max(dip, depth * (t < 1 ? 1 - 0.8 * t * t : 0.2 * (1.25 - t) / 0.25));
+      }
+    }
+    return dip;
+  }
 
   /**
    * How much a place lies in a great lowland plain (0..1): broad, low, gently
@@ -163,6 +209,7 @@ const riverDepth = (km2: number) => Math.min(5, 0.35 + 0.6 * Math.sqrt(km2));
 function layRivers(
   w: number, cell: number, ox: number, oz: number, H: Float32Array, recv: Int32Array, catchment: Float32Array,
   isRiver: (i: number) => boolean, km2: (c: number) => number, sink: number, wander?: (x: number, z: number) => number,
+  lake?: (i: number) => number,
 ): number[] {
   const n = w * w;
   const rivers: number[] = [];
@@ -203,7 +250,9 @@ function layRivers(
     const j = recv[i];
     if (j < 0) continue;
     const [bx, bz] = pos(j, PX, PZ);
-    const sb = isRiver(j) ? S[j] : Math.max(SEA, Math.min(S[i], H[j]));
+    // Into a lake: down to its surface (not its bed). Otherwise down to the ground it runs into.
+    const lj = lake ? lake(j) : NaN;
+    const sb = isRiver(j) ? S[j] : Math.max(SEA, Math.min(S[i], Number.isNaN(lj) ? H[j] : lj));
     const a = km2(catchment[i]);
     out.push(PX[i], PZ[i], bx, bz, S[i], sb, riverHalfWidth(a), riverDepth(a));
   }
@@ -314,6 +363,8 @@ export function buildTile(seed: number, tx: number, tz: number, base = new BaseL
     for (let q = 0; q < 8; q++) big.push(R[k + q]);
   }
   const nearBig = new Uint8Array(n);
+  /** Within a big river's valley floor: no lake basins dug there. */
+  const inValley = new Uint8Array(n);
   const riverSurface = new Float32Array(n).fill(NaN);
   const inChannel = new Uint8Array(n);
   const H0 = H.slice();
@@ -344,10 +395,19 @@ export function buildTile(seed: number, tx: number, tz: number, base = new BaseL
         const keep = smooth(full, full + 40, e); // 0: cut to the valley side, 1: the land as it was
         if (H[i] > line) H[i] = line + (H[i] - line) * keep;
         if (d < r + 24) nearBig[i] = 1;
+        if (d < r + 70) inValley[i] = 1;
         if (d < r + 2) inChannel[i] = 1;
         if (d < r - CELL * 0.5 && !(riverSurface[i] <= sf)) riverSurface[i] = sf;
       }
     }
+  }
+  // Lake basins are dug after the weathering (which would silt them up), the
+  // same for every tile, so neighbouring maps agree about them.
+  for (let k = 0; k < n; k++) {
+    const x = ox + (k % TN) * CELL, z = oz + Math.floor(k / TN) * CELL;
+    // Not beside a big river (its valley floor is the river's).
+    const dip = inValley[k] ? 0 : base.lakeDip(x, z, H[k]);
+    if (dip > 0) H[k] -= dip;
   }
   const clim = climate(H, TN, seed, SEA, ox, oz, CELL);
   const dr = drainage(H, TN, SEA, clim.rain, { cell: CELL, streamAt: STREAM_AT * HILL_STREAM, minLake: 8, lakeDepth: 12, noLake: inChannel });
@@ -396,7 +456,8 @@ export function buildTile(seed: number, tx: number, tz: number, base = new BaseL
     for (let step = 0; c >= 0 && !inChannel[c] && !feeds[c] && step < 16; step++, c = dr.recv[c]) feeds[c] = 1;
   }
   const isStream = (i: number) => dr.kind[i] === 1 && (!nearBig[i] || feeds[i] === 1);
-  const small = layRivers(TN, CELL, ox, oz, H, dr.recv, dr.catchment, isStream, (c) => c * CELL * CELL * 1e-6, 0.5);
+  const small = layRivers(TN, CELL, ox, oz, H, dr.recv, dr.catchment, isStream, (c) => c * CELL * CELL * 1e-6, 0.5,
+    undefined, (i) => (dr.kind[i] === 2 ? dr.S[i] : NaN));
   for (let i = 0; i < n; i++) if (dr.kind[i] === 1 && !isStream(i)) { dr.kind[i] = 0; dr.S[i] = NaN; }
   // Wide rivers on the map itself (kind 3), so they show from afar as well.
   for (let i = 0; i < n; i++) {
@@ -555,12 +616,39 @@ class Tile {
   }
 
   private nearLake?: Map<number, number>;
-  /** For each cell near a lake, the nearest cell of it. */
+  /**
+   * For each cell near a lake this tile owns, the nearest cell of it. A lake
+   * reaching across the join between tiles is worked out by both, a little
+   * differently; it belongs to the tile its deepest point lies in, and only
+   * that tile's version is used, so its shore never ends in a straight line
+   * where one tile's say gives out.
+   */
   private findNearLake(): Map<number, number> {
+    const kind = this.d.kind, H = this.d.H, n = kind.length;
+    const owned = new Uint8Array(n), seen = new Uint8Array(n);
+    const x0 = PAD / CELL, x1 = x0 + TILE / CELL;
+    for (let i = 0; i < n; i++) {
+      if (kind[i] !== 2 || seen[i]) continue;
+      const cells: number[] = [i];
+      seen[i] = 1;
+      let deep = i;
+      for (let q = 0; q < cells.length; q++) {
+        const c = cells[q], cx = c % TN, cz = Math.floor(c / TN);
+        if (H[c] < H[deep]) deep = c;
+        for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const x = cx + dx, z = cz + dz;
+          if (x < 0 || z < 0 || x >= TN || z >= TN) continue;
+          const j = z * TN + x;
+          if (kind[j] === 2 && !seen[j]) { seen[j] = 1; cells.push(j); }
+        }
+      }
+      const dx = deep % TN, dz = Math.floor(deep / TN);
+      if (dx >= x0 && dx < x1 && dz >= x0 && dz < x1) for (const c of cells) owned[c] = 1;
+    }
     const near = new Map<number, number>(), dist = new Map<number, number>();
     const R = LAKE_REACH + 1;
-    for (let i = 0; i < this.d.kind.length; i++) {
-      if (this.d.kind[i] !== 2) continue;
+    for (let i = 0; i < n; i++) {
+      if (!owned[i]) continue;
       const ix = i % TN, iz = Math.floor(i / TN);
       for (let dz = -R; dz <= R; dz++) for (let dx = -R; dx <= R; dx++) {
         const x = ix + dx, z = iz + dz;
@@ -725,14 +813,28 @@ export class WorldGen {
    * lies below its surface, so the shore follows the land, not the map grid.
    */
   private lakeSample(x: number, z: number): { mapH: number; depth: number } {
-    let mapH = 0, depth = 0;
-    for (const [t, w] of this.cover(x, z)) {
-      const h = t.height(x, z);
-      mapH += h * w;
-      const [s, d] = t.lake(x, z);
-      if (!Number.isNaN(s)) depth += w * Math.max(0, Math.min(s - h, (LAKE_REACH - d) * 4));
+    let mapH = 0;
+    for (const [t, w] of this.cover(x, z)) mapH += t.height(x, z) * w;
+    // Lakes belong to one tile each; ask this tile and any neighbour whose map
+    // reaches here (a lake can spread up to the map's overlap past its tile).
+    const tx = Math.floor(x / TILE), tz = Math.floor(z / TILE);
+    const fx = x - tx * TILE, fz = z - tz * TILE;
+    let s = NaN, bd = Infinity;
+    for (let oz = -1; oz <= 1; oz++) {
+      if ((oz < 0 && fz > PAD) || (oz > 0 && TILE - fz > PAD)) continue;
+      for (let ox = -1; ox <= 1; ox++) {
+        if ((ox < 0 && fx > PAD) || (ox > 0 && TILE - fx > PAD)) continue;
+        const [ls, d] = this.tile(tx + ox, tz + oz).lake(x, z);
+        if (!Number.isNaN(ls) && d < bd) { bd = d; s = ls; }
+      }
     }
-    return { mapH, depth };
+    if (Number.isNaN(s)) return { mapH, depth: 0 };
+    // Past the lake's own cells it laps only over ground a little below its
+    // surface, never out over a lower hollow or channel beside it.
+    // Where the ground there dips lower, it rises into a low bank that holds
+    // the lake in, rather than the water ending in a wall.
+    if (bd > 0 && s - mapH > 0.6 + 0.4 * bd) return { mapH: s + 0.25 - 0.1 * bd, depth: 0 };
+    return { mapH, depth: Math.max(0, Math.min(s - mapH, (LAKE_REACH - bd) * 4)) };
   }
 
   /** The surface of a lake at a point, or NaN. */

@@ -250,8 +250,11 @@ export class DistantLand {
         id = wpos.length / 3;
         vid.set(key2, id);
         const x = x0 + lx * CELL, z = z0 + lz * CELL, j = (lz + off) * TN + lx + off;
-        wpos.push(x, s - 0.6, z);
-        wdepth.push(s - d.H[j]);
+        // At the lake's edge the sheet dips under the bank, so the land cuts
+        // its shoreline along the lie of the ground, not the map grid.
+        const shore = d.kind[j] !== 2;
+        wpos.push(x, shore ? Math.min(s - 0.6, d.H[j] - 2) : s - 0.6, z);
+        wdepth.push(shore ? 0 : s - d.H[j]);
       }
       return id;
     };
