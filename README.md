@@ -21,8 +21,10 @@ Vercel dashboard, or from the CLI:
 npx vercel --prod
 ```
 
-No server is needed — the world and your character save to the browser's `localStorage` (only the terrain
-chunks you changed are stored; the rest regenerates from the seed).
+No server is needed — the world and your character save to the browser's IndexedDB, which has room for
+hundreds of megabytes. Only what you changed is stored (dug terrain, felled trees, buildings, your
+things); the rest regenerates from the seed. The game saves every minute, when you switch away from the
+tab and when you close it. Saves from older versions in `localStorage` are moved over automatically.
 
 ## Controls
 

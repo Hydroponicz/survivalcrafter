@@ -15,7 +15,7 @@ const cont = document.getElementById('continue') as HTMLButtonElement;
 const newBtn = document.getElementById('new') as HTMLButtonElement;
 const seedInput = document.getElementById('seed') as HTMLInputElement;
 
-if (Game.hasSave()) cont.style.display = '';
+void Game.hasSave().then((has) => { if (has) cont.style.display = ''; });
 try {
   for (const [key, why] of OLD_SAVES) {
     if (!localStorage.getItem(key)) continue;
@@ -51,9 +51,13 @@ function launch(make: () => Game | null) {
   }, 30);
 }
 
-cont.addEventListener('click', () => launch(() => Game.loadSave(canvas)));
-newBtn.addEventListener('click', () => {
-  if (Game.hasSave() && !confirm('Start a new world? Your current save will be overwritten.')) return;
+cont.addEventListener('click', async () => {
+  status.textContent = 'Reading your save…';
+  const data = await Game.readSave();
+  launch(() => Game.loadSave(canvas, data));
+});
+newBtn.addEventListener('click', async () => {
+  if (await Game.hasSave() && !confirm('Start a new world? Your current save will be overwritten.')) return;
   const seed = seedFrom(seedInput.value);
   launch(() => {
     const world = new World(seed);

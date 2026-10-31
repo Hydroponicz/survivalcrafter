@@ -132,7 +132,7 @@ export class UI {
       </div>`);
     this.pauseEl.addEventListener('click', (e) => {
       const act = (e.target as HTMLElement).dataset.act;
-      if (act === 'save') { g.save(); this.log('Game saved.', 'good'); return; }
+      if (act === 'save') { void g.save().then(() => this.log('Game saved.', 'good')); return; }
       if (act === 'unstuck') { g.unstuck(); g.input.lock(); return; }
       if (act === 'quality') {
         g.graphics.nextQuality(); g.applyGraphics();

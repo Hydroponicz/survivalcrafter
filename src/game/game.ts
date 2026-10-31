@@ -11,6 +11,7 @@ import { GroundCover } from '../world/groundcover';
 import { Fireflies } from '../world/fireflies';
 import { DistantLand } from '../world/lod';
 import { GraphicsSettings } from './graphics';
+import { deleteSave, hasSaveAt, migrateSave, readSave, writeSave } from './storage';
 
 /** Within this distance the real trees stand (wild things load about 220 m around you); distant forests take over beyond. */
 const NEAR_TREES = 230;
@@ -213,7 +214,10 @@ export class Game {
       this.camera.updateProjectionMatrix();
       this.renderer.setSize(window.innerWidth, window.innerHeight);
     });
-    window.addEventListener('beforeunload', () => { if (!this.abandoned) this.save(); });
+    // Save when the tab is hidden or closed. Hiding comes first and gives the
+    // save time to finish; closing alone may not wait for it.
+    window.addEventListener('beforeunload', () => { if (!this.abandoned) void this.save(); });
+    document.addEventListener('visibilitychange', () => { if (document.hidden && !this.abandoned) void this.save(); });
   }
 
   // ---------- setup
@@ -1589,7 +1593,8 @@ export class Game {
   }
 
   // ---------- persistence
-  save() {
+  /** Save the game (in the background; resolves once it's safely stored). */
+  async save(): Promise<void> {
     try {
       const p = this.player;
       const data = {
@@ -1608,7 +1613,7 @@ export class Game {
         active: this.activeUid,
         nextUid: getNextUid(),
       };
-      localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+      await writeSave(SAVE_KEY, data);
     } catch (e) {
       console.warn('Save failed', e);
     }
@@ -1684,25 +1689,31 @@ export class Game {
     p.vel.set(0, 0, 0);
   }
 
-  abandon() {
+  async abandon() {
     this.abandoned = true;
-    Game.clearSave();
+    await Game.clearSave();
     location.reload();
   }
 
-  static hasSave(): boolean {
-    try { return !!localStorage.getItem(SAVE_KEY); } catch { return false; }
-  }
-
-  static clearSave() {
-    try { localStorage.removeItem(SAVE_KEY); } catch { /* ignore */ }
-  }
-
-  static loadSave(canvas: HTMLCanvasElement): Game | null {
+  static async hasSave(): Promise<boolean> {
     try {
-      const raw = localStorage.getItem(SAVE_KEY);
-      if (!raw) return null;
-      const data = JSON.parse(raw);
+      await migrateSave(SAVE_KEY);
+      return await hasSaveAt(SAVE_KEY);
+    } catch { return false; }
+  }
+
+  static async clearSave() {
+    try { await deleteSave(SAVE_KEY); } catch { /* ignore */ }
+  }
+
+  /** The stored save, if there is one (read it before building the game: that part isn't async). */
+  static async readSave(): Promise<unknown> {
+    try { return await readSave(SAVE_KEY); } catch (e) { console.warn('Load failed', e); return undefined; }
+  }
+
+  static loadSave(canvas: HTMLCanvasElement, data: any): Game | null {
+    try {
+      if (!data) return null;
       setNextUid(data.nextUid);
       const world = World.load(data.world);
       const g = new Game(canvas, world);
