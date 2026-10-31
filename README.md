@@ -25,6 +25,9 @@ No server is needed — the world and your character save to the browser's Index
 hundreds of megabytes. Only what you changed is stored (dug terrain, felled trees, buildings, your
 things); the rest regenerates from the seed. The game saves every minute, when you switch away from the
 tab and when you close it. Saves from older versions in `localStorage` are moved over automatically.
+The game asks the browser to keep its storage even when the disk runs low. **Export save file** in the
+pause menu downloads your world as a small compressed file (a backup, or a way to move it to another
+computer); **Import save file** (main menu or pause menu) loads one back.
 
 ## Controls
 

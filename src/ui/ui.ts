@@ -126,6 +126,8 @@ export class UI {
           <button data-act="unstuck">Unstuck</button>
           <button data-act="quality">Graphics: ${g.graphics.level.label}</button>
           <button data-act="fps">Frame cap: ${g.graphics.fpsLabel}</button>
+          <button data-act="export">Export save file</button>
+          <button data-act="import">Import save file</button>
           <button data-act="help">Controls &amp; guide</button>
           <button data-act="new" class="danger">Abandon world</button>
         </div>
@@ -145,6 +147,17 @@ export class UI {
         return;
       }
       if (act === 'help') { this.toggle('help'); return; }
+      if (act === 'export') {
+        g.exportSave().then(() => this.log('World exported: check your downloads.', 'good'), (err) => this.log(`Export failed: ${err?.message ?? err}`, 'fail'));
+        return;
+      }
+      if (act === 'import') {
+        pickFile((file) => {
+          if (!confirm('Replace this world with the one in that file? Export this one first if you want to keep it.')) return;
+          g.importAndReload(file).catch((err) => this.log(err?.message ?? String(err), 'fail'));
+        });
+        return;
+      }
       if (act === 'new') {
         if (confirm('Abandon this world and start a new one? Your save will be deleted.')) {
           g.abandon();
@@ -891,4 +904,13 @@ export class UI {
       <p>Watch your <b>food</b> and <b>water</b>: drink from lakes (aim at water), and eat cooked food — higher QL food is more nourishing. Your game saves automatically.</p>`);
     this.windows.get('help')!.querySelector('.window-body')!.appendChild(replay);
   }
+}
+
+/** Ask the player for a save file. */
+export function pickFile(then: (file: File) => void) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.gz,.json,application/json,application/gzip';
+  input.onchange = () => { const f = input.files?.[0]; if (f) then(f); };
+  input.click();
 }

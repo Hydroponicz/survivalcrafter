@@ -74,3 +74,50 @@ export async function migrateSave(key: string): Promise<void> {
     console.warn('Could not move the save to IndexedDB; leaving it where it is', e);
   }
 }
+
+/**
+ * Ask the browser to keep the game's storage even when the disk runs low
+ * (by default site data is "best effort" and can be cleared without
+ * asking). Chrome decides by itself; Firefox may ask the player.
+ */
+export async function keepStorage(): Promise<boolean> {
+  try {
+    if (!navigator.storage?.persist) return false;
+    if (await navigator.storage.persisted()) return true;
+    return await navigator.storage.persist();
+  } catch {
+    return false;
+  }
+}
+
+const FILE_FORMAT = 'survivalcrafter-save';
+
+/** Download a save as a file (gzip-compressed where the browser can). */
+export async function downloadSave(data: unknown, name: string): Promise<void> {
+  const json = JSON.stringify({ format: FILE_FORMAT, exported: new Date().toISOString(), data });
+  let blob = new Blob([json], { type: 'application/json' });
+  let ext = 'json';
+  if (typeof CompressionStream !== 'undefined') {
+    blob = await new Response(blob.stream().pipeThrough(new CompressionStream('gzip'))).blob();
+    ext = 'json.gz';
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${name}.${ext}`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 30000);
+}
+
+/** Read a save file made by `downloadSave` (compressed or not). Throws if it isn't one. */
+export async function readSaveFile(file: File): Promise<unknown> {
+  const head = new Uint8Array(await file.slice(0, 2).arrayBuffer());
+  const gzip = head[0] === 0x1f && head[1] === 0x8b;
+  const text = gzip ? await new Response(file.stream().pipeThrough(new DecompressionStream('gzip'))).text() : await file.text();
+  const obj = JSON.parse(text);
+  if (obj?.format !== FILE_FORMAT || typeof obj.data !== 'object' || !obj.data?.world || !obj.data?.player) {
+    throw new Error('That file is not a Survivalcrafter save.');
+  }
+  return obj.data;
+}

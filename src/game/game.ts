@@ -11,7 +11,7 @@ import { GroundCover } from '../world/groundcover';
 import { Fireflies } from '../world/fireflies';
 import { DistantLand } from '../world/lod';
 import { GraphicsSettings } from './graphics';
-import { deleteSave, hasSaveAt, migrateSave, readSave, writeSave } from './storage';
+import { deleteSave, downloadSave, hasSaveAt, migrateSave, readSave, readSaveFile, writeSave } from './storage';
 
 /** Within this distance the real trees stand (wild things load about 220 m around you); distant forests take over beyond. */
 const NEAR_TREES = 230;
@@ -1687,6 +1687,27 @@ export class Game {
       this.msg('You could not find footing nearby, so you made your way back home.', 'info');
     }
     p.vel.set(0, 0, 0);
+  }
+
+  /** Download this world as a file: a backup, or a way to take it to another computer. */
+  async exportSave() {
+    await this.save();
+    const data = await readSave(SAVE_KEY);
+    const day = new Date().toISOString().slice(0, 10);
+    await downloadSave(data, `survivalcrafter-${this.world.terrain.seed}-${day}`);
+  }
+
+  /** Replace this world with one from a save file, and reload into it. */
+  async importAndReload(file: File) {
+    await Game.importSave(file);
+    this.abandoned = true; // don't save the old world over it on the way out
+    location.reload();
+  }
+
+  /** Store a save file as the save (throws with a message if it isn't one). */
+  static async importSave(file: File) {
+    const data = await readSaveFile(file);
+    await writeSave(SAVE_KEY, data);
   }
 
   async abandon() {

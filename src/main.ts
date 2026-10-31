@@ -5,7 +5,8 @@ import { ACTION_MAP } from './game/actions';
 import { createMinigame } from './game/minigames';
 import { STRUCTURES } from './data/structures';
 import { Game, OLD_SAVES } from './game/game';
-import { UI } from './ui/ui';
+import { pickFile, UI } from './ui/ui';
+import { keepStorage } from './game/storage';
 import { World } from './world/world';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
@@ -13,6 +14,7 @@ const menu = document.getElementById('menu')!;
 const status = document.getElementById('menu-status')!;
 const cont = document.getElementById('continue') as HTMLButtonElement;
 const newBtn = document.getElementById('new') as HTMLButtonElement;
+const importBtn = document.getElementById('import') as HTMLButtonElement;
 const seedInput = document.getElementById('seed') as HTMLInputElement;
 
 void Game.hasSave().then((has) => { if (has) cont.style.display = ''; });
@@ -35,6 +37,8 @@ function seedFrom(text: string): number {
 
 function launch(make: () => Game | null) {
   status.textContent = 'Shaping the land…';
+  // Ask the browser not to clear the save when the disk runs low.
+  void keepStorage();
   // Let the status paint before the heavy generation work.
   setTimeout(() => {
     const game = make();
@@ -68,3 +72,14 @@ newBtn.addEventListener('click', async () => {
     return g;
   });
 });
+
+importBtn.addEventListener('click', () => pickFile(async (file) => {
+  if (await Game.hasSave() && !confirm('Replace your current world with the one in that file?')) return;
+  try {
+    await Game.importSave(file);
+    cont.style.display = '';
+    status.textContent = 'Save imported. Press Continue to play it.';
+  } catch (e) {
+    status.textContent = e instanceof Error ? e.message : 'Could not read that file.';
+  }
+}));
