@@ -109,11 +109,12 @@ Toggles are remembered per browser; a purple **DEV** badge shows while any cheat
   Iron comes as rusty ironstone seams near the base of certain shale beds (plus a few deep veins in the
   granite): find an outcrop and follow it. Soil is thin on ridges and deep in hollows, fast rivers run
   over gravel, and scree piles up below cliffs.
-- **Rivers and lakes.** Drainage is worked out across the land 12 km around: streams start where enough
-  rain gathers, join into rivers that carve their channels down to the sea, and basins fill into lakes
-  deep enough to swim in. Rivers widen with the land they drain, as real ones do: a 10 m creek in the
-  hills becomes a broad river 40–100 m across in the lowlands, winding along the valley floor and
-  visible from afar. River beds are sand and grit, lake beds silty clay, and the banks are where you dig
+- **Rivers and lakes.** Rivers are traced across 8 km regions at a time, so they run unbroken from
+  their sources to the sea. Streams start narrow where enough rain gathers and join into rivers that
+  meander along the valley floors and carve their channels down to the sea; the water only ever runs
+  downhill, cutting through any rise in its way. Rivers widen with the land they drain, as real ones do:
+  a few-metre creek in the hills becomes a broad river 40–120 m across in the lowlands, visible from
+  afar. Basins fill into lakes deep enough to swim in. River beds are sand and grit, lake beds silty clay, and the banks are where you dig
   clay. Drink from any of them; wading through a stream slows you down.
 - **Voxel terrain you can reshape anywhere.** The world is a smooth voxel landscape (Surface Nets on a
   1 m grid, like Enshrouded). With a shovel you **dig**, **raise**, **smooth** and **level ground to your
