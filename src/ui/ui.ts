@@ -344,7 +344,9 @@ export class UI {
     const f = g.world.dayFraction;
     const mins = Math.floor(f * 24 * 60);
     const hh = String(Math.floor(mins / 60)).padStart(2, '0'), mm = String(mins % 60).padStart(2, '0');
-    this.clockEl.textContent = `Day ${g.world.day} · ${hh}:${mm}${f > 0.78 || f < 0.22 ? ' · night' : ''}`;
+    // With dev settings on, where you are too (handy for reporting a spot).
+    const pos = g.dev.anyActive ? ` · ${Math.round(g.player.pos.x)}, ${Math.round(g.player.pos.z)}` : '';
+    this.clockEl.textContent = `Day ${g.world.day} · ${hh}:${mm}${f > 0.78 || f < 0.22 ? ' · night' : ''}${pos}`;
 
     const status: string[] = [];
     if (g.dev.anyActive) status.push('<span class="dev-badge">DEV</span>');
