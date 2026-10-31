@@ -404,6 +404,31 @@ export function buildTile(seed: number, tx: number, tz: number, base = new BaseL
     dr.kind[i] = 3; dr.S[i] = riverSurface[i];
   }
   for (let i = 0; i < n; i++) if (dr.kind[i]) clim.moist[i] = Math.min(1, clim.moist[i] + 0.25);
+  // A stream running into a river carries on down its bank into the water:
+  // its last stretch ends well inside the river, at the river's own level
+  // (the map point it drains to may still be up on the bank).
+  if (big.length) {
+    const starts = new Set<string>();
+    for (let k = 0; k < small.length; k += 8) starts.add(`${small[k]},${small[k + 1]}`);
+    for (let k = 0; k < small.length; k += 8) {
+      const bx = small[k + 2], bz = small[k + 3];
+      if (starts.has(`${bx},${bz}`)) continue; // it carries on as another stream
+      let best = Infinity, px = 0, pz = 0, ps = 0, pr = 0;
+      for (let j = 0; j < big.length; j += 8) {
+        const ax = big[j], az = big[j + 1], dx = big[j + 2] - ax, dz = big[j + 3] - az;
+        if (Math.abs(ax - bx) > 120 || Math.abs(az - bz) > 120) continue;
+        const l2 = dx * dx + dz * dz;
+        const t = l2 > 0 ? clamp01(((bx - ax) * dx + (bz - az) * dz) / l2) : 0;
+        const cx = ax + dx * t, cz = az + dz * t, d = Math.hypot(bx - cx, bz - cz) - big[j + 6];
+        if (d < best) { best = d; px = cx; pz = cz; ps = big[j + 4] + (big[j + 5] - big[j + 4]) * t; pr = big[j + 6]; }
+      }
+      if (best > 12) continue;
+      // Into the river by about half its width (and never past the middle).
+      const d0 = Math.hypot(bx - px, bz - pz) || 1, into = Math.max(0, d0 - pr * 0.5) / d0;
+      small[k + 2] = bx + (px - bx) * into; small[k + 3] = bz + (pz - bz) * into;
+      small[k + 5] = Math.min(small[k + 4], ps);
+    }
+  }
   const reaches = big.concat(small);
   return {
     tx, tz, H, dep: er.deposit, flow: er.flow, kind: dr.kind, S: dr.S,

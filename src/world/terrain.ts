@@ -952,9 +952,23 @@ export class Terrain {
     // White water where the stream falls steeply along its course: rapids
     // and little falls (not wherever the surface happens to tilt).
     const drop = (k: number) => {
-      const rv = this.gen.river(x0 + (k % CI), z0 + Math.floor(k / CI));
-      if (!rv || !rv.fall || rv.d > rv.r) return 0;
-      return Math.max(0, Math.min(1, (rv.fall - 0.03) / 0.07));
+      const x = x0 + (k % CI), z = z0 + Math.floor(k / CI);
+      const here = this.gen.river(x, z);
+      if (!here || here.d > here.r) return 0;
+      // Averaged over the stream around this point, so white water builds up
+      // and fades away along the course instead of starting and stopping at
+      // a line where one traced stretch meets the next.
+      let fall = 0, n = 0;
+      const span = Math.max(8, here.r * 1.5);
+      for (const [dx, dz] of [[0, 0], [span, 0], [-span, 0], [0, span], [0, -span], [span, span], [-span, -span], [span, -span], [-span, span]]) {
+        const rv = dx || dz ? this.gen.river(x + dx, z + dz) : here;
+        if (!rv || rv.d > rv.r + 2) continue;
+        fall += rv.fall ?? 0; n++;
+      }
+      fall /= n;
+      // Wide rivers need a harder drop to break white.
+      const need = 0.03 + Math.min(0.03, here.r * 0.002);
+      return Math.max(0, Math.min(1, (fall - need) / 0.07));
     };
     const vid = new Int32Array(CI * CI).fill(-1);
     const x0 = cx * CH - 1, z0 = cz * CH - 1;
