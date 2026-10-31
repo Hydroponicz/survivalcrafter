@@ -1,10 +1,10 @@
 import { type Item } from '../data/items';
 import { pieceBoxes, STRUCTURES, type V3 } from '../data/structures';
-import { mulberry32, Simplex } from './noise';
+import { mulberry32 } from './noise';
 import { Mat, Terrain } from './terrain';
-import type { Zone } from './climate';
+import { TreeCover, VEGETATION, type Species } from './trees';
 
-export type Species = 'oak' | 'birch' | 'pine';
+export type { Species } from './trees';
 export type AnimalSpecies = 'deer' | 'boar';
 
 export interface TreeObj {
@@ -111,17 +111,6 @@ export function pointInPiece(s: StructureObj, x: number, y: number, z: number, m
   return false;
 }
 
-/** What grows in each climate zone: tree density per 4 m², species mix, stature, berry bushes. */
-export const VEGETATION: Record<Zone, { trees: number; oak: number; birch: number; pine: number; stature: number; bushes: number }> = {
-  broadleaf: { trees: 0.11, oak: 6, birch: 3, pine: 1, stature: 1, bushes: 0.04 },
-  conifer: { trees: 0.14, oak: 0.5, birch: 1.5, pine: 8, stature: 1, bushes: 0.02 },
-  meadow: { trees: 0.012, oak: 6, birch: 2, pine: 1, stature: 1, bushes: 0.05 },
-  heath: { trees: 0.008, oak: 1, birch: 3, pine: 4, stature: 0.75, bushes: 0.03 },
-  marsh: { trees: 0.03, oak: 0, birch: 8, pine: 1, stature: 0.85, bushes: 0.02 },
-  alpine: { trees: 0.03, oak: 0, birch: 1, pine: 9, stature: 0.6, bushes: 0.01 },
-  beach: { trees: 0.004, oak: 0, birch: 1, pine: 3, stature: 0.8, bushes: 0 },
-  snow: { trees: 0, oak: 0, birch: 0, pine: 1, stature: 0.5, bushes: 0 },
-};
 
 /** Wild things are generated a region at a time around you. */
 export const REGION = 64;
@@ -268,7 +257,7 @@ export class World {
     };
     const t = this.terrain;
     const rng = mulberry32(this.terrain.seed * 31 + r * 7919);
-    const forest = this.forestNoise ??= new Simplex(t.seed + 1234);
+    const cover = this.treeCover ??= new TreeCover(t.seed);
     const x0 = rx * REGION, z0 = rz * REGION;
     for (let gz = 0; gz < REGION; gz += 2) {
       for (let gx = 0; gx < REGION; gx += 2) {
@@ -277,13 +266,10 @@ export class World {
         const h = t.heightAt(px, pz);
         if (h < t.waterAt(px, pz) + 0.5) continue;
         if (t.topAt(px, pz) !== Mat.Grass) continue;
-        // The climate zone sets what grows; patchy noise breaks it into stands and clearings.
-        const zone = VEGETATION[t.zoneAt(px, pz)];
-        const f = forest.fbm(px * 0.02, pz * 0.02, 3);
-        const density = zone.trees * Math.max(0.15, Math.min(1.8, 1 + f * 2.2));
-        if (roll < density) {
-          const sp = roll2 * (zone.oak + zone.birch + zone.pine);
-          const species: Species = sp < zone.oak ? 'oak' : sp < zone.oak + zone.birch ? 'birch' : 'pine';
+        // The climate zone sets what grows; great woods, stands and clearings break it up.
+        const zoneName = t.zoneAt(px, pz), zone = VEGETATION[zoneName];
+        if (roll < cover.density(zoneName, px, pz)) {
+          const species = cover.pick(zoneName, roll2);
           // Mostly full-grown, with younger trees and saplings coming up between them;
           // up high and in the dry, trees grow stunted.
           const age = (roll3 < 0.1 ? 0.15 + roll3 * 1.5 : roll3 < 0.32 ? 0.35 + (roll3 - 0.1) * 1.6 : 0.75 + (roll3 - 0.32) * 0.37) * zone.stature;
@@ -303,7 +289,7 @@ export class World {
     }
   }
 
-  private forestNoise?: Simplex;
+  private treeCover?: TreeCover;
 
   /** Let go of a far region: its wild things are regenerated (with your changes) when you come back. */
   private unloadRegion(r: number) {

@@ -92,9 +92,12 @@ Toggles are remembered per browser; a purple **DEV** badge shows while any cheat
   forests would grow (pared-down copies of the real trees beyond the ~230 m where those stand), and
   carrying the same photographed ground textures as the land near you. Trees, bushes, forage and
   animals are generated region by region as you approach; saves keep only what you changed.
-- **Trees at real scale.** Full-grown trees stand 12–20 m (with the odd giant), mixed with younger
-  trees and saplings, in stands and clearings set by the climate. Big trees take longer to fell and
-  give more logs.
+- **Trees at real scale, in great forests.** Seven kinds of tree: oak, beech, maple and birch in the
+  broadleaf woods, pine and tall dark spruce in the conifer forests and up to the tree line, and willows
+  by the water. Full-grown trees stand 12–30 m (with the odd giant), mixed with younger trees and
+  saplings. Besides the climate's own woodland, great forests spread for kilometres across open country
+  too, broken into stands and clearings. Big trees take longer to fell and give more logs; each kind
+  has its own hardness.
 - **Weathered, eroded landscapes.** Each world is shaped by simulated rain: ~170,000 droplets run
   downhill, carving gullies into the mountains and laying sediment along valley floors. Soil is thick
   where sediment settled and thin where water stripped it; clay lines the well-watered valley bottoms.

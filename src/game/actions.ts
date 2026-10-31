@@ -10,6 +10,7 @@ import {
 import { FORAGE, IDENTIFY } from '../data/forage';
 import { BIOMES, biomeAt, type Biome } from './forage';
 import { treeScale } from '../world/treefx';
+import { SPECIES, TREES } from '../world/trees';
 import { ZONE_NAMES } from '../world/climate';
 import type { Game } from './game';
 import type { SwingKind } from './tools';
@@ -414,7 +415,7 @@ export const ACTIONS: ActionDef[] = [
       const label = c.tool.label ?? '';
       c.g.consumeActive();
       if (!o.success) return c.g.msg('The sprout wilts as you plant it.', 'fail');
-      const species = label.includes('pine') ? 'pine' : label.includes('birch') ? 'birch' : 'oak';
+      const species = SPECIES.find((sp) => label.includes(sp)) ?? 'oak';
       c.g.world.add<TreeObj>({ kind: 'tree', species, x: c.t.point.x, z: c.t.point.z, age: 0.03, branches: 0, growing: true });
       c.g.msg(`You plant the ${species} sprout. Give it time to grow.`, 'good');
     },
@@ -471,7 +472,7 @@ export const ACTIONS: ActionDef[] = [
     },
     // Each swing is one blow; it lands at the bottom of the stroke.
     time: 1.35, fixedTime: true, impactAt: 0.62, swing: 'chop',
-    skill: 'woodcutting', difficulty: (c) => ({ pine: 8, oak: 14, birch: 10 })[obj(c, 'tree')!.species], stamina: 3, toolWear: 0.05,
+    skill: 'woodcutting', difficulty: (c) => TREES[obj(c, 'tree')!.species].difficulty, stamina: 3, toolWear: 0.05,
     repeat: (c) => { const t = obj(c, 'tree'); return !!t && c.g.world.objects.has(t.id); },
     run: (c, o) => {
       const t = obj(c, 'tree')!;
@@ -481,7 +482,7 @@ export const ACTIONS: ActionDef[] = [
       if (t.notchDir === undefined) t.notchDir = Math.atan2(p.x - t.x, p.z - t.z);
       const power = c.tool ? itemDef(c.tool.type).toolPower ?? 1 : 0.5;
       // Bigger trees take longer: hardness grows with the trunk.
-      const hardness = { pine: 0.9, oak: 1.25, birch: 1.0 }[t.species] * (0.35 + 0.3 * treeScale(t).s);
+      const hardness = TREES[t.species].hardness * (0.35 + 0.3 * treeScale(t).s);
       const bite = (0.13 + 0.08 * power + g.skills.get('woodcutting') / 300) / hardness;
       // A glancing blow still takes a little out.
       const gained = o.success ? bite * (0.85 + Math.random() * 0.3) : bite * 0.45;

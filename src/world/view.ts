@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { SPECIES, treeGeometries, TREES } from './trees';
 import { STRUCTURES, totalMaterials } from '../data/structures';
 import { FORAGE, FORAGE_SPECIES } from '../data/forage';
 import { forageGeometry, forageScale } from './forageProps';
@@ -12,6 +13,65 @@ import {
 
 const mat = (color: number, extra: THREE.MeshStandardMaterialParameters = {}) =>
   new THREE.MeshStandardMaterial({ color, roughness: 0.9, metalness: 0, ...extra });
+
+/** Trees within this distance (metres) are drawn with full crowns. */
+const TREE_DETAIL = 75;
+
+/**
+ * Instances kept packed at the front (removing one moves the last into its
+ * place), so only what's shown is drawn. Keyed by object id.
+ */
+class PackedPool {
+  mesh: THREE.InstancedMesh;
+  private at = new Map<number, number>();
+  private ids: number[] = [];
+  private tmp = new THREE.Matrix4();
+  private col = new THREE.Color();
+
+  constructor(geo: THREE.BufferGeometry, material: THREE.Material, readonly capacity: number) {
+    this.mesh = new THREE.InstancedMesh(geo, material, capacity);
+    this.mesh.castShadow = true;
+    this.mesh.receiveShadow = true;
+    this.mesh.frustumCulled = false;
+    this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.mesh.setColorAt(0, this.col.set(0xffffff));
+    this.mesh.count = 0;
+  }
+
+  set(id: number, m: THREE.Matrix4, color: THREE.Color) {
+    let i = this.at.get(id);
+    if (i === undefined) {
+      if (this.ids.length >= this.capacity) return;
+      i = this.ids.length;
+      this.ids.push(id);
+      this.at.set(id, i);
+      this.mesh.count = this.ids.length;
+    }
+    this.mesh.setMatrixAt(i, m);
+    this.mesh.setColorAt(i, color);
+    this.mesh.instanceMatrix.needsUpdate = true;
+    this.mesh.instanceColor!.needsUpdate = true;
+  }
+
+  remove(id: number) {
+    const i = this.at.get(id);
+    if (i === undefined) return;
+    const last = this.ids.length - 1, lastId = this.ids[last];
+    if (i !== last) {
+      this.mesh.getMatrixAt(last, this.tmp);
+      this.mesh.setMatrixAt(i, this.tmp);
+      this.mesh.getColorAt(last, this.col);
+      this.mesh.setColorAt(i, this.col);
+      this.ids[i] = lastId;
+      this.at.set(lastId, i);
+    }
+    this.ids.pop();
+    this.at.delete(id);
+    this.mesh.count = this.ids.length;
+    this.mesh.instanceMatrix.needsUpdate = true;
+    this.mesh.instanceColor!.needsUpdate = true;
+  }
+}
 
 /** Fixed-capacity instanced mesh with slot allocation; hidden slots are zero-scaled. */
 class InstancePool {
@@ -60,28 +120,6 @@ class InstancePool {
   }
 }
 
-function treeGeometries(species: Species): { trunk: THREE.BufferGeometry; leaves: THREE.BufferGeometry } {
-  if (species === 'pine') {
-    const trunk = new THREE.CylinderGeometry(0.14, 0.24, 4.5, 6).translate(0, 2.25, 0);
-    const cones = [0, 1, 2].map((i) =>
-      new THREE.ConeGeometry(1.5 - i * 0.38, 2.0, 7).translate(0, 2.4 + i * 1.25, 0));
-    return { trunk, leaves: mergeGeometries(cones)! };
-  }
-  if (species === 'birch') {
-    const trunk = new THREE.CylinderGeometry(0.11, 0.17, 4.6, 6).translate(0, 2.3, 0);
-    const a = new THREE.IcosahedronGeometry(1.15, 1).scale(1, 1.45, 1).translate(0, 4.4, 0);
-    const b = new THREE.IcosahedronGeometry(0.8, 1).translate(0.5, 3.6, 0.3);
-    return { trunk, leaves: mergeGeometries([a, b])! };
-  }
-  const trunk = new THREE.CylinderGeometry(0.2, 0.3, 3.4, 7).translate(0, 1.7, 0);
-  const blobs = [
-    new THREE.IcosahedronGeometry(1.7, 1).translate(0, 4.0, 0),
-    new THREE.IcosahedronGeometry(1.15, 1).translate(1.1, 3.4, 0.3),
-    new THREE.IcosahedronGeometry(1.1, 1).translate(-0.9, 3.5, -0.6),
-  ];
-  return { trunk, leaves: mergeGeometries(blobs)! };
-}
-
 export class WorldView implements WorldListener {
   /** Called when a building piece appears or goes (the ground cover around it changes). */
   onStructure?: (o: StructureObj) => void;
@@ -89,7 +127,14 @@ export class WorldView implements WorldListener {
   /** Trees being chopped and felled, chips, leaves and stumps. */
   treeFx: TreeFx;
   private trunks = {} as Record<Species, InstancePool>;
-  private leaves = {} as Record<Species, InstancePool>;
+  private leaves = {} as Record<Species, PackedPool>;
+  /** Simpler crowns for the trees further off. */
+  private leavesLo = {} as Record<Species, PackedPool>;
+  private leafBase = {} as Record<Species, number>;
+  /** Trees drawn with the simpler crowns, and where the detail was last judged from. */
+  private far = new Set<number>();
+  private trees = new Map<number, TreeObj>();
+  private lodAt = { x: NaN, z: NaN };
   private bushPool: InstancePool;
   private berryPool: InstancePool;
   private slots = new Map<number, number>();
@@ -108,16 +153,15 @@ export class WorldView implements WorldListener {
   private cropMats: THREE.MeshStandardMaterial[];
 
   constructor(private world: World) {
-    const trunkMat: Record<Species, number> = { oak: 0x5a4030, birch: 0xd8d4c8, pine: 0x4a3426 };
-    const leafMat: Record<Species, number> = { oak: 0x3f7a2c, birch: 0x7aa33e, pine: 0x2b5a33 };
-    for (const s of ['oak', 'birch', 'pine'] as Species[]) {
+    const trunkMat = Object.fromEntries(SPECIES.map((s) => [s, TREES[s].bark])) as Record<Species, number>;
+    const leafMat = Object.fromEntries(SPECIES.map((s) => [s, TREES[s].leaf])) as Record<Species, number>;
+    for (const s of SPECIES) {
       const g = treeGeometries(s);
-      this.trunks[s] = new InstancePool(g.trunk, mat(trunkMat[s]), 6000);
-      this.leaves[s] = new InstancePool(g.leaves, mat(0xffffff, { flatShading: true }), 6000);
-      // seed instanceColor so per-tree tint works
-      this.leaves[s].mesh.setColorAt(0, new THREE.Color(leafMat[s]));
-      (this.leaves[s].mesh as THREE.InstancedMesh & { baseColor?: number }).baseColor = leafMat[s];
-      this.group.add(this.trunks[s].mesh, this.leaves[s].mesh);
+      this.trunks[s] = new InstancePool(g.trunk, mat(trunkMat[s]), 9000);
+      this.leaves[s] = new PackedPool(g.leaves, mat(0xffffff, { flatShading: true }), 9000);
+      this.leavesLo[s] = new PackedPool(treeGeometries(s, 0).leaves, mat(0xffffff, { flatShading: true }), 9000);
+      this.leafBase[s] = leafMat[s];
+      this.group.add(this.trunks[s].mesh, this.leaves[s].mesh, this.leavesLo[s].mesh);
     }
     this.bushPool = new InstancePool(
       new THREE.IcosahedronGeometry(0.6, 1).scale(1, 0.75, 1).translate(0, 0.4, 0),
@@ -153,7 +197,7 @@ export class WorldView implements WorldListener {
     }
 
     const leafGeos = {} as Record<Species, THREE.BufferGeometry>;
-    for (const sp of ['oak', 'birch', 'pine'] as Species[]) leafGeos[sp] = treeGeometries(sp).leaves;
+    for (const sp of SPECIES) leafGeos[sp] = treeGeometries(sp).leaves;
     this.treeFx = new TreeFx(world.terrain, (sp) => leafGeos[sp], (t) => this.leafColor(t));
     this.group.add(this.treeFx.group);
     this.treeFx.syncStumps(world.stumps);
@@ -168,8 +212,9 @@ export class WorldView implements WorldListener {
     if (o.kind === 'structure') this.onStructure?.(o);
     if (o.kind === 'tree') {
       const slot = this.trunks[o.species].alloc();
-      this.leaves[o.species].alloc();
       this.slots.set(o.id, slot);
+      this.trees.set(o.id, o);
+      if (Math.hypot(o.x - this.lodAt.x, o.z - this.lodAt.z) > TREE_DETAIL) this.far.add(o.id);
       this.updateTree(o);
     } else if (o.kind === 'bush') {
       const slot = this.bushPool.alloc();
@@ -191,8 +236,11 @@ export class WorldView implements WorldListener {
     if (o.kind === 'tree') {
       const s = this.slots.get(o.id)!;
       this.trunks[o.species].release(s);
-      this.leaves[o.species].release(s);
+      this.leaves[o.species].remove(o.id);
+      this.leavesLo[o.species].remove(o.id);
       this.slots.delete(o.id);
+      this.trees.delete(o.id);
+      this.far.delete(o.id);
       this.treeFx.remove(o.id);
     } else if (o.kind === 'bush') {
       const s = this.slots.get(o.id)!;
@@ -234,7 +282,7 @@ export class WorldView implements WorldListener {
   // ---------- updates
   /** The same per-tree leaf tint the instanced trees use. */
   private leafColor(o: TreeObj): THREE.Color {
-    const base = new THREE.Color((this.leaves[o.species].mesh as THREE.InstancedMesh & { baseColor: number }).baseColor);
+    const base = new THREE.Color(this.leafBase[o.species]);
     return base.offsetHSL((hash2(o.id, 3) - 0.5) * 0.04, 0, (hash2(o.id, 4) - 0.5) * 0.08);
   }
 
@@ -243,7 +291,8 @@ export class WorldView implements WorldListener {
     // A tree that's been chopped into is drawn on its own, notch and all.
     if ((o.chop ?? 0) > 0 || this.treeFx.has(o.id)) {
       this.trunks[o.species].hide(slot);
-      this.leaves[o.species].hide(slot);
+      this.leaves[o.species].remove(o.id);
+      this.leavesLo[o.species].remove(o.id);
       this.treeFx.place(this.treeFx.ensure(o));
       return;
     }
@@ -253,9 +302,26 @@ export class WorldView implements WorldListener {
     this.q.setFromAxisAngle(this.up, r);
     this.m4.compose(new THREE.Vector3(o.x, y, o.z), this.q, new THREE.Vector3(s, s * hs, s));
     this.trunks[o.species].set(slot, this.m4);
-    const base = new THREE.Color((this.leaves[o.species].mesh as THREE.InstancedMesh & { baseColor: number }).baseColor);
-    base.offsetHSL((hash2(o.id, 3) - 0.5) * 0.04, 0, (hash2(o.id, 4) - 0.5) * 0.08);
-    this.leaves[o.species].set(slot, this.m4, base);
+    const lo = this.far.has(o.id);
+    (lo ? this.leavesLo : this.leaves)[o.species].set(o.id, this.m4, this.leafColor(o));
+    (lo ? this.leaves : this.leavesLo)[o.species].remove(o.id);
+  }
+
+  /**
+   * Trees near you get full crowns, those further off simpler ones (from a
+   * distance they look the same, at a fraction of the drawing). Checked as you
+   * move, with a margin so trees on the boundary don't flicker between the two.
+   */
+  updateTreeDetail(px: number, pz: number) {
+    if (Math.hypot(px - this.lodAt.x, pz - this.lodAt.z) < 6) return;
+    this.lodAt = { x: px, z: pz };
+    for (const [id, o] of this.trees) {
+      const d = Math.hypot(o.x - px, o.z - pz), lo = this.far.has(id);
+      if (lo && d < TREE_DETAIL - 8) this.far.delete(id);
+      else if (!lo && d > TREE_DETAIL + 8) this.far.add(id);
+      else continue;
+      this.updateTree(o);
+    }
   }
 
   private updateBush(o: BushObj) {

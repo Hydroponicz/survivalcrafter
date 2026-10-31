@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { hash2 } from './noise';
 import type { Terrain } from './terrain';
+import { SPECIES, TREES } from './trees';
 import type { Species, Stump, TreeObj } from './world';
 
 // Visual life of a tree being chopped: a V-notch that deepens with each hit,
@@ -8,18 +9,14 @@ import type { Species, Stump, TreeObj } from './world';
 // crashing to the ground in a cloud of dust and leaving a stump behind.
 
 /** Trunk shape per species: base radius, top radius, height. Matches the instanced trees. */
-export const TRUNK: Record<Species, { r0: number; r1: number; h: number }> = {
-  oak: { r0: 0.3, r1: 0.2, h: 3.4 },
-  birch: { r0: 0.17, r1: 0.11, h: 4.6 },
-  pine: { r0: 0.24, r1: 0.14, h: 4.5 },
-};
-export const BARK: Record<Species, number> = { oak: 0x5a4030, birch: 0xd8d4c8, pine: 0x4a3426 };
+export const TRUNK = Object.fromEntries(SPECIES.map((s) => [s, TREES[s].trunk])) as Record<Species, { r0: number; r1: number; h: number }>;
+export const BARK = Object.fromEntries(SPECIES.map((s) => [s, TREES[s].bark])) as Record<Species, number>;
 const HEARTWOOD = new THREE.Color(0xf6dfae);
 /** Height of the felling notch above the ground, in the trunk's local units. */
 const NOTCH_Y = 0.7;
 
-/** Model multiplier for a typical full-grown tree of each kind: oaks ~20 m, birches ~18 m, pines ~27 m. */
-export const GROWN: Record<Species, number> = { oak: 2.7, birch: 2.4, pine: 3.4 };
+/** Model multiplier for a typical full-grown tree of each kind (oaks ~20 m, spruces ~30 m). */
+export const GROWN = Object.fromEntries(SPECIES.map((s) => [s, TREES[s].grown])) as Record<Species, number>;
 
 /**
  * How big this tree grows (a multiplier on the model), fixed by its id: a

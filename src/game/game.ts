@@ -1574,6 +1574,7 @@ export class Game {
     this.fireflies.update(this.renderDt, this.elapsed, this.camera.position, this.world.terrain, this.amb.fireflies);
     const a = this.amb;
     this.sound.ambience({ wind: a.wind, river: a.water, birds: a.birds, night: a.crickets, frogs: a.frogs }, this.renderDt);
+    this.view.updateTreeDetail(this.camera.position.x, this.camera.position.z);
     this.view.syncAnimals(this.elapsed);
     this.view.updateFires(p.pos.x, p.pos.z, this.elapsed);
     this.frameNo++;
