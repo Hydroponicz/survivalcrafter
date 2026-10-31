@@ -76,13 +76,15 @@ vec2 waterRipple(vec2 p, float scale, vec2 drift) {
 ${o.rapids ? `// A texture carried along by the current: two copies drifting downstream,
 // each restarting in turn while the other is showing, so it never smears.
 float carried(vec2 p, float scale, float speed, int ch) {
-  float t = uWaterTime * 0.35;
+  float t = uWaterTime * 0.2;
   float a = fract(t), b = fract(t + 0.5);
   vec2 f = vFlow * speed / scale;
   vec4 s0 = texture2D(uWaterNormals, p / scale - f * a);
   vec4 s1 = texture2D(uWaterNormals, p / scale - f * b + 0.37);
   float v0 = ch == 0 ? s0.r : s0.g, v1 = ch == 0 ? s1.r : s1.g;
-  return mix(v0, v1, abs(2.0 * a - 1.0));
+  // Blend the two, keeping the contrast even through the blend (no pulsing).
+  float w = abs(2.0 * a - 1.0);
+  return 0.5 + (mix(v0, v1, w) - 0.5) / sqrt(w * w + (1.0 - w) * (1.0 - w));
 }` : ''}`)
       .replace('#include <color_fragment>', `#include <color_fragment>
   float wd = vWaterDepth;
@@ -122,7 +124,7 @@ float carried(vec2 p, float scale, float speed, int ch) {
     ${o.rapids ? `// Running water: ripples swept along with the current.
     float run = clamp(length(vFlow), 0.0, 1.0);
     vec2 rr = vec2(carried(vWaterPos.xz, 5.0, 3.0, 0), carried(vWaterPos.xz + 2.3, 5.0, 3.0, 1)) * 2.0 - 1.0;
-    r = mix(r, rr * 0.9, run * 0.8);` : ''}
+    r = mix(r, rr * 0.5, run * 0.6);` : ''}
     float far = length(vWaterPos - cameraPosition);
     r *= 0.42 / (1.0 + far / 260.0);
     vec3 wnrm = normalize((vec4(normal, 0.0) * viewMatrix).xyz);

@@ -274,7 +274,7 @@ export class World {
           // up high and in the dry, trees grow stunted.
           const age = (roll3 < 0.1 ? 0.15 + roll3 * 1.5 : roll3 < 0.32 ? 0.35 + (roll3 - 0.1) * 1.6 : 0.75 + (roll3 - 0.32) * 0.37) * zone.stature;
           place<TreeObj>({ kind: 'tree', species, x: px, z: pz, age, branches: 3 });
-        } else if (roll2 < zone.bushes) {
+        } else if (roll2 < cover.bushes(zoneName, px, pz) && this.clearOfWater(px, pz, 3)) {
           place<BushObj>({ kind: 'bush', x: px, z: pz, ripe: roll3 < 0.7, regrowAt: 0 });
         }
       }

@@ -495,9 +495,14 @@ export class GroundCover {
           obs.push({ ax: x, az: z, bx: x, bz: z, r: 0.55 * sc });
           continue;
         }
-        if ((zone === 'broadleaf' || zone === 'conifer') && g.mat === Mat.Grass && g.slope < 0.5 && r() < 0.06) {
-          const f = rnd(r, 0.75, 1.05);
+        // Fallen trees lie in the woods (where trees stand thick enough to fall),
+        // now and then, and never across a bank or in a stream.
+        if ((zone === 'broadleaf' || zone === 'conifer') && g.mat === Mat.Grass && g.slope < 0.5 && r() < 0.025) {
           const yaw = r() * 6.28, sc = rnd(r, 0.7, 1.15);
+          const hx0 = Math.cos(yaw) * 2.5 * sc, hz0 = -Math.sin(yaw) * 2.5 * sc;
+          if (t.nearWaterAt(x, z) || t.nearWaterAt(x + hx0, z + hz0) || t.nearWaterAt(x - hx0, z - hz0)) continue;
+          if (this.world.near(x, z, 12).filter((o) => o.kind === 'tree').length < 3) continue;
+          const f = rnd(r, 0.75, 1.05);
           put('log', x, g.h - 0.05, z, yaw, sc, f, f, f, Math.atan(g.slope) * 0.5);
           // The trunk runs 2 m either way along its local X.
           const hx = Math.cos(yaw) * 2 * sc, hz = -Math.sin(yaw) * 2 * sc;

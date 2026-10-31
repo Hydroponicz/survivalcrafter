@@ -1308,6 +1308,19 @@ export class Game {
   }
 
   // ---------- main loop
+  /**
+   * The bed under the sea at a point, for the water's depth: the land map,
+   * with river channels cut down where they reach the sea (else a river
+   * mouth would read as dry land, all shore foam).
+   */
+  private seaBed(x: number, z: number): number {
+    let h = this.distant.groundAt(x, z);
+    if (!(h < 4)) return h;
+    const rv = this.world.terrain.gen.river(x, z);
+    if (rv && rv.d < rv.r) h = Math.min(h, WATER_LEVEL - rv.depth * (1 - (rv.d / rv.r) ** 2));
+    return h;
+  }
+
   /** Put the graphics settings into effect. */
   applyGraphics() {
     const q = this.graphics.level;
@@ -1565,7 +1578,7 @@ export class Game {
     if (this.ambTimer <= 0) { this.ambTimer = 0.5; this.surroundings(); }
     this.groundCover.update(this.camera.position, this.elapsed, this.world.terrain.wind, this.amb.sway);
     this.world.terrain.waterTime.value = this.elapsed;
-    seaFloor.update(this.camera.position.x, this.camera.position.z, this.renderDt, (x, z) => this.distant.groundAt(x, z), WATER_LEVEL);
+    seaFloor.update(this.camera.position.x, this.camera.position.z, this.renderDt, (x, z) => this.seaBed(x, z), WATER_LEVEL);
     this.tileTimer -= this.renderDt;
     if (this.tileTimer <= 0) { this.tileTimer = 0.5; this.keepTiles(); }
     const mc = this.world.terrain.meshCentre;

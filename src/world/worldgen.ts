@@ -42,7 +42,8 @@ const SPRING_KM2 = 0.012;
 const REGION = 8192, REGION_MARGIN = 6144, BASIN_CELL = 64;
 const BASIN_N = (REGION + 2 * REGION_MARGIN) / BASIN_CELL + 1;
 
-export interface RiverHit { d: number; s: number; r: number; depth: number }
+/** A point's river: distance from its line, surface, half-width, depth, and how steeply it falls (rise over run). */
+export interface RiverHit { d: number; s: number; r: number; depth: number; fall?: number }
 
 /** One map tile: everything simulated for it, as plain arrays (it can come from a worker). */
 export interface TileData {
@@ -497,7 +498,10 @@ class Tile {
       const t = len2 > 0 ? clamp01(((x - ax) * dx + (z - az) * dz) / len2) : 0;
       const d = Math.hypot(x - (ax + dx * t), z - (az + dz * t));
       const edge = d - R[o + 6];
-      if (edge < best.edge) { best.edge = edge; best.hit = { d, s: R[o + 4] + (R[o + 5] - R[o + 4]) * t, r: R[o + 6], depth: R[o + 7] }; }
+      if (edge < best.edge) {
+        best.edge = edge;
+        best.hit = { d, s: R[o + 4] + (R[o + 5] - R[o + 4]) * t, r: R[o + 6], depth: R[o + 7], fall: len2 > 0 ? Math.abs(R[o + 4] - R[o + 5]) / Math.sqrt(len2) : 0 };
+      }
     }
   }
 
@@ -825,7 +829,11 @@ export class WorldGen {
       const rv = this.river(x, z);
       return { top: lake ? 'clay' : rv && (rv.r > 4 || slope > 0.3) ? 'gravel' : 'sand', soil: Math.max(soil, 1.2), waterBed: true };
     }
-    if (this.nearWater(x, z) && slope < 0.9 && this.patch.noise(x * 0.15, z * 0.15) > 0.05) return { top: 'clay', soil: Math.max(soil, 1.2), waterBed: false };
+    // Clay along the banks of rivers and lakes; a little creek runs between grassy banks.
+    const rvb = this.river(x, z);
+    const bigWater = rvb ? rvb.r > 3 && rvb.d < rvb.r + 3 : false;
+    const lakeSide = !rvb && this.nearWater(x, z);
+    if ((bigWater || lakeSide) && slope < 0.9 && this.patch.noise(x * 0.15, z * 0.15) > 0.05) return { top: 'clay', soil: Math.max(soil, 1.2), waterBed: false };
     if (soil < 0.4) return { top: 'rock', soil: 0, waterBed: false };
     if (h < SEA + 1.4) return { top: this.patch.noise(x * 0.06, z * 0.06) > 0.4 && h > -2 ? 'clay' : 'sand', soil, waterBed: false };
     // Silt along well-watered valley floors.

@@ -108,9 +108,11 @@ export class TreeCover {
   private woods: Simplex;
   private land: BaseLand;
   private wild: Simplex;
+  private berries: Simplex;
   constructor(seed: number) {
     this.land = new BaseLand(seed);
     this.wild = new Simplex(seed + 1250);
+    this.berries = new Simplex(seed + 1260);
     this.stands = new Simplex(seed + 1234);
     this.woods = new Simplex(seed + 1240);
   }
@@ -123,6 +125,18 @@ export class TreeCover {
   bankClearance(x: number, z: number): number {
     const wild = smooth01((this.wild.fbm(x / 2600 + 7.7, z / 2600, 2) - 0.36) / 0.14);
     return 8 * (1 - wild) + 0.5 * wild;
+  }
+
+  /**
+   * Berry bushes per 4 m² at a point: in patches (a sunny bank, a woodland
+   * edge), mostly where the trees thin out and let the light in, and none
+   * at all across most of the land.
+   */
+  bushes(zone: Zone, x: number, z: number): number {
+    const patch = smooth01((this.berries.fbm(x / 70 + 3.3, z / 70, 2) - 0.35) / 0.2);
+    if (patch <= 0) return 0;
+    const sun = 1 - smooth01((this.density(zone, x, z) - 0.03) / 0.12);
+    return VEGETATION[zone].bushes * 2 * patch * (0.1 + 0.9 * sun);
   }
 
   /** Trees per 4 m² at a point in a zone. */

@@ -949,17 +949,12 @@ export class Terrain {
       const speed = Math.min(1, 0.25 + g * 4);
       return [(-gx / g) * speed, (-gz / g) * speed];
     };
-    // White water where the surface drops steeply: rapids and little falls.
+    // White water where the stream falls steeply along its course: rapids
+    // and little falls (not wherever the surface happens to tilt).
     const drop = (k: number) => {
-      const lx = k % CI, lz = Math.floor(k / CI);
-      let g = 0;
-      for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-        const x = lx + dx, z = lz + dz;
-        if (x < 0 || z < 0 || x >= CI || z >= CI) continue;
-        const a = W[z * CI + x], b = W[k];
-        if (!Number.isNaN(a) && !Number.isNaN(b)) g = Math.max(g, Math.abs(a - b));
-      }
-      return Math.max(0, Math.min(1, (g - 0.05) / 0.2));
+      const rv = this.gen.river(x0 + (k % CI), z0 + Math.floor(k / CI));
+      if (!rv || !rv.fall || rv.d > rv.r) return 0;
+      return Math.max(0, Math.min(1, (rv.fall - 0.03) / 0.07));
     };
     const vid = new Int32Array(CI * CI).fill(-1);
     const x0 = cx * CH - 1, z0 = cz * CH - 1;
