@@ -268,7 +268,7 @@ export class World {
         if (t.topAt(px, pz) !== Mat.Grass) continue;
         // The climate zone sets what grows; great woods, stands and clearings break it up.
         const zoneName = t.zoneAt(px, pz), zone = VEGETATION[zoneName];
-        if (roll < cover.density(zoneName, px, pz)) {
+        if (roll < cover.density(zoneName, px, pz) && this.clearOfWater(px, pz, cover.bankClearance(px, pz))) {
           const species = cover.pick(zoneName, roll2);
           // Mostly full-grown, with younger trees and saplings coming up between them;
           // up high and in the dry, trees grow stunted.
@@ -290,6 +290,18 @@ export class World {
   }
 
   private treeCover?: TreeCover;
+
+  /** Whether a spot is at least `clear` metres back from a river or lake (wider rivers keep more room). */
+  private clearOfWater(x: number, z: number, clear: number): boolean {
+    const gen = this.terrain.gen;
+    const rv = gen.river(x, z);
+    if (rv && rv.d < rv.r + Math.min(11, clear * (1 + rv.r / 25))) return false;
+    if (clear < 2) return true;
+    for (const [dx, dz] of [[clear, 0], [-clear, 0], [0, clear], [0, -clear]]) {
+      if (!Number.isNaN(gen.lakeSurface(x + dx, z + dz))) return false;
+    }
+    return true;
+  }
 
   /** Let go of a far region: its wild things are regenerated (with your changes) when you come back. */
   private unloadRegion(r: number) {

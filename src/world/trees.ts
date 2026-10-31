@@ -107,10 +107,22 @@ export class TreeCover {
   private stands: Simplex;
   private woods: Simplex;
   private land: BaseLand;
+  private wild: Simplex;
   constructor(seed: number) {
     this.land = new BaseLand(seed);
+    this.wild = new Simplex(seed + 1250);
     this.stands = new Simplex(seed + 1234);
     this.woods = new Simplex(seed + 1240);
+  }
+
+  /**
+   * How far (metres) trees keep back from the water's edge here. Banks are
+   * mostly open (grass, shingle, the odd tree), but in a few wild stretches
+   * the forest crowds right down to the water.
+   */
+  bankClearance(x: number, z: number): number {
+    const wild = smooth01((this.wild.fbm(x / 2600 + 7.7, z / 2600, 2) - 0.36) / 0.14);
+    return 8 * (1 - wild) + 0.5 * wild;
   }
 
   /** Trees per 4 m² at a point in a zone. */
@@ -137,3 +149,5 @@ export class TreeCover {
     return 'pine';
   }
 }
+
+const smooth01 = (t: number) => { t = Math.max(0, Math.min(1, t)); return t * t * (3 - 2 * t); };

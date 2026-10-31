@@ -136,7 +136,8 @@ Toggles are remembered per browser; a purple **DEV** badge shows while any cheat
   the banks are where you dig clay. Drink from any of them; wading through a stream slows you down.
 - **Plains and forests.** Great lowland plains tens of kilometres across, about a third of the land, roll
   gently with open grassland and fields, scattered trees and copses and the odd wood; elsewhere hills and
-  mountains rise under deep forest.
+  mountains rise under deep forest. River and lake banks are mostly open, with trees standing back from
+  the water, except in wild stretches where the forest crowds right down to it.
 - **Voxel terrain you can reshape anywhere.** The world is a smooth voxel landscape (Surface Nets on a
   1 m grid, like Enshrouded). With a shovel you **dig**, **raise**, **smooth** and **level ground to your
   feet** (Valheim-style); a pickaxe mines rock in any direction, so you can tunnel into hills, find caves

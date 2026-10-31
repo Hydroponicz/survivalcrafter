@@ -86,6 +86,8 @@ export class FarForest {
         const i = iz * TN + ix;
         const h = d.H[i];
         if (h < SEA + 1.5 || d.kind[i]) continue;
+        // Banks are mostly open: keep back from rivers and lakes, except in the wild stretches.
+        if (this.cover.bankClearance(x, z) > 2 && (d.kind[i + 1] || d.kind[i - 1] || d.kind[i + TN] || d.kind[i - TN])) continue;
         const slope = Math.hypot(d.H[i + 1] - d.H[i - 1], d.H[i + TN] - d.H[i - TN]) / (2 * CELL);
         if (slope > 1.0) continue;
         const temp = tempAt(d.climBase[i], h);
