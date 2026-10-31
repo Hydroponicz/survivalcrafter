@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { makeWaterMaterial } from './water';
 import { BLEND, CELL, LOD_N, PAD, TILE, TN, tileLodColors, type TileData } from './worldgen';
 
 // The distant land: every map tile near enough to see becomes one low-detail
@@ -24,14 +25,12 @@ export class DistantLand {
   readonly group = new THREE.Group();
   private hole = { value: new THREE.Vector3(0, 0, 0) }; // x, z, radius
   private material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95 });
-  private waterMaterial: THREE.Material;
+  private waterMaterial = makeWaterMaterial({ depth: 'attribute', fresh: true, extra: (sh) => this.cut(sh), key: 'lod' });
   private index: THREE.BufferAttribute;
   private tiles = new Map<string, LodTile>();
 
-  constructor(waterMaterial: THREE.Material) {
-    this.patch(this.material);
-    this.waterMaterial = (waterMaterial as THREE.MeshStandardMaterial).clone();
-    this.patch(this.waterMaterial);
+  constructor() {
+    this.material.onBeforeCompile = (sh) => this.cut(sh);
     // One index for every tile: the grid, then the skirt around its edge.
     const N = LOD_N;
     const idx: number[] = [];
@@ -200,7 +199,7 @@ export class DistantLand {
     const off = OFF;
 
     // Lakes, as flat sheets at their surface.
-    const wpos: number[] = [], widx: number[] = [], wuv: number[] = [];
+    const wpos: number[] = [], widx: number[] = [], wdepth: number[] = [];
     const vid = new Map<number, number>();
     const v = (lx: number, lz: number, s: number) => {
       const key2 = lz * (N + 1) + lx;
@@ -210,7 +209,7 @@ export class DistantLand {
         vid.set(key2, id);
         const x = x0 + lx * CELL, z = z0 + lz * CELL;
         wpos.push(x, s - 0.6, z);
-        wuv.push(x / 960, z / 960);
+        wdepth.push(s - d.H[(lz + off) * TN + lx + off]);
       }
       return id;
     };
@@ -227,7 +226,7 @@ export class DistantLand {
     if (widx.length) {
       const wg = new THREE.BufferGeometry();
       wg.setAttribute('position', new THREE.Float32BufferAttribute(wpos, 3));
-      wg.setAttribute('uv', new THREE.Float32BufferAttribute(wuv, 2));
+      wg.setAttribute('depth', new THREE.Float32BufferAttribute(wdepth, 1));
       wg.setIndex(widx);
       wg.computeVertexNormals();
       group.add(new THREE.Mesh(wg, this.waterMaterial));
@@ -237,6 +236,7 @@ export class DistantLand {
 
   /** Drop distant land too far from a point to see. */
   prune(x: number, z: number) {
+    this.lastTx = NaN;
     for (const [key, t] of this.tiles) {
       const g = t.group, tx = t.d.tx, tz = t.d.tz;
       if (Math.max(Math.abs((tx + 0.5) * TILE - x), Math.abs((tz + 0.5) * TILE - z)) <= (LOD_TILES + 1.5) * TILE) continue;
@@ -253,15 +253,26 @@ export class DistantLand {
     this.hole.value.set(x, z, r);
   }
 
-  private patch(m: THREE.Material) {
-    m.onBeforeCompile = (shader) => {
-      shader.uniforms.uHole = this.hole;
-      shader.vertexShader = shader.vertexShader
-        .replace('#include <common>', '#include <common>\nvarying vec3 vLodPos;')
-        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvLodPos = (modelMatrix * vec4(transformed, 1.0)).xyz;');
-      shader.fragmentShader = shader.fragmentShader
-        .replace('#include <common>', '#include <common>\nvarying vec3 vLodPos;\nuniform vec3 uHole;')
-        .replace('void main() {', 'void main() {\n  if (distance(vLodPos.xz, uHole.xy) < uHole.z) discard;');
-    };
+  /** Patch a shader to leave out the hole. */
+  private cut(shader: THREE.WebGLProgramParametersWithUniforms) {
+    shader.uniforms.uHole = this.hole;
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vLodPos;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvLodPos = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vLodPos;\nuniform vec3 uHole;')
+      .replace('void main() {', 'void main() {\n  if (distance(vLodPos.xz, uHole.xy) < uHole.z) discard;');
   }
+
+  /** Land height from the map at a point (nearest map point), or NaN where no tile is loaded. */
+  groundAt(x: number, z: number): number {
+    const tx = Math.floor(x / TILE), tz = Math.floor(z / TILE);
+    if (tx !== this.lastTx || tz !== this.lastTz) { this.lastTx = tx; this.lastTz = tz; this.lastTile = this.tiles.get(`${tx},${tz}`)?.d ?? null; }
+    const d = this.lastTile;
+    if (!d) return NaN;
+    return d.H[(Math.round((z - tz * TILE) / CELL) + OFF) * TN + Math.round((x - tx * TILE) / CELL) + OFF];
+  }
+  private lastTx = NaN;
+  private lastTz = NaN;
+  private lastTile: TileData | null = null;
 }

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { Sky as SkyMesh } from 'three/examples/jsm/objects/Sky.js';
 import { WATER_LEVEL } from '../world/terrain';
+import { makeWaterMaterial } from '../world/water';
 
 // The sky, sun and atmosphere. A physically based sky (Rayleigh and Mie
 // scattering, with drifting clouds) lights the world: every few seconds it's
@@ -94,7 +95,6 @@ export class Sky {
   private dome = new SkyMesh();
   private stars: THREE.Points;
   readonly water: THREE.Mesh;
-  private waterTex: THREE.Texture;
   readonly haze: Haze;
   private pmrem: THREE.PMREMGenerator | null = null;
   private envRT: THREE.WebGLRenderTarget | null = null;
@@ -164,20 +164,11 @@ export class Sky {
     this.stars.renderOrder = -9;
     scene.add(this.stars);
 
-    this.waterTex = makeWaterNormal();
-    this.waterTex.wrapS = this.waterTex.wrapT = THREE.RepeatWrapping;
-    // One UV unit is 960 m everywhere (rivers too); the ripples repeat every 24 m.
-    this.waterTex.repeat.set(40, 40);
-    const wm = new THREE.MeshStandardMaterial({
-      color: 0x1f4f68, transparent: true, opacity: 0.82, roughness: 0.06, metalness: 0.25,
-      normalMap: this.waterTex, normalScale: new THREE.Vector2(0.3, 0.3),
-    });
-    // The sea reaches past the view distance and follows you (in whole ripple
-    // repeats, so the pattern stays put on the water).
+    const wm = makeWaterMaterial({ depth: 'seafloor' });
+    // The sea reaches past the view distance and follows you (its ripples are
+    // fixed to the world, so they stay put as it moves).
     const seaSize = 16000;
     const seaGeo = new THREE.PlaneGeometry(seaSize, seaSize);
-    const uv = seaGeo.attributes.uv, sp = seaGeo.attributes.position;
-    for (let i = 0; i < uv.count; i++) uv.setXY(i, sp.getX(i) / 960, sp.getY(i) / 960);
     this.water = new THREE.Mesh(seaGeo, wm);
     this.water.rotation.x = -Math.PI / 2;
     this.water.position.set(0, WATER_LEVEL - 0.05, 0);
@@ -233,7 +224,6 @@ export class Sky {
       if (this.probeTimer <= 0 && !this.probing) { this.probeTimer = PROBE_INTERVAL; this.probeHorizon(renderer, camera); }
     }
     this.haze.color.copy(this.horizon);
-    this.waterTex.offset.set(time * 0.01, time * 0.006);
   }
 
   /** Capture the sky as a (small: it's smooth) environment map for skylight and reflections. */
@@ -279,26 +269,3 @@ export class Sky {
   }
 }
 
-function makeWaterNormal(): THREE.Texture {
-  const S = 128;
-  const c = document.createElement('canvas');
-  c.width = c.height = S;
-  const ctx = c.getContext('2d')!;
-  const img = ctx.createImageData(S, S);
-  const h = (x: number, y: number) =>
-    Math.sin((x / S) * Math.PI * 2 * 3) * 0.5 + Math.sin(((x + y) / S) * Math.PI * 2 * 5) * 0.3 +
-    Math.sin((y / S) * Math.PI * 2 * 4 + Math.sin((x / S) * Math.PI * 4)) * 0.4;
-  for (let y = 0; y < S; y++) {
-    for (let x = 0; x < S; x++) {
-      const dx = h(x + 1, y) - h(x - 1, y);
-      const dy = h(x, y + 1) - h(x, y - 1);
-      const i = (y * S + x) * 4;
-      img.data[i] = 128 + dx * 90;
-      img.data[i + 1] = 128 + dy * 90;
-      img.data[i + 2] = 255;
-      img.data[i + 3] = 255;
-    }
-  }
-  ctx.putImageData(img, 0, 0);
-  return new THREE.CanvasTexture(c);
-}

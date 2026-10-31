@@ -4,12 +4,13 @@ import type { Recipe, StationKind } from '../data/recipes';
 import { SKILLS, Skills, type SkillId } from '../data/skills';
 import { pieceBoxes, STRUCTURES, type StructureDef, type V3 } from '../data/structures';
 import { anvilGrade } from './smithy';
-import { isRock, Mat, type Volumes } from '../world/terrain';
+import { isRock, Mat, WATER_LEVEL, type Volumes } from '../world/terrain';
 import { forageHeight, forageScale } from '../world/forageProps';
 import { buildPieceMesh, WorldView } from '../world/view';
 import { GroundCover } from '../world/groundcover';
 import { Fireflies } from '../world/fireflies';
 import { DistantLand, LOD_TILES } from '../world/lod';
+import { seaFloor } from '../world/water';
 import { WorkerTiles } from '../world/tilesource';
 import { TILE, tileOf } from '../world/worldgen';
 import {
@@ -174,14 +175,12 @@ export class Game {
     this.scene.add(this.view.group);
     this.scene.add(this.player.model);
     this.sky = new Sky(this.scene);
-    // Rivers and lakes share the sea's water material (and its ripples).
-    world.terrain.waterMaterial = this.sky.water.material as THREE.Material;
     // The rest of the world, out to the horizon: map tiles are made in the
     // background as you travel, and each becomes distant land when it arrives.
     const gen = world.terrain.gen;
-    this.distant = new DistantLand(this.sky.water.material as THREE.Material);
+    this.distant = new DistantLand();
     this.scene.add(this.distant.group);
-    gen.onTile = (d, lod) => this.distant.addTile(d, lod);
+    gen.onTile = (d, lod) => { this.distant.addTile(d, lod); seaFloor.changed(); };
     gen.forEachTile((d) => this.distant.addTile(d));
     try {
       this.tileWorkers = new WorkerTiles(gen.seed, (d, lod) => gen.addTile(d, lod), TILE);
@@ -1527,6 +1526,7 @@ export class Game {
     if (this.ambTimer <= 0) { this.ambTimer = 0.5; this.surroundings(); }
     this.groundCover.update(this.camera.position, this.elapsed, this.world.terrain.wind, this.amb.sway);
     this.world.terrain.waterTime.value = this.elapsed;
+    seaFloor.update(this.camera.position.x, this.camera.position.z, this.renderDt, (x, z) => this.distant.groundAt(x, z), WATER_LEVEL);
     this.tileTimer -= this.renderDt;
     if (this.tileTimer <= 0) { this.tileTimer = 0.5; this.keepTiles(); }
     const mc = this.world.terrain.meshCentre;
