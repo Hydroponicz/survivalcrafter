@@ -955,6 +955,8 @@ export class Terrain {
       const x = x0 + (k % CI), z = z0 + Math.floor(k / CI);
       const here = this.gen.river(x, z);
       if (!here || here.d > here.r) return 0;
+      // A stream running into a lake: still water there, no rapids.
+      if (!Number.isNaN(this.gen.lakeSurface(x, z))) return 0;
       // Averaged over the stream around this point, so white water builds up
       // and fades away along the course instead of starting and stopping at
       // a line where one traced stretch meets the next.
