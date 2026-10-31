@@ -61,9 +61,18 @@ function patchFog() {
     float haze = 1.0 - exp( - fogNear * fogNear * vFogDepth * vFogDepth );
     float low = smoothstep( ${MIST_TOP.toFixed(1)}, 1.0, vFogWorld.y );
     float mist = fogFar * low * ( 1.0 - exp( - vFogDepth * 0.05 ) );
-    // Mist catches the light: paler than the horizon behind it.
-    vec3 mistColor = fogColor * 1.6 + vec3( 0.025, 0.027, 0.03 );
-    gl_FragColor.rgb = mix( gl_FragColor.rgb, fogColor, clamp( haze, 0.0, 1.0 ) );
+    // Haze glows toward the sun (light scattered forward by the air), only in
+    // that direction: the rest of the view keeps the plain sky colour.
+    vec3 hazeColor = fogColor;
+    #if NUM_DIR_LIGHTS > 0
+      vec3 viewDir = normalize( mat3( viewMatrix ) * ( vFogWorld - cameraPosition ) );
+      float toSun = max( dot( viewDir, directionalLights[ 0 ].direction ), 0.0 );
+      vec3 sunTint = directionalLights[ 0 ].color / max( max( directionalLights[ 0 ].color.r, directionalLights[ 0 ].color.g ), 1e-4 );
+      hazeColor += fogColor * sunTint * ( 0.6 * pow( toSun, 6.0 ) + 1.2 * pow( toSun, 40.0 ) );
+    #endif
+    // Mist catches the light: a little paler than the haze behind it.
+    vec3 mistColor = hazeColor * 1.25 + vec3( 0.02, 0.021, 0.024 );
+    gl_FragColor.rgb = mix( gl_FragColor.rgb, hazeColor, clamp( haze, 0.0, 1.0 ) );
     gl_FragColor.rgb = mix( gl_FragColor.rgb, mistColor, clamp( mist, 0.0, 1.0 ) * ( 1.0 - haze ) );
     float fogFactor = 0.0;
   #endif
@@ -218,7 +227,7 @@ export class Sky {
     this.haze.mist = Math.max(0.75 * dawn, nightMist, 0.08);
 
     if (renderer) {
-      // Skylight only needs refreshing as the sun moves; the horizon also changes as you turn.
+      // Skylight only needs refreshing as the sun moves.
       if (!(Math.abs(ang - this.envAngle) < ENV_STEP)) { this.envAngle = ang; this.captureEnv(renderer); }
       this.probeTimer -= dt;
       if (this.probeTimer <= 0 && !this.probing) { this.probeTimer = PROBE_INTERVAL; this.probeHorizon(renderer, camera); }
@@ -236,11 +245,14 @@ export class Sky {
     this.scene.environmentIntensity = 0.55;
   }
 
-  /** Sample the sky just above the horizon, the way the camera faces, for the haze colour. */
-  private probeHorizon(renderer: THREE.WebGLRenderer, camera?: THREE.Camera) {
-    const fwd = new THREE.Vector3(0, 0, -1);
-    if (camera) camera.getWorldDirection(fwd);
-    fwd.y = 0;
+  /**
+   * Sample the sky just above the horizon, side-on to the sun, for the haze
+   * colour. (Looking into the sun the sky is far brighter; that glow is added
+   * in the fog shader in the sun's direction only, so turning your head
+   * doesn't wash the whole view out.)
+   */
+  private probeHorizon(renderer: THREE.WebGLRenderer, _camera?: THREE.Camera) {
+    const fwd = new THREE.Vector3(-this.sunDir.z, 0, this.sunDir.x);
     if (fwd.lengthSq() < 1e-4) fwd.set(0, 0, -1);
     fwd.normalize();
     this.probeCam.position.set(0, 0, 0);
