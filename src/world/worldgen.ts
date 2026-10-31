@@ -1,5 +1,5 @@
 import { erode, slump } from './erosion';
-import { drainage } from './hydrology';
+import { drainage, localDrainage } from './hydrology';
 import { climate, SNOW_TEMP, tempAt, zoneOf, type Zone } from './climate';
 import { hash2, Simplex } from './noise';
 
@@ -35,7 +35,7 @@ const STREAM_AT = STREAM_KM2 / (CELL * CELL * 1e-6);
  * land around it, on a grid of this many metres: every tile in a region uses
  * the same network, so a river runs on unbroken from tile to tile.
  */
-const REGION = 8192, REGION_MARGIN = 2048, BASIN_CELL = 64;
+const REGION = 8192, REGION_MARGIN = 6144, BASIN_CELL = 64;
 const BASIN_N = (REGION + 2 * REGION_MARGIN) / BASIN_CELL + 1;
 
 export interface RiverHit { d: number; s: number; r: number; depth: number }
@@ -124,6 +124,7 @@ const riverDepth = (km2: number) => Math.min(5, 0.35 + 0.6 * Math.sqrt(km2));
 function layRivers(
   w: number, cell: number, ox: number, oz: number, H: Float32Array, recv: Int32Array, catchment: Float32Array,
   isRiver: (i: number) => boolean, km2: (c: number) => number, sink: number, wander?: (x: number, z: number) => number,
+  lake?: (i: number) => number,
 ): number[] {
   const n = w * w;
   const rivers: number[] = [];
@@ -164,7 +165,9 @@ function layRivers(
     const j = recv[i];
     if (j < 0) continue;
     const [bx, bz] = pos(j, PX, PZ);
-    const sb = isRiver(j) ? S[j] : Math.max(SEA, Math.min(S[i], H[j]));
+    // Into a lake: down to its surface. Otherwise down to the ground it runs into.
+    const lj = lake ? lake(j) : NaN;
+    const sb = isRiver(j) ? S[j] : Math.max(SEA, Math.min(S[i], Number.isNaN(lj) ? H[j] : lj));
     const a = km2(catchment[i]);
     out.push(PX[i], PZ[i], bx, bz, S[i], sb, riverHalfWidth(a), riverDepth(a));
   }
@@ -176,8 +179,18 @@ function layRivers(
  * land around it (so it knows where water comes from), as reaches split into
  * short pieces. Kept for reuse, since every tile in the region needs them.
  */
-const regionCache = new Map<string, Float32Array>();
-function regionRivers(base: BaseLand, seed: number, rx: number, rz: number): Float32Array {
+interface RegionWater {
+  /** River reaches (as in TileData). */
+  reaches: Float32Array;
+  /** Lake surface on the region's coarse grid (NaN: none), from (x0, z0). */
+  lakes: Float32Array; x0: number; z0: number;
+}
+/** How far below the land around it a river's surface runs (metres), on the coarse grid; lakes sit the same. */
+const RIVER_SINK = 2.5;
+/** How far from a river its valley sides can reach (metres), where it's cut down through high ground. */
+const VALLEY = 220;
+const regionCache = new Map<string, RegionWater>();
+function regionRivers(base: BaseLand, seed: number, rx: number, rz: number): RegionWater {
   const key = `${seed}:${rx},${rz}`;
   const hit = regionCache.get(key);
   if (hit) return hit;
@@ -185,12 +198,32 @@ function regionRivers(base: BaseLand, seed: number, rx: number, rz: number): Flo
   const gx0 = rx * REGION - REGION_MARGIN, gz0 = rz * REGION - REGION_MARGIN;
   const Hc = new Float32Array(BN * BN);
   for (let k = 0; k < Hc.length; k++) Hc[k] = base.height(gx0 + (k % BN) * B, gz0 + Math.floor(k / BN) * B);
-  const dr = drainage(Hc, BN, SEA, undefined, { cell: B, streamAt: Infinity, minLake: Infinity, lakeDepth: 0 });
+  const dr = localDrainage(Hc, BN, SEA);
   const km2 = (c: number) => c * B * B * 1e-6;
   const meander = new Simplex(seed + 77);
+  // Lakes fill hollows up to where they spill out; rivers run into them and on from their outlets.
+  const lakes = dr.level.map((l, i) => (l - RIVER_SINK > Hc[i] + 0.5 ? l - RIVER_SINK : NaN));
   const coarse = layRivers(BN, B, gx0, gz0, Hc, dr.recv, dr.catchment,
-    (i) => km2(dr.catchment[i]) >= RIVER_KM2 && Hc[i] > SEA, km2, 2.5,
-    (x, z) => meander.fbm(x / 420, z / 420, 2) * 30);
+    (i) => km2(dr.catchment[i]) >= RIVER_KM2 && Hc[i] > SEA && Number.isNaN(lakes[i]), km2, RIVER_SINK,
+    (x, z) => meander.fbm(x / 420, z / 420, 2) * 30, (i) => lakes[i]);
+  // Where the coarse grid has a river end at the sea but the finer land runs on
+  // a little further, carry it on (gently down to sea level) until it reaches the shore.
+  const starts = new Set<string>();
+  for (let k = 0; k < coarse.length; k += 8) starts.add(`${Math.round(coarse[k])},${Math.round(coarse[k + 1])}`);
+  const ends = coarse.length;
+  for (let k = 0; k < ends; k += 8) {
+    let bx = coarse[k + 2], bz = coarse[k + 3];
+    if (starts.has(`${Math.round(bx)},${Math.round(bz)}`)) continue;
+    const ei = Math.round((bz - gz0) / B) * BN + Math.round((bx - gx0) / B);
+    if (!(Hc[ei] <= SEA)) continue; // it ends in a lake, not the sea
+    const dx = bx - coarse[k], dz = bz - coarse[k + 1], l = Math.hypot(dx, dz) || 1;
+    let s0 = coarse[k + 5];
+    for (let step = 0; step < 30 && base.height(bx, bz) > SEA - 1; step++) {
+      const nx = bx + (dx / l) * 16, nz = bz + (dz / l) * 16, s1 = Math.max(SEA, s0 - 0.3);
+      coarse.push(bx, bz, nx, nz, s0, s1, coarse[k + 6], coarse[k + 7]);
+      bx = nx; bz = nz; s0 = s1;
+    }
+  }
   // Keep the region's own (plus a little), in pieces about 16 m long.
   const out: number[] = [];
   const lo = -600, hi = REGION + 600;
@@ -205,7 +238,7 @@ function regionRivers(base: BaseLand, seed: number, rx: number, rz: number): Flo
         coarse[k + 4] + (coarse[k + 5] - coarse[k + 4]) * t0, coarse[k + 4] + (coarse[k + 5] - coarse[k + 4]) * t1, coarse[k + 6], coarse[k + 7]);
     }
   }
-  const res = new Float32Array(out);
+  const res: RegionWater = { reaches: new Float32Array(out), lakes, x0: gx0, z0: gz0 };
   regionCache.set(key, res);
   if (regionCache.size > 6) regionCache.delete(regionCache.keys().next().value!);
   return res;
@@ -237,7 +270,8 @@ export function buildTile(seed: number, tx: number, tz: number, base = new BaseL
   const span = TN * CELL;
   const big: number[] = [];
   const rx = Math.floor((tx * TILE + TILE / 2) / REGION), rz = Math.floor((tz * TILE + TILE / 2) / REGION);
-  const R = regionRivers(base, seed, rx, rz);
+  const region = regionRivers(base, seed, rx, rz);
+  const R = region.reaches;
   for (let k = 0; k < R.length; k += 8) {
     const m = R[k + 6] + 40;
     if (Math.max(R[k], R[k + 2]) < ox - m || Math.min(R[k], R[k + 2]) > ox + span + m) continue;
@@ -246,10 +280,11 @@ export function buildTile(seed: number, tx: number, tz: number, base = new BaseL
   }
   const nearBig = new Uint8Array(n);
   const riverSurface = new Float32Array(n).fill(NaN);
+  const inChannel = new Uint8Array(n);
   for (let k = 0; k < big.length; k += 8) {
     const ax = big[k], az = big[k + 1], dx = big[k + 2] - ax, dz = big[k + 3] - az, r = big[k + 6];
     const len2 = dx * dx + dz * dz;
-    const reach = Math.ceil((r + 40) / CELL) + 2;
+    const reach = Math.ceil((r + VALLEY) / CELL) + 2;
     const cx = Math.round((ax - ox) / CELL), cz = Math.round((az - oz) / CELL);
     for (let iz = cz - reach; iz <= cz + reach; iz++) {
       for (let ix = cx - reach; ix <= cx + reach; ix++) {
@@ -257,26 +292,61 @@ export function buildTile(seed: number, tx: number, tz: number, base = new BaseL
         const i = iz * TN + ix, x = ox + ix * CELL, z = oz + iz * CELL;
         const t = len2 > 0 ? clamp01(((x - ax) * dx + (z - az) * dz) / len2) : 0;
         const d = Math.hypot(x - (ax + dx * t), z - (az + dz * t));
-        if (d > r + 40) continue;
+        if (d > r + VALLEY) continue;
         const sf = big[k + 4] + (big[k + 5] - big[k + 4]) * t;
-        // The channel, and the valley sides easing up from its banks.
-        H[i] = Math.min(H[i], d < r ? sf + 0.25 : sf + 0.3 + (d - r) * 0.35);
+        // The channel, a gentle floodplain beside it, then valley sides rising
+        // at up to about 35° wherever the river has had to cut down.
+        const e = d - r;
+        H[i] = Math.min(H[i], e < 0 ? sf + 0.25 : e < 40 ? sf + 0.3 + e * 0.35 : sf + 14.3 + (e - 40) * 0.7);
         if (d < r + 24) nearBig[i] = 1;
+        if (d < r + 2) inChannel[i] = 1;
         if (d < r - CELL * 0.5 && !(riverSurface[i] <= sf)) riverSurface[i] = sf;
       }
     }
   }
+  // The region's lakes: the ground under them sits below their surface.
+  const lakeLevel = new Float32Array(n).fill(NaN);
+  {
+    const B = BASIN_CELL, BN = BASIN_N;
+    for (let i = 0; i < n; i++) {
+      const fx = (ox + (i % TN) * CELL - region.x0) / B, fz = (oz + Math.floor(i / TN) * CELL - region.z0) / B;
+      // The lake's own cells are always water (the rivers running into it end
+      // there); round its edges it spreads as far as the land lies below it.
+      const nx = Math.round(fx), nz = Math.round(fz);
+      const own = nx >= 0 && nz >= 0 && nx < BN && nz < BN ? region.lakes[nz * BN + nx] : NaN;
+      let L = own;
+      for (const [dx, dz] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
+        const cx = Math.floor(fx) + dx, cz = Math.floor(fz) + dz;
+        if (cx < 0 || cz < 0 || cx >= BN || cz >= BN) continue;
+        const l = region.lakes[cz * BN + cx];
+        if (!Number.isNaN(l) && !(L >= l)) L = l;
+      }
+      if (Number.isNaN(L) || (Number.isNaN(own) && L <= H[i] + 0.2)) continue;
+      lakeLevel[i] = L;
+      H[i] = Math.min(H[i], L - 1.2);
+    }
+  }
   const clim = climate(H, TN, seed, SEA, ox, oz, CELL);
   const dr = drainage(H, TN, SEA, clim.rain, { cell: CELL, streamAt: STREAM_AT, minLake: 8, lakeDepth: 12 });
-  // The land's own streams, until they reach a river.
-  const small = layRivers(TN, CELL, ox, oz, H, dr.recv, dr.catchment, (i) => dr.kind[i] === 1 && !nearBig[i],
-    (c) => c * CELL * CELL * 1e-6, 0.5);
-  for (let i = 0; i < n; i++) if (dr.kind[i] === 1 && nearBig[i]) { dr.kind[i] = 0; dr.S[i] = NaN; }
+  // The land's own streams, until they reach a river. Near a river the map's
+  // own drainage mostly just retraces it, so streams are left out there,
+  // except a stream coming in from outside, which carries on down into it.
+  const feeds = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    if (dr.kind[i] !== 1 || nearBig[i]) continue;
+    let c = dr.recv[i];
+    if (c < 0 || !nearBig[c]) continue;
+    for (let step = 0; c >= 0 && !inChannel[c] && !feeds[c] && step < 16; step++, c = dr.recv[c]) feeds[c] = 1;
+  }
+  const isStream = (i: number) => dr.kind[i] === 1 && (!nearBig[i] || feeds[i] === 1);
+  const small = layRivers(TN, CELL, ox, oz, H, dr.recv, dr.catchment, isStream, (c) => c * CELL * CELL * 1e-6, 0.5);
+  for (let i = 0; i < n; i++) if (dr.kind[i] === 1 && !isStream(i)) { dr.kind[i] = 0; dr.S[i] = NaN; }
   // Wide rivers on the map itself (kind 3), so they show from afar as well.
   for (let i = 0; i < n; i++) {
     if (Number.isNaN(riverSurface[i]) || dr.kind[i] === 2 || riverSurface[i] <= SEA + 0.1) continue;
     dr.kind[i] = 3; dr.S[i] = riverSurface[i];
   }
+  for (let i = 0; i < n; i++) if (!Number.isNaN(lakeLevel[i])) { dr.kind[i] = 2; dr.S[i] = lakeLevel[i]; }
   for (let i = 0; i < n; i++) if (dr.kind[i]) clim.moist[i] = Math.min(1, clim.moist[i] + 0.25);
   const reaches = big.concat(small);
   return {

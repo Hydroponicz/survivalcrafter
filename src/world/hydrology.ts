@@ -31,7 +31,7 @@ export interface DrainageOptions {
 }
 
 /** Binary min-heap of cell indices keyed by height. */
-class Heap {
+export class Heap {
   private keys: Float64Array;
   private vals: Int32Array;
   size = 0;
@@ -168,4 +168,91 @@ export function drainage(H: Float32Array, w: number, sea: number, rain: Float32A
     kind[c] = 1;
   }
   return { F, recv, catchment, kind, S };
+}
+
+/**
+ * Drainage worked out from the lie of the land nearby only, so any map that
+ * covers a place agrees on where its water goes (unlike the flood above,
+ * whose routes can depend on the map's edges). Water runs down the steepest
+ * slope; from the bottom of a hollow it takes the lowest way out to lower
+ * ground within `reach` cells. A hollow between `lakeDepth` and
+ * `maxLakeDepth` deep (and no bigger than `maxLakeCells`) fills into a lake up
+ * to its way out (`level`, NaN elsewhere); a river cuts its way through any
+ * other. Cells on the map's edge whose water leaves it, and the
+ * sea, drain nowhere (-1). A closed basin keeps its water as a small lake.
+ */
+export function localDrainage(H: Float32Array, w: number, sea: number, reach = 40, lakeDepth = 3, maxLakeDepth = 14, maxLakeCells = 260):
+  { recv: Int32Array; catchment: Float32Array; level: Float32Array } {
+  const n = w * w;
+  const recv = new Int32Array(n).fill(-1);
+  const level = new Float32Array(n).fill(NaN);
+  const pits: number[] = [];
+  for (let i = 0; i < n; i++) {
+    if (H[i] <= sea) continue;
+    const cx = i % w, cz = (i / w) | 0;
+    let best = -1, drop = 0, edge = false;
+    for (let k = 0; k < 8; k++) {
+      const x = cx + NX[k], z = cz + NZ[k];
+      if (x < 0 || z < 0 || x >= w || z >= w) { edge = true; continue; }
+      const j = z * w + x;
+      const s = (H[i] - H[j]) / (k < 4 ? 1 : Math.SQRT2);
+      if (s > drop) { drop = s; best = j; }
+    }
+    if (best >= 0) recv[i] = best;
+    else if (!edge) pits.push(i);
+  }
+  // Hollows, highest first: a lower one's way out takes precedence where they cross.
+  pits.sort((a, b) => H[b] - H[a] || a - b);
+  const seen = new Map<number, number>();
+  for (const p of pits) {
+    seen.clear();
+    const heap = new Heap((2 * reach + 1) ** 2);
+    heap.push(H[p], p);
+    seen.set(p, -1);
+    const px = p % w, pz = (p / w) | 0;
+    let target = -1, spill = H[p];
+    const basin: number[] = [];
+    while (heap.size) {
+      const c = heap.pop();
+      if (c !== p && H[c] < H[p]) { target = c; break; }
+      spill = Math.max(spill, H[c]);
+      basin.push(c);
+      const cx = c % w, cz = (c / w) | 0;
+      for (let k = 0; k < 8; k++) {
+        const x = cx + NX[k], z = cz + NZ[k];
+        if (x < 0 || z < 0 || x >= w || z >= w || Math.abs(x - px) > reach || Math.abs(z - pz) > reach) continue;
+        const j = z * w + x;
+        if (seen.has(j)) continue;
+        seen.set(j, c);
+        heap.push(H[j], j);
+      }
+    }
+    if (target < 0) {
+      // A closed basin: its water stays, as a small lake in the bottom.
+      for (const c of basin) if (H[c] < H[p] + lakeDepth) level[c] = Math.max(level[c] || -Infinity, H[p] + lakeDepth);
+      continue;
+    }
+    const depth = spill - H[p];
+    if (depth >= lakeDepth && depth <= maxLakeDepth) {
+      const under = basin.filter((c) => H[c] < spill);
+      if (under.length <= maxLakeCells) for (const c of under) level[c] = Math.max(level[c] || -Infinity, spill);
+    }
+    // Route the hollow out along the way the search came.
+    for (let c = target, prev = seen.get(target)!; prev >= 0; c = prev, prev = seen.get(prev)!) recv[prev] = c;
+  }
+  // Add up what drains through each cell (upstream first).
+  const indeg = new Int32Array(n);
+  for (let i = 0; i < n; i++) if (recv[i] >= 0) indeg[recv[i]]++;
+  const catchment = new Float32Array(n).fill(1);
+  const queue: number[] = [];
+  for (let i = 0; i < n; i++) if (indeg[i] === 0) queue.push(i);
+  for (let q = 0; q < queue.length; q++) {
+    const c = queue[q], j = recv[c];
+    if (j < 0) continue;
+    catchment[j] += catchment[c];
+    if (--indeg[j] === 0) queue.push(j);
+  }
+  // Anything left in a loop (it shouldn't happen) drains nowhere.
+  for (let i = 0; i < n; i++) if (indeg[i] > 0) recv[i] = -1;
+  return { recv, catchment, level };
 }
