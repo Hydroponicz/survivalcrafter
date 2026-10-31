@@ -28,6 +28,66 @@ function loadNormals() {
   });
 }
 
+/**
+ * Foam, drawn here rather than loaded: red is a web of bubbles (the bright
+ * rims between cells, at two sizes), green a soft blotchy coverage that
+ * breaks the foam into patches and streaks. Tiles seamlessly.
+ */
+function makeFoamTexture(): THREE.Texture {
+  const S = 256;
+  const data = new Uint8Array(S * S * 4);
+  let seed = 1234567;
+  const rand = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+  // Bubble rims: distance between the nearest and second-nearest cell points (wrapping).
+  const cells = (n: number) => {
+    const pts = Array.from({ length: n * n }, () => [rand(), rand()]);
+    return (u: number, v: number) => {
+      const cx = Math.floor(u * n), cy = Math.floor(v * n);
+      let d1 = 9, d2 = 9;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const gx = cx + dx, gy = cy + dy;
+        const p = pts[(((gy % n) + n) % n) * n + (((gx % n) + n) % n)];
+        const d = Math.hypot((gx + p[0]) / n - u, (gy + p[1]) / n - v) * n;
+        if (d < d1) { d2 = d1; d1 = d; } else if (d < d2) d2 = d;
+      }
+      return d2 - d1; // 0 on a rim, larger inside a bubble
+    };
+  };
+  const big = cells(14), small = cells(38);
+  // Smooth tileable value noise for coverage.
+  const vn = (n: number) => {
+    const g = Array.from({ length: n * n }, () => rand());
+    return (u: number, v: number) => {
+      const x = u * n, y = v * n, x0 = Math.floor(x), y0 = Math.floor(y), tx = x - x0, ty = y - y0;
+      const at = (a: number, b: number) => g[((b % n + n) % n) * n + ((a % n + n) % n)];
+      const sx = tx * tx * (3 - 2 * tx), sy = ty * ty * (3 - 2 * ty);
+      const a = at(x0, y0) + (at(x0 + 1, y0) - at(x0, y0)) * sx, b = at(x0, y0 + 1) + (at(x0 + 1, y0 + 1) - at(x0, y0 + 1)) * sx;
+      return a + (b - a) * sy;
+    };
+  };
+  const c1 = vn(5), c2 = vn(11);
+  for (let y = 0; y < S; y++) {
+    for (let x = 0; x < S; x++) {
+      const u = x / S, v = y / S;
+      const rim = Math.max(1 - big(u, v) / 0.7, 0.85 * (1 - small(u, v) / 0.55), 0);
+      const k = (y * S + x) * 4;
+      data[k] = Math.round(Math.min(1, rim) * 255);
+      data[k + 1] = Math.round((c1(u, v) * 0.65 + c2(u, v) * 0.35) * 255);
+      data[k + 2] = 0;
+      data[k + 3] = 255;
+    }
+  }
+  const t = new THREE.DataTexture(data, S, S);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.magFilter = THREE.LinearFilter;
+  t.minFilter = THREE.LinearMipmapLinearFilter;
+  t.generateMipmaps = true;
+  t.anisotropy = 8;
+  t.needsUpdate = true;
+  return t;
+}
+const foamTex = { value: null as THREE.Texture | null };
+
 export interface WaterOptions {
   /** Where the depth comes from: a `depth` vertex attribute, or the sea-floor map. */
   depth: 'attribute' | 'seafloor';
@@ -45,6 +105,8 @@ export function makeWaterMaterial(o: WaterOptions): THREE.MeshStandardMaterial {
   loadNormals();
   const m = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, roughness: 0.05, metalness: 0 });
   m.onBeforeCompile = (shader) => {
+    foamTex.value ??= makeFoamTexture();
+    shader.uniforms.uFoam = foamTex;
     shader.uniforms.uWaterTime = waterTime;
     shader.uniforms.uWaterNormals = normals;
     shader.uniforms.uSeaFloor = seaFloor.texture;
@@ -68,6 +130,20 @@ ${o.rapids ? `varying float vFoam;
 varying vec2 vFlow;` : ''}
 uniform float uWaterTime;
 uniform sampler2D uWaterNormals;
+uniform sampler2D uFoam;
+// Foam where 'amount' (0..1) calls for it: the bubble web fills in from its
+// rims as the amount rises, broken into patches, soft at the edges.
+// The same, with the clumping taken from a separate (larger) sample.
+float foamAt2(vec4 f, float cover, float amount) {
+  float a = clamp(amount, 0.0, 1.0);
+  // Clumps where the coverage runs high (more of them as the amount rises),
+  // feathered at their edges, each a mass of bubbles brightest on the rims.
+  float clump = smoothstep(0.82 - 0.45 * a, 1.12 - 0.45 * a, cover);
+  return clump * mix(0.45, 1.0, smoothstep(0.2, 0.8, f.r));
+}
+float foamAt(vec4 f, float amount) {
+  return foamAt2(f, f.g, amount);
+}
 uniform sampler2D uSeaFloor;
 uniform vec4 uSeaArea;
 vec2 waterRipple(vec2 p, float scale, vec2 drift) {
@@ -85,6 +161,15 @@ float carried(vec2 p, float scale, float speed, int ch) {
   // Blend the two, keeping the contrast even through the blend (no pulsing).
   float w = abs(2.0 * a - 1.0);
   return 0.5 + (mix(v0, v1, w) - 0.5) / sqrt(w * w + (1.0 - w) * (1.0 - w));
+}
+// The foam texture carried downstream the same way.
+vec4 carriedFoam(vec2 p, float scale, float speed) {
+  float t = uWaterTime * 0.2;
+  float a = fract(t), b = fract(t + 0.5);
+  vec2 f = vFlow * speed / scale;
+  vec4 s0 = texture2D(uFoam, p / scale - f * a);
+  vec4 s1 = texture2D(uFoam, p / scale - f * b + 0.37);
+  return mix(s0, s1, abs(2.0 * a - 1.0));
 }` : ''}`)
       .replace('#include <color_fragment>', `#include <color_fragment>
   float wd = vWaterDepth;
@@ -102,18 +187,26 @@ float carried(vec2 p, float scale, float speed, int ch) {
   vec3 wc = mix(shallowCol, midCol, 1.0 - exp(-wd / 1.8));
   wc = mix(wc, deepCol, 1.0 - exp(-wd / 9.0));
   float wa = mix(${o.fresh ? '0.4' : '0.2'}, 0.93, smoothstep(0.0, 2.6, wd));
-  // Foam lapping at the water's edge, in broken lines that wash in and out.
-  float wn = texture2D(uWaterNormals, vWaterPos.xz / 7.0 + vec2(0.013, 0.007) * uWaterTime).r;
-  float wash = 0.5 + 0.5 * sin(wd * 9.0 - uWaterTime * 1.3 + wn * 5.0);
-  float shore = (1.0 - smoothstep(0.0, 0.3, wd)) * smoothstep(0.45, 0.9, wash * 0.6 + wn * 0.6) * ${o.fresh ? '0.3' : '0.8'};
-  ${o.rapids ? `// White water tumbling down the rapids: churning patches, never solid.
-  // It's carried downstream with the current.
-  float f1 = carried(vWaterPos.xz, 2.7, 4.0, 0);
-  float f2 = carried(vWaterPos.xz, 6.1, 3.0, 1);
-  float churn = smoothstep(0.45, 0.8, f1 * 0.55 + f2 * 0.55);
-  shore = max(shore, vFoam * (0.2 + 0.7 * churn));` : ''}
-  diffuseColor.rgb = mix(wc, vec3(0.88, 0.92, 0.94), shore);
-  diffuseColor.a = mix(wa, 0.95, shore);`)
+  // Foam lapping at the water's edge: a lacy fringe of bubbles that slowly
+  // washes in and out, thinning away from the shore.
+  vec4 sf = texture2D(uFoam, vWaterPos.xz / 3.2 + vec2(0.004, 0.003) * uWaterTime);
+  float wash = 0.75 + 0.25 * sin(uWaterTime * 0.6 + sf.g * 6.0);
+  float shore = foamAt(sf, (1.0 - smoothstep(0.0, 0.45, wd)) * wash) * ${o.fresh ? '0.35' : '0.75'};
+  ${o.rapids ? `// White water down the rapids, carried along with the current: thicker
+  // where the stream falls hardest, opening into streaks and patches below.
+  // Bubbles, gathered into clumps from a larger, separate sample (so their
+  // pattern doesn't repeat), all carried along with the current.
+  vec4 rf = carriedFoam(vWaterPos.xz, 2.2, 3.0);
+  float cover = carriedFoam(vWaterPos.xz, 7.0, 2.0).g * 0.6 + carriedFoam(vWaterPos.xz + 3.1, 3.3, 3.0).g * 0.4;
+  shore = max(shore, foamAt2(rf, cover, vFoam * 0.85) * 0.72);
+  // Churned water is paler all through, not just where the bubbles are.
+  wc = mix(wc, vec3(0.42, 0.5, 0.52), vFoam * (0.25 + 0.25 * rf.g));
+  wa = mix(wa, 0.9, vFoam * 0.5);` : ''}
+  // Far off the bubbles are too small to see; foam reads as a soft paleness.
+  shore *= mix(1.0, 0.6, smoothstep(40.0, 160.0, length(vWaterPos - cameraPosition)));
+  // Foam is white with a little of the water's colour through it, never glaring.
+  diffuseColor.rgb = mix(wc, mix(vec3(0.78, 0.82, 0.84), wc * 3.0, 0.15), shore);
+  diffuseColor.a = mix(wa, 0.9, shore);`)
       .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
   {
     // Ripples at three scales drifting different ways, gentler far off (where
