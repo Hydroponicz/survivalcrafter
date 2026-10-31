@@ -11,6 +11,9 @@ import { GroundCover } from '../world/groundcover';
 import { Fireflies } from '../world/fireflies';
 import { DistantLand } from '../world/lod';
 import { GraphicsSettings } from './graphics';
+
+/** Within this distance the real trees stand (wild things load about 220 m around you); distant forests take over beyond. */
+const NEAR_TREES = 230;
 import { seaFloor } from '../world/water';
 import { WorkerTiles } from '../world/tilesource';
 import { TILE, tileOf } from '../world/worldgen';
@@ -183,7 +186,7 @@ export class Game {
     // The rest of the world, out to the horizon: map tiles are made in the
     // background as you travel, and each becomes distant land when it arrives.
     const gen = world.terrain.gen;
-    this.distant = new DistantLand();
+    this.distant = new DistantLand(gen.seed);
     this.scene.add(this.distant.group);
     gen.onTile = (d, lod) => { this.distant.addTile(d, lod); seaFloor.changed(); };
     gen.forEachTile((d) => this.distant.addTile(d));
@@ -1315,6 +1318,7 @@ export class Game {
     }
     this.groundCover.setDensity(q.plants);
     this.distant.radius = q.viewTiles;
+    this.distant.forestThin = q.forestThin;
   }
 
   private frame(timestamp: number) {
@@ -1562,6 +1566,7 @@ export class Game {
     if (this.tileTimer <= 0) { this.tileTimer = 0.5; this.keepTiles(); }
     const mc = this.world.terrain.meshCentre;
     this.distant.setHole(mc.x, mc.z, Number.isFinite(mc.x) ? Math.max(0, this.world.terrain.readyRadius - 6) : 0);
+    this.distant.setTreesNear(p.pos.x, p.pos.z, NEAR_TREES);
     this.fireflies.update(this.renderDt, this.elapsed, this.camera.position, this.world.terrain, this.amb.fireflies);
     const a = this.amb;
     this.sound.ambience({ wind: a.wind, river: a.water, birds: a.birds, night: a.crickets, frogs: a.frogs }, this.renderDt);

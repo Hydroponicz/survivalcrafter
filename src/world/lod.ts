@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { FarForest } from './farforest';
 import { makeWaterMaterial } from './water';
 import { BLEND, CELL, LOD_N, PAD, TILE, TN, tileLodColors, type TileData } from './worldgen';
 
@@ -21,7 +22,10 @@ const STEPS = [1, 2, 4];
 /** Map cells per tile side, and how many cells either side of a join are blended. */
 const N_CELLS = TILE / CELL, B_CELLS = BLEND / CELL, OFF = PAD / CELL;
 
-interface LodTile { d: TileData; cols: Float32Array; group: THREE.Group; land: THREE.Mesh }
+interface LodTile {
+  d: TileData; cols: Float32Array; group: THREE.Group; land: THREE.Mesh;
+  trees: { mesh: THREE.InstancedMesh; counts: [number, number, number] } | null;
+}
 
 export class DistantLand {
   readonly group = new THREE.Group();
@@ -32,8 +36,13 @@ export class DistantLand {
   private tiles = new Map<string, LodTile>();
   /** Tiles of distant land drawn around you (a graphics setting, up to LOD_TILES). */
   radius = LOD_TILES;
+  /** Thin the distant forests by this many levels (a graphics setting). */
+  forestThin = 0;
+  private forest: FarForest | null;
 
-  constructor() {
+  /** With a world seed, distant land carries forests too. */
+  constructor(seed?: number) {
+    this.forest = seed === undefined ? null : new FarForest(seed);
     this.material.onBeforeCompile = (sh) => this.cut(sh);
     // Overlapping river ribbons at the same height shouldn't blend twice.
     this.waterMaterial.depthFunc = THREE.LessDepth;
@@ -69,6 +78,7 @@ export class DistantLand {
       const d = Math.max(Math.abs((t.d.tx + 0.5) * TILE - x), Math.abs((t.d.tz + 0.5) * TILE - z)) / TILE;
       const level = d < 1.6 ? 0 : d < 2.6 ? 1 : 2;
       if (t.land.geometry.index !== this.indexes[level]) t.land.geometry.setIndex(this.indexes[level]);
+      if (t.trees) t.trees.mesh.count = t.trees.counts[Math.min(2, level + this.forestThin)];
     }
   }
 
@@ -208,7 +218,9 @@ export class DistantLand {
     const group = new THREE.Group();
     const land = new THREE.Mesh(geo, this.material);
     group.add(land);
-    const t: LodTile = { d, cols, group, land };
+    const trees = this.forest?.build(d) ?? null;
+    if (trees) group.add(trees.mesh);
+    const t: LodTile = { d, cols, group, land, trees };
     this.tiles.set(key, t);
     this.shape(t, false);
     // The neighbours' joins with this tile can now be blended properly.
@@ -280,7 +292,10 @@ export class DistantLand {
     for (const [key, t] of this.tiles) {
       const g = t.group, tx = t.d.tx, tz = t.d.tz;
       if (Math.max(Math.abs((tx + 0.5) * TILE - x), Math.abs((tz + 0.5) * TILE - z)) <= (this.radius + 1.5) * TILE) continue;
-      for (const m of g.children) (m as THREE.Mesh).geometry.dispose();
+      for (const m of g.children) {
+        if (m instanceof THREE.InstancedMesh) m.dispose(); // its crown geometry is shared
+        else (m as THREE.Mesh).geometry.dispose();
+      }
       this.group.remove(g);
       this.tiles.delete(key);
     }
@@ -291,6 +306,11 @@ export class DistantLand {
   /** Cut a hole where the detailed terrain is (x, z, radius). */
   setHole(x: number, z: number, r: number) {
     this.hole.value.set(x, z, r);
+  }
+
+  /** Where the real trees stand (x, z, radius): the distant forests leave that to them. */
+  setTreesNear(x: number, z: number, r: number) {
+    this.forest?.near.value.set(x, z, r);
   }
 
   /** Patch a shader to leave out the hole. */

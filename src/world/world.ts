@@ -112,7 +112,7 @@ export function pointInPiece(s: StructureObj, x: number, y: number, z: number, m
 }
 
 /** What grows in each climate zone: tree density per 4 m², species mix, stature, berry bushes. */
-const VEGETATION: Record<Zone, { trees: number; oak: number; birch: number; pine: number; stature: number; bushes: number }> = {
+export const VEGETATION: Record<Zone, { trees: number; oak: number; birch: number; pine: number; stature: number; bushes: number }> = {
   broadleaf: { trees: 0.11, oak: 6, birch: 3, pine: 1, stature: 1, bushes: 0.04 },
   conifer: { trees: 0.14, oak: 0.5, birch: 1.5, pine: 8, stature: 1, bushes: 0.02 },
   meadow: { trees: 0.012, oak: 6, birch: 2, pine: 1, stature: 1, bushes: 0.05 },

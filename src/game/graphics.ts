@@ -17,12 +17,14 @@ export interface QualityLevel {
   plants: number;
   /** How many map tiles (1 km) of distant land to draw around you. */
   viewTiles: number;
+  /** Thin distant forests by this many levels of detail (0: full). */
+  forestThin: number;
 }
 
 export const QUALITY: Record<Quality, QualityLevel> = {
-  low: { label: 'Low', pixelRatio: 0.75, shadowSize: 0, shadowEvery: 1, plants: 0.4, viewTiles: 2 },
-  medium: { label: 'Medium', pixelRatio: 1, shadowSize: 1024, shadowEvery: 2, plants: 0.7, viewTiles: 3 },
-  high: { label: 'High', pixelRatio: 2, shadowSize: 2048, shadowEvery: 1, plants: 1, viewTiles: 3 },
+  low: { label: 'Low', pixelRatio: 0.75, shadowSize: 0, shadowEvery: 1, plants: 0.4, viewTiles: 2, forestThin: 1 },
+  medium: { label: 'Medium', pixelRatio: 1, shadowSize: 1024, shadowEvery: 2, plants: 0.7, viewTiles: 3, forestThin: 0 },
+  high: { label: 'High', pixelRatio: 2, shadowSize: 2048, shadowEvery: 1, plants: 1, viewTiles: 3, forestThin: 0 },
 };
 
 /** Frame rate caps on offer (0: as fast as the screen refreshes). */
