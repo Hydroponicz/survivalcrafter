@@ -1035,6 +1035,53 @@ export class WorldGen {
       }
     }
     t.level = level;
+    this.joinMouths(t);
+  }
+
+  /**
+   * A stream whose last stretch stops short of the water it was running
+   * into (a lake that settled lower, or one another tile traced a little
+   * differently) carries on down to the nearest water within reach.
+   */
+  private joinMouths(t: Tile) {
+    const R = t.d.reaches;
+    const starts = new Set<string>();
+    for (let k = 0; k < R.length; k += 8) starts.add(`${R[k]},${R[k + 1]}`);
+    const x0 = t.d.tx * TILE, z0 = t.d.tz * TILE;
+    for (let k = 0; k < R.length; k += 8) {
+      const bx = R[k + 2], bz = R[k + 3];
+      if (starts.has(`${bx},${bz}`) || R[k] < x0 || R[k] >= x0 + TILE || R[k + 1] < z0 || R[k + 1] >= z0 + TILE) continue;
+      const se = R[k + 5];
+      const dx = bx - R[k], dz = bz - R[k + 1], l = Math.hypot(dx, dz) || 1;
+      // Already in water just past its end?
+      const px = bx + (dx / l) * 2, pz = bz + (dz / l) * 2;
+      if (this.mapHeight(px, pz) < SEA || !Number.isNaN(this.waterBeside(px, pz, R, k))) continue;
+      // The nearest water no higher than the stream, searching outward (ahead of it first).
+      let best: [number, number, number] | null = null;
+      for (let rad = 3; rad <= 32 && !best; rad += 3) {
+        for (let a = 0; a < 24; a++) {
+          const ang = Math.atan2(dz, dx) + ((a % 2 ? 1 : -1) * Math.ceil(a / 2) * Math.PI) / 12;
+          const x = bx + Math.cos(ang) * rad, z = bz + Math.sin(ang) * rad;
+          const w = this.mapHeight(x, z) < SEA ? SEA : this.waterBeside(x, z, R, k);
+          if (!Number.isNaN(w) && w <= se + 0.2) { best = [x, z, w]; break; }
+        }
+      }
+      if (best) t.lakeLinks.push(bx, bz, best[0], best[1], se, Math.min(se, best[2]), R[k + 6], R[k + 7]);
+    }
+  }
+
+  /** Water at a point other than the stream stretch k of reaches R itself (NaN if none). */
+  private waterBeside(x: number, z: number, R: Float32Array, k: number): number {
+    const lake = this.lakeSurface(x, z);
+    if (!Number.isNaN(lake)) return lake;
+    const rv = this.river(x, z);
+    if (!rv || rv.d > rv.r) return NaN;
+    // Not just this same stream: it must be a different one (or lower down).
+    const ax = R[k], az = R[k + 1], bx = R[k + 2], bz = R[k + 3];
+    const dx = bx - ax, dz = bz - az, l2 = dx * dx + dz * dz;
+    const tt = l2 > 0 ? clamp01(((x - ax) * dx + (z - az) * dz) / l2) : 0;
+    if (Math.hypot(x - ax - dx * tt, z - az - dz * tt) < R[k + 6] + 0.5 && rv.s >= R[k + 5] - 0.05) return NaN;
+    return rv.s;
   }
 
   private linkCache = new Map<string, Float32Array>();
