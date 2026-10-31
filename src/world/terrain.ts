@@ -928,6 +928,24 @@ export class Terrain {
       // itself (on a steep stream the water uphill would otherwise poke out).
       if (cnt) V[k] = Math.min(sum / cnt - 0.25, ci.h[k] - 0.1);
     }
+    // Running water's surface smoothed over its neighbours, so it slopes
+    // evenly down the stream instead of stepping from one metre to the next.
+    {
+      const src = V.slice();
+      for (let k = 0; k < CI * CI; k++) {
+        if (Number.isNaN(W[k])) continue;
+        const lx = k % CI, lz = Math.floor(k / CI);
+        let sum = src[k] * 2, cnt = 2;
+        for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const x = lx + dx, z = lz + dz;
+          if (x < 0 || z < 0 || x >= CI || z >= CI) continue;
+          const w = W[z * CI + x];
+          if (Number.isNaN(w)) continue;
+          sum += w; cnt++;
+        }
+        V[k] = sum / cnt;
+      }
+    }
     const mesh = new THREE.Mesh(new THREE.BufferGeometry(), this.riverMaterial());
     mesh.visible = false;
     this.waterMeshes.set(key, mesh);
@@ -969,8 +987,10 @@ export class Terrain {
       }
       fall /= n;
       // Wide rivers need a harder drop to break white.
-      const need = 0.03 + Math.min(0.03, here.r * 0.002);
-      return Math.max(0, Math.min(1, (fall - need) / 0.07));
+      // Gentle riffles stay clear; white water only where it really drops.
+      const need = 0.07 + Math.min(0.03, here.r * 0.002);
+      const t = Math.max(0, Math.min(1, (fall - need) / 0.15));
+      return t * t * (3 - 2 * t);
     };
     const vid = new Int32Array(CI * CI).fill(-1);
     const x0 = cx * CH - 1, z0 = cz * CH - 1;
