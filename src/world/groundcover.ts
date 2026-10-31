@@ -421,8 +421,9 @@ export class GroundCover {
         const roll = r() * 3; // three samples per m²: compare densities against this
         const yaw = r() * Math.PI * 2;
         const wet = t.freshWaterAt(x, z) || t.nearWaterAt(x, z);
-        // Reeds: along banks and standing in the shallows.
-        if (wet && (g.mat === Mat.Grass || g.mat === Mat.Clay || g.mat === Mat.Sand || g.mat === Mat.Gravel) && g.h > water - 0.7 && g.slope < 0.8) {
+        // Reeds: along banks and standing in the shallows of lakes; a river
+        // keeps its channel clear, so there only right at the edge.
+        if (wet && (g.mat === Mat.Grass || g.mat === Mat.Clay || g.mat === Mat.Sand || g.mat === Mat.Gravel) && g.h > water - (t.riverAt(x, z) ? 0.2 : 0.6) && g.slope < 0.8) {
           if (roll < (g.h < water ? 1.4 : 0.9) && !blocked(x, g.h, z)) {
             const v = rnd(r, 0.85, 1.1);
             put('reeds', x, g.h - 0.05, z, yaw, rnd(r, 0.75, 1.15), v, v, v);

@@ -26,6 +26,8 @@ export interface DrainageOptions {
   minLake: number;
   /** Deepest a lake bed is scooped out (metres). */
   lakeDepth: number;
+  /** Water arriving from beyond the map's edge, per cell (in cells' worth of rain). */
+  inflow?: Float32Array;
 }
 
 /** Binary min-heap of cell indices keyed by height. */
@@ -98,7 +100,7 @@ export function drainage(H: Float32Array, w: number, sea: number, rain: Float32A
   }
 
   const catchment = new Float32Array(n);
-  for (let i = 0; i < n; i++) catchment[i] = rain ? rain[i] : 1;
+  for (let i = 0; i < n; i++) catchment[i] = (rain ? rain[i] : 1) + (o.inflow ? o.inflow[i] : 0);
   for (let k = count - 1; k >= 0; k--) {
     const c = order[k];
     if (recv[c] >= 0) catchment[recv[c]] += catchment[c];

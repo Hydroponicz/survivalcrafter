@@ -28,7 +28,9 @@ export const BLEND = 128;
 export const SEA = 0;
 
 /** Catchment (map cells of average rain) where a stream starts. */
-const STREAM_AT = 260;
+const STREAM_AT = 5000;
+/** The wider drainage basin each tile looks at to see what water flows in from outside it. */
+const BASIN_CELL = 64, BASIN_N = 193;
 
 export interface RiverHit { d: number; s: number; r: number; depth: number }
 
@@ -60,8 +62,8 @@ export class BaseLand {
 
   /** 0 open sea .. 1 inland. Mostly land, with seas, coasts and islands scattered through it. */
   land(x: number, z: number): number {
-    const wx = x + this.warp.fbm(x / 1800, z / 1800, 3) * 700, wz = z + this.warp.fbm(x / 1800 + 7, z / 1800, 3) * 700;
-    const c = this.cont.fbm(wx / 7000, wz / 7000, 4) + 0.22;
+    const wx = x + this.warp.fbm(x / 3600, z / 3600, 3) * 1400, wz = z + this.warp.fbm(x / 3600 + 7, z / 3600, 3) * 1400;
+    const c = this.cont.fbm(wx / 16000, wz / 16000, 4) + 0.22;
     return smooth(-0.05, 0.14, c);
   }
 
@@ -102,6 +104,43 @@ export class BaseLand {
   }
 }
 
+/**
+ * Water flowing into a tile's map from the land around it. Rivers gather rain
+ * from far beyond one tile, so the land 12 km around is drained coarsely
+ * (on a grid fixed in the world, so neighbouring tiles agree), and wherever
+ * that drainage crosses into the map its water is added where it enters.
+ */
+function basinInflow(base: BaseLand, H: Float32Array, ox: number, oz: number): Float32Array {
+  const B = BASIN_CELL, BN = BASIN_N, span = TN * CELL;
+  const gx0 = Math.round((ox + span / 2) / B - BN / 2) * B, gz0 = Math.round((oz + span / 2) / B - BN / 2) * B;
+  const Hc = new Float32Array(BN * BN);
+  for (let k = 0; k < Hc.length; k++) Hc[k] = base.height(gx0 + (k % BN) * B, gz0 + Math.floor(k / BN) * B);
+  const dr = drainage(Hc, BN, SEA, undefined, { cell: B, streamAt: Infinity, minLake: Infinity, lakeDepth: 0 });
+  const inflow = new Float32Array(TN * TN);
+  const inside = (x: number, z: number) => x >= ox && z >= oz && x < ox + span && z < oz + span;
+  const scale = (B * B) / (CELL * CELL);
+  for (let c = 0; c < BN * BN; c++) {
+    const r = dr.recv[c];
+    if (r < 0) continue;
+    const cx = gx0 + (c % BN) * B, cz = gz0 + Math.floor(c / BN) * B;
+    const rx = gx0 + (r % BN) * B, rz = gz0 + Math.floor(r / BN) * B;
+    if (inside(cx, cz) || !inside(rx, rz)) continue;
+    // It joins where it enters, at the lowest point near there (the valley floor).
+    let bi = -1, bh = Infinity;
+    const ix = Math.round((rx - ox) / CELL), iz = Math.round((rz - oz) / CELL);
+    for (let dz = -4; dz <= 4; dz++) for (let dx = -4; dx <= 4; dx++) {
+      const x = Math.max(2, Math.min(TN - 3, ix + dx)), z = Math.max(2, Math.min(TN - 3, iz + dz));
+      if (H[z * TN + x] < bh) { bh = H[z * TN + x]; bi = z * TN + x; }
+    }
+    inflow[bi] += dr.catchment[c] * scale;
+  }
+  return inflow;
+}
+
+/** Half-width (metres) of a river draining this many cells: wider as the square root of its catchment, as real rivers are. */
+const riverHalfWidth = (catchment: number) => Math.min(60, 2 + 9 * Math.sqrt(catchment * CELL * CELL * 1e-6));
+const riverDepth = (catchment: number) => Math.min(5, 0.6 + 0.6 * Math.sqrt(catchment * CELL * CELL * 1e-6));
+
 /** Simulate one map tile (with its overlap). Pure: safe to run in a worker. */
 export function buildTile(seed: number, tx: number, tz: number, base = new BaseLand(seed)): TileData {
   const n = TN * TN;
@@ -124,17 +163,56 @@ export function buildTile(seed: number, tx: number, tz: number, base = new BaseL
     }
   }
   const clim = climate(H, TN, seed, SEA, ox, oz, CELL);
-  const dr = drainage(H, TN, SEA, clim.rain, { cell: CELL, streamAt: STREAM_AT, minLake: 8, lakeDepth: 12 });
+  const inflow = basinInflow(base, H, ox, oz);
+  const dr = drainage(H, TN, SEA, clim.rain, { cell: CELL, streamAt: STREAM_AT, minLake: 8, lakeDepth: 12, inflow });
   for (let i = 0; i < n; i++) if (dr.kind[i]) clim.moist[i] = Math.min(1, clim.moist[i] + 0.25);
+  // River courses follow the map grid in steps; smooth them along the flow
+  // (each point toward the ones above and below it) so they curve naturally.
+  const PX = new Float32Array(n), PZ = new Float32Array(n), up = new Int32Array(n).fill(-1);
+  for (let i = 0; i < n; i++) {
+    PX[i] = ox + (i % TN) * CELL; PZ[i] = oz + Math.floor(i / TN) * CELL;
+    const j = dr.recv[i];
+    if (dr.kind[i] === 1 && j >= 0 && dr.kind[j] === 1 && (up[j] < 0 || dr.catchment[i] > dr.catchment[up[j]])) up[j] = i;
+  }
+  for (let it = 0; it < 4; it++) {
+    const qx = PX.slice(), qz = PZ.slice();
+    for (let i = 0; i < n; i++) {
+      const j = dr.recv[i], u = up[i];
+      if (dr.kind[i] !== 1 || u < 0 || j < 0 || dr.kind[j] !== 1) continue;
+      PX[i] = 0.5 * qx[i] + 0.25 * (qx[u] + qx[j]);
+      PZ[i] = 0.5 * qz[i] + 0.25 * (qz[u] + qz[j]);
+    }
+  }
   const reaches: number[] = [];
   for (let i = 0; i < n; i++) {
     if (dr.kind[i] !== 1) continue;
     const j = dr.recv[i];
     if (j < 0) continue;
-    const s = Math.min(8, Math.log2(dr.catchment[i] / STREAM_AT));
     const sb = Number.isNaN(dr.S[j]) ? SEA : dr.S[j];
-    reaches.push(ox + (i % TN) * CELL, oz + Math.floor(i / TN) * CELL, ox + (j % TN) * CELL, oz + Math.floor(j / TN) * CELL,
-      dr.S[i], sb, 1.0 + 1.2 * s, 0.5 + 0.35 * s);
+    reaches.push(PX[i], PZ[i], PX[j], PZ[j], dr.S[i], sb, riverHalfWidth(dr.catchment[i]), riverDepth(dr.catchment[i]));
+  }
+  // Wide rivers on the map itself: the ground beneath them sits just under
+  // their surface and they're marked as open water (kind 3), so they show
+  // from afar as well as up close.
+  for (let k = 0; k < reaches.length / 8; k++) {
+    const o = k * 8, r = reaches[o + 6];
+    if (r < 6) continue;
+    const ax = reaches[o], az = reaches[o + 1], dx = reaches[o + 2] - ax, dz = reaches[o + 3] - az;
+    const len2 = dx * dx + dz * dz;
+    const reach = Math.ceil(r / CELL);
+    const cx = Math.round((ax - ox) / CELL), cz = Math.round((az - oz) / CELL);
+    for (let iz = cz - reach - 1; iz <= cz + reach + 1; iz++) {
+      for (let ix = cx - reach - 1; ix <= cx + reach + 1; ix++) {
+        if (ix < 0 || iz < 0 || ix >= TN || iz >= TN) continue;
+        const i = iz * TN + ix, x = ox + ix * CELL, z = oz + iz * CELL;
+        const t = len2 > 0 ? clamp01(((x - ax) * dx + (z - az) * dz) / len2) : 0;
+        if (Math.hypot(x - (ax + dx * t), z - (az + dz * t)) > r - CELL * 0.5) continue;
+        const sf = reaches[o + 4] + (reaches[o + 5] - reaches[o + 4]) * t;
+        if (dr.kind[i] === 2 || sf <= SEA + 0.1) continue;
+        if (dr.kind[i] !== 3 || sf < dr.S[i]) { dr.S[i] = sf; dr.kind[i] = 3; }
+        H[i] = Math.min(H[i], sf + 0.3);
+      }
+    }
   }
   return {
     tx, tz, H, dep: er.deposit, flow: er.flow, kind: dr.kind, S: dr.S,

@@ -31,6 +31,8 @@ export class DistantLand {
 
   constructor() {
     this.material.onBeforeCompile = (sh) => this.cut(sh);
+    // Overlapping river ribbons at the same height shouldn't blend twice.
+    this.waterMaterial.depthFunc = THREE.LessDepth;
     // One index for every tile: the grid, then the skirt around its edge.
     const N = LOD_N;
     const idx: number[] = [];
@@ -198,7 +200,7 @@ export class DistantLand {
     }
     const off = OFF;
 
-    // Lakes, as flat sheets at their surface.
+    // Lakes and wide rivers, as sheets at their surface.
     const wpos: number[] = [], widx: number[] = [], wdepth: number[] = [];
     const vid = new Map<number, number>();
     const v = (lx: number, lz: number, s: number) => {
@@ -207,9 +209,9 @@ export class DistantLand {
       if (id === undefined) {
         id = wpos.length / 3;
         vid.set(key2, id);
-        const x = x0 + lx * CELL, z = z0 + lz * CELL;
+        const x = x0 + lx * CELL, z = z0 + lz * CELL, j = (lz + off) * TN + lx + off;
         wpos.push(x, s - 0.6, z);
-        wdepth.push(s - d.H[(lz + off) * TN + lx + off]);
+        wdepth.push(s - d.H[j]);
       }
       return id;
     };
@@ -222,6 +224,23 @@ export class DistantLand {
         const a = v(lx, lz, s), b = v(lx + 1, lz, s), c = v(lx, lz + 1, s), dd = v(lx + 1, lz + 1, s);
         widx.push(a, c, b, b, c, dd);
       }
+    }
+    // Wide rivers, as ribbons along their course (each reach a little longer
+    // than itself, so the bends join up).
+    const R = d.reaches;
+    for (let k = 0; k < R.length / 8; k++) {
+      const o = k * 8, r = R[o + 6];
+      if (r < 6 || R[o] < x0 || R[o] >= x0 + TILE || R[o + 1] < z0 || R[o + 1] >= z0 + TILE) continue;
+      const ax = R[o], az = R[o + 1], bx = R[o + 2], bz = R[o + 3];
+      const len = Math.hypot(bx - ax, bz - az) || 1, ux = (bx - ax) / len, uz = (bz - az) / len;
+      const e = r * 0.45, px = -uz * r, pz = ux * r;
+      const base = wpos.length / 3;
+      const sa = R[o + 4] - 0.6, sb = R[o + 5] - 0.6;
+      wpos.push(ax - ux * e + px, sa, az - uz * e + pz, ax - ux * e - px, sa, az - uz * e - pz,
+        bx + ux * e + px, sb, bz + uz * e + pz, bx + ux * e - px, sb, bz + uz * e - pz);
+      const dp = Math.max(3, R[o + 7]); // seen from afar, rivers read as solid water
+      wdepth.push(dp, dp, dp, dp);
+      widx.push(base, base + 2, base + 1, base + 1, base + 2, base + 3);
     }
     if (widx.length) {
       const wg = new THREE.BufferGeometry();
