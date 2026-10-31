@@ -417,12 +417,35 @@ const LAKE_REACH = 3;
 class Tile {
   readonly ox: number; readonly oz: number;
   private buckets = new Map<number, number[]>();
+  /** Streams leaving this tile, followed on until the next tile's version takes over. */
+  private tails = new Map<number, number[]>();
   lastUsed = 0;
   constructor(readonly d: TileData) {
     this.ox = d.tx * TILE - PAD;
     this.oz = d.tz * TILE - PAD;
     const R = d.reaches;
+    const x0 = d.tx * TILE, z0 = d.tz * TILE;
+    const inCore = (x: number, z: number) => x >= x0 && x < x0 + TILE && z >= z0 && z < z0 + TILE;
+    // Each stretch of stream belongs to the tile it starts in, so where tiles
+    // overlap it's drawn once (neighbours trace the same water a little
+    // differently, and both would show). A stream leaving this tile carries
+    // on along its own course (its "tail") until it meets the next tile's
+    // version of it.
+    const startAt = new Map<string, number>();
+    for (let k = 0; k < R.length / 8; k++) startAt.set(`${R[k * 8]},${R[k * 8 + 1]}`, k);
+    const tail = new Uint8Array(R.length / 8);
     for (let k = 0; k < R.length / 8; k++) {
+      if (!inCore(R[k * 8], R[k * 8 + 1]) || inCore(R[k * 8 + 2], R[k * 8 + 3])) continue;
+      let j = startAt.get(`${R[k * 8 + 2]},${R[k * 8 + 3]}`);
+      for (let step = 0; j !== undefined && step < 30 && !tail[j] && !inCore(R[j * 8], R[j * 8 + 1]); step++) {
+        tail[j] = 1;
+        j = startAt.get(`${R[j * 8 + 2]},${R[j * 8 + 3]}`);
+      }
+    }
+    for (let k = 0; k < R.length / 8; k++) {
+      const own = inCore(R[k * 8], R[k * 8 + 1]);
+      if (!own && !tail[k]) continue;
+      const buckets = own ? this.buckets : this.tails;
       const r = R[k * 8 + 6], len = Math.hypot(R[k * 8 + 2] - R[k * 8], R[k * 8 + 3] - R[k * 8 + 1]);
       const reach = Math.ceil((r + 12 + len) / CELL) + 1;
       const cx = Math.round((R[k * 8] - this.ox) / CELL), cz = Math.round((R[k * 8 + 1] - this.oz) / CELL);
@@ -430,8 +453,8 @@ class Tile {
         const bx = cx + ox, bz = cz + oz;
         if (bx < 0 || bz < 0 || bx >= TN || bz >= TN) continue;
         const key = bz * TN + bx;
-        let list = this.buckets.get(key);
-        if (!list) this.buckets.set(key, (list = []));
+        let list = buckets.get(key);
+        if (!list) buckets.set(key, (list = []));
         list.push(k);
       }
     }
@@ -462,9 +485,9 @@ class Tile {
     return cr(row(-1), row(0), row(1), row(2), tz);
   }
 
-  river(x: number, z: number, best: { hit: RiverHit | null; edge: number }) {
+  river(x: number, z: number, best: { hit: RiverHit | null; edge: number }, tails = false) {
     const ix = Math.round((x - this.ox) / CELL), iz = Math.round((z - this.oz) / CELL);
-    const list = this.buckets.get(iz * TN + ix);
+    const list = (tails ? this.tails : this.buckets).get(iz * TN + ix);
     if (!list) return;
     const R = this.d.reaches;
     for (const k of list) {
@@ -648,7 +671,19 @@ export class WorldGen {
   /** The nearest river reach to a point, if one is close enough to matter. */
   river(x: number, z: number): RiverHit | null {
     const best = { hit: null as RiverHit | null, edge: Infinity };
-    for (const [t, w] of this.cover(x, z)) if (w > 0.15) t.river(x, z, best);
+    const cover = this.cover(x, z);
+    for (const [t] of cover) t.river(x, z, best);
+    // Where the tile this point is in has no stream of its own close by, a
+    // stream from the next tile carries on over the join until it meets this
+    // tile's version of it.
+    const home = this.tiles.get(`${Math.floor(x / TILE)},${Math.floor(z / TILE)}`);
+    const own = { hit: null as RiverHit | null, edge: Infinity };
+    home?.river(x, z, own);
+    if (own.edge > 10) {
+      const tail = { hit: null as RiverHit | null, edge: Infinity };
+      for (const [t] of cover) t.river(x, z, tail, true);
+      if (tail.edge < best.edge) { best.hit = tail.hit; best.edge = tail.edge; }
+    }
     return best.hit && best.edge < 12 ? best.hit : null;
   }
 

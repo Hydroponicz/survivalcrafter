@@ -924,7 +924,9 @@ export class Terrain {
         const w = W[z * CI + x];
         if (!Number.isNaN(w)) { sum += w; cnt++; }
       }
-      if (cnt) V[k] = sum / cnt - 0.25;
+      // On the bank: just under the water beside it, and never above the bank
+      // itself (on a steep stream the water uphill would otherwise poke out).
+      if (cnt) V[k] = Math.min(sum / cnt - 0.25, ci.h[k] - 0.1);
     }
     const mesh = new THREE.Mesh(new THREE.BufferGeometry(), this.riverMaterial());
     mesh.visible = false;
