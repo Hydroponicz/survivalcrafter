@@ -745,6 +745,9 @@ export class WorldGen {
     let calm = depth > 0.05 ? 0.25 : 1;
     if (ch) calm *= 0.15 + 0.85 * smooth(ch.r, ch.r + 8, ch.d);
     h += (this.detail.fbm(x / 26, z / 26, 4) * amp + this.detail2.fbm(x / 7, z / 7, 2) * amp * 0.25) * calm;
+    // A lake bed stays under the water: only right at the shore does the
+    // ground come up through it (no scatter of tiny islands in the shallows).
+    if (depth > 0.05) h = Math.min(h, mapH + depth - 0.4 * smooth(0.1, 0.6, depth));
     // A stream running into a lake ends there: it doesn't cut on through the lake bed.
     const intoLake = smooth(0.05, 0.6, depth);
     if (ch && intoLake < 1) {
@@ -766,17 +769,18 @@ export class WorldGen {
 
   /** Fresh water surface at a point (river or lake), or NaN. Pass the ground height if known. */
   water(x: number, z: number, ground = this.height(x, z)): number {
+    // A lake fills its bed (where a stream has cut a channel far below that,
+    // the channel stays a channel: the water doesn't hang over it). Inside a
+    // lake its surface wins over a stream running in, which would otherwise
+    // lie on top of it at the stream's own level.
+    const { mapH, depth } = this.lakeSample(x, z);
+    if (depth > 0.05 && ground < mapH + depth && ground > mapH - 1.5) return mapH + depth;
     const ch = this.channel(x, z);
     // Where a river meets the sea, it's the sea.
     if (ch && ch.d < ch.r * 0.97 && ground < ch.s) return ch.sea ? NaN : ch.s;
-    // A lake fills its hollow up to its surface; just past its own cells it
-    // only laps over ground a little below that (not down into a valley beyond).
-    // A lake fills its bed; where a stream has cut a channel far below that,
-    // the channel stays a channel (the water doesn't hang over it).
-    const { mapH, depth } = this.lakeSample(x, z);
-    if (depth > 0.05 && ground < mapH + depth && ground > mapH - 1.5) return mapH + depth;
     return NaN;
   }
+
 
   /** Within a few metres of a river or lake. */
   nearWater(x: number, z: number): boolean {

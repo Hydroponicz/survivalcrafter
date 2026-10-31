@@ -932,7 +932,23 @@ export class Terrain {
     mesh.visible = false;
     this.waterMeshes.set(key, mesh);
     if (!any) return;
-    const pos: number[] = [], depth: number[] = [], idx: number[] = [], foam: number[] = [];
+    const pos: number[] = [], depth: number[] = [], idx: number[] = [], foam: number[] = [], flow: number[] = [];
+    // Which way the water runs: down its surface's slope (still water: none).
+    const current = (k: number): [number, number] => {
+      const lx = k % CI, lz = Math.floor(k / CI);
+      const at = (x: number, z: number) => {
+        if (x < 0 || z < 0 || x >= CI || z >= CI) return W[k];
+        const w = W[z * CI + x];
+        return Number.isNaN(w) ? W[k] : w;
+      };
+      if (Number.isNaN(W[k]) || !this.riverAt(x0 + lx, z0 + lz)) return [0, 0];
+      const gx = (at(lx + 1, lz) - at(lx - 1, lz)) / 2, gz = (at(lx, lz + 1) - at(lx, lz - 1)) / 2;
+      const g = Math.hypot(gx, gz);
+      if (g < 1e-4) return [0, 0];
+      // Faster where it's steeper; even a gentle river keeps moving.
+      const speed = Math.min(1, 0.25 + g * 4);
+      return [(-gx / g) * speed, (-gz / g) * speed];
+    };
     // White water where the surface drops steeply: rapids and little falls.
     const drop = (k: number) => {
       const lx = k % CI, lz = Math.floor(k / CI);
@@ -954,6 +970,7 @@ export class Terrain {
         pos.push(x, V[k] - 0.04, z);
         depth.push(V[k] - ci.h[k]);
         foam.push(drop(k));
+        flow.push(...current(k));
       }
       return vid[k];
     };
@@ -971,6 +988,7 @@ export class Terrain {
     geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     geo.setAttribute('depth', new THREE.Float32BufferAttribute(depth, 1));
     geo.setAttribute('foam', new THREE.Float32BufferAttribute(foam, 1));
+    geo.setAttribute('flow', new THREE.Float32BufferAttribute(flow, 2));
     geo.setIndex(idx);
     geo.computeVertexNormals();
     geo.computeBoundingSphere();
