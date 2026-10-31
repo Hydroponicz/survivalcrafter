@@ -11,6 +11,11 @@ import type { World } from './world';
 // sway in the wind and fade out at the edge of their range.
 
 const TILE = 16;
+/** A key for a cover tile, unique anywhere in the (endless) world. */
+const KOFF = 2 ** 20;
+const tkey = (x: number, z: number) => (z + KOFF) * 2 ** 21 + x + KOFF;
+const tkeyX = (k: number) => (k % 2 ** 21) - KOFF;
+const tkeyZ = (k: number) => Math.floor(k / 2 ** 21) - KOFF;
 
 interface Kind {
   name: string;
@@ -281,6 +286,8 @@ export class GroundCover {
   private cache = [new Map<number, TileData[]>(), new Map<number, TileData[]>()];
   /** Logs and boulders per far tile, kept for the near tiles' plants to avoid. */
   private obstacles = new Map<number, Obstacle[]>();
+  /** Share of the small plants drawn (graphics setting); the rest are left out evenly. */
+  density = 1;
   private centre = [NaN, NaN];
   private dirty = true;
   private seed: number;
@@ -305,7 +312,7 @@ export class GroundCover {
   invalidate(x: number, z: number, r: number) {
     for (const cache of this.cache) {
       for (let tz = Math.floor((z - r) / TILE); tz <= Math.floor((z + r) / TILE); tz++) {
-        for (let tx = Math.floor((x - r) / TILE); tx <= Math.floor((x + r) / TILE); tx++) { cache.delete(tz * 1000 + tx); this.obstacles.delete(tz * 1000 + tx); }
+        for (let tx = Math.floor((x - r) / TILE); tx <= Math.floor((x + r) / TILE); tx++) { cache.delete(tkey(tx, tz)); this.obstacles.delete(tkey(tx, tz)); }
       }
     }
     this.dirty = true;
@@ -328,21 +335,28 @@ export class GroundCover {
       const want: [number, number, number][] = [];
       for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) {
         const x = tx + dx, z = tz + dz;
-        if (!cache.has(z * 1000 + x)) want.push([x, z, dx * dx + dz * dz]);
+        if (!cache.has(tkey(x, z))) want.push([x, z, dx * dx + dz * dz]);
       }
       want.sort((a, b) => a[2] - b[2]);
       for (const [x, z] of want) {
         if (performance.now() - start > budgetMs && cache.size > 0) { missing = true; break; }
-        cache.set(z * 1000 + x, this.generate(x, z, far));
+        cache.set(tkey(x, z), this.generate(x, z, far));
       }
       // Drop tiles well out of range so memory doesn't grow.
       for (const k of cache.keys()) {
-        const x = k % 1000, z = Math.floor(k / 1000);
+        const x = tkeyX(k), z = tkeyZ(k);
         if (Math.abs(x - tx) > r + 2 || Math.abs(z - tz) > r + 2) { cache.delete(k); if (far) this.obstacles.delete(k); }
       }
     }
     this.rebuild(tx, tz);
     this.dirty = missing;
+  }
+
+  /** Change how much is drawn, and redraw. */
+  setDensity(d: number) {
+    if (d === this.density) return;
+    this.density = d;
+    this.rebuild(this.centre[0], this.centre[1]);
   }
 
   private rebuild(tx: number, tz: number) {
@@ -354,9 +368,9 @@ export class GroundCover {
       const ma = mesh.instanceMatrix.array as Float32Array, ca = mesh.instanceColor!.array as Float32Array;
       let n = 0;
       for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) {
-        const t = cache.get((tz + dz) * 1000 + tx + dx)?.[i];
+        const t = cache.get(tkey(tx + dx, tz + dz))?.[i];
         if (!t || !t.n) continue;
-        const take = Math.min(t.n, k.cap - n);
+        const take = Math.min(k.far ? t.n : Math.ceil(t.n * this.density), k.cap - n);
         if (take <= 0) continue;
         ma.set(t.m.subarray(0, take * 16), n * 16);
         ca.set(t.c.subarray(0, take * 3), n * 3);
@@ -398,7 +412,7 @@ export class GroundCover {
     if (!far) {
       for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
         const x = tx + dx, z = tz + dz;
-        const key = z * 1000 + x;
+        const key = tkey(x, z);
         if (!this.obstacles.has(key)) this.cache[1].set(key, this.generate(x, z, true));
         obs.push(...(this.obstacles.get(key) ?? []));
       }
@@ -491,7 +505,7 @@ export class GroundCover {
         }
       }
     }
-    if (far) this.obstacles.set(tz * 1000 + tx, obs);
+    if (far) this.obstacles.set(tkey(tx, tz), obs);
     return lists.map((L) => ({ m: new Float32Array(L.m), c: new Float32Array(L.c), n: L.c.length / 3 }));
   }
 }

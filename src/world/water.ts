@@ -155,7 +155,7 @@ class SeaFloor {
     this.wait -= dt;
     const moved = cx !== this.cx || cz !== this.cz;
     if (!moved && !(this.dirty && this.wait <= 0)) return;
-    this.cx = cx; this.cz = cz; this.dirty = false; this.wait = 1.5;
+    this.cx = cx; this.cz = cz; this.dirty = false; this.wait = 4;
     const x0 = cx - span / 2, z0 = cz - span / 2, N = SeaFloor.N, C = SeaFloor.CELL;
     for (let j = 0; j < N; j++) {
       for (let i = 0; i < N; i++) {

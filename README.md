@@ -39,6 +39,14 @@ chunks you changed are stored; the rest regenerates from the seed).
 | G / J / M | Survey for forage / field journal / sound on-off |
 | ` or F2 | Dev console (cheats) |
 
+## Graphics settings
+
+The pause menu (Esc) has **Graphics** (Low / Medium / High) and **Frame cap** (30 / 60 / 120 fps /
+unlimited), remembered per browser. Medium and a 60 fps cap are the defaults. If your computer runs
+hot, try Low or a 30 fps cap. Low draws at a lower resolution with no shadows, fewer plants and less
+distant land. High draws at full resolution on high-DPI screens, with sharper shadows redrawn every
+frame.
+
 ## Dev console
 
 Press **`** (backtick) or **F2** for a cheat panel, handy for testing. Toggles: instant crafting, instant actions,

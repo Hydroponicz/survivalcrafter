@@ -13,9 +13,11 @@ import { BLEND, CELL, LOD_N, PAD, TILE, TN, tileLodColors, type TileData } from 
 // meshes cut a hole where it's loaded, and sit a little lower so the two never
 // fight at the seam.
 
-/** How far (in tiles) distant land is drawn around you. */
+/** How far (in tiles) distant land is drawn around you, at most (see `radius`). */
 export const LOD_TILES = 3;
 const SKIRT = 30;
+/** Map points skipped by each level of detail. */
+const STEPS = [1, 2, 4];
 /** Map cells per tile side, and how many cells either side of a join are blended. */
 const N_CELLS = TILE / CELL, B_CELLS = BLEND / CELL, OFF = PAD / CELL;
 
@@ -26,30 +28,48 @@ export class DistantLand {
   private hole = { value: new THREE.Vector3(0, 0, 0) }; // x, z, radius
   private material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95 });
   private waterMaterial = makeWaterMaterial({ depth: 'attribute', fresh: true, extra: (sh) => this.cut(sh), key: 'lod' });
-  private index: THREE.BufferAttribute;
+  private indexes: THREE.BufferAttribute[];
   private tiles = new Map<string, LodTile>();
+  /** Tiles of distant land drawn around you (a graphics setting, up to LOD_TILES). */
+  radius = LOD_TILES;
 
   constructor() {
     this.material.onBeforeCompile = (sh) => this.cut(sh);
     // Overlapping river ribbons at the same height shouldn't blend twice.
     this.waterMaterial.depthFunc = THREE.LessDepth;
-    // One index for every tile: the grid, then the skirt around its edge.
+    // Index buffers for each level of detail: every map point near you, every
+    // 2nd and 4th further out (each the grid, then the skirt around its edge;
+    // the skirts hide the small steps where a finer tile meets a coarser one).
+    this.indexes = STEPS.map((step) => this.makeIndex(step));
+  }
+
+  private makeIndex(step: number): THREE.BufferAttribute {
     const N = LOD_N;
     const idx: number[] = [];
-    for (let z = 0; z < N - 1; z++) {
-      for (let x = 0; x < N - 1; x++) {
-        const a = z * N + x, b = a + 1, c = a + N, d = c + 1;
+    for (let z = 0; z < N - 1; z += step) {
+      for (let x = 0; x < N - 1; x += step) {
+        const a = z * N + x, b = a + step, c = a + step * N, d = c + step;
         idx.push(a, c, b, b, c, d);
       }
     }
     const edge = this.edgeLoop();
     const base = N * N;
-    for (let k = 0; k < edge.length; k++) {
-      const a = edge[k], b = edge[(k + 1) % edge.length];
-      const sa = base + k, sb = base + ((k + 1) % edge.length);
+    for (let k = 0; k < edge.length; k += step) {
+      const k2 = (k + step) % edge.length;
+      const a = edge[k], b = edge[k2];
+      const sa = base + k, sb = base + k2;
       idx.push(a, sa, b, b, sa, sb);
     }
-    this.index = new THREE.BufferAttribute(new Uint32Array(idx), 1);
+    return new THREE.BufferAttribute(new Uint32Array(idx), 1);
+  }
+
+  /** Pick each tile's detail for its distance from a point. */
+  private refine(x: number, z: number) {
+    for (const t of this.tiles.values()) {
+      const d = Math.max(Math.abs((t.d.tx + 0.5) * TILE - x), Math.abs((t.d.tz + 0.5) * TILE - z)) / TILE;
+      const level = d < 1.6 ? 0 : d < 2.6 ? 1 : 2;
+      if (t.land.geometry.index !== this.indexes[level]) t.land.geometry.setIndex(this.indexes[level]);
+    }
   }
 
   /** The grid points around a tile's edge, in order. */
@@ -184,7 +204,7 @@ export class DistantLand {
     geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     geo.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(nv * 3), 3));
     geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(nv * 3), 3));
-    geo.setIndex(this.index);
+    geo.setIndex(this.indexes[0]);
     const group = new THREE.Group();
     const land = new THREE.Mesh(geo, this.material);
     group.add(land);
@@ -256,9 +276,10 @@ export class DistantLand {
   /** Drop distant land too far from a point to see. */
   prune(x: number, z: number) {
     this.lastTx = NaN;
+    this.refine(x, z);
     for (const [key, t] of this.tiles) {
       const g = t.group, tx = t.d.tx, tz = t.d.tz;
-      if (Math.max(Math.abs((tx + 0.5) * TILE - x), Math.abs((tz + 0.5) * TILE - z)) <= (LOD_TILES + 1.5) * TILE) continue;
+      if (Math.max(Math.abs((tx + 0.5) * TILE - x), Math.abs((tz + 0.5) * TILE - z)) <= (this.radius + 1.5) * TILE) continue;
       for (const m of g.children) (m as THREE.Mesh).geometry.dispose();
       this.group.remove(g);
       this.tiles.delete(key);

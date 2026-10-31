@@ -9,7 +9,8 @@ import { forageHeight, forageScale } from '../world/forageProps';
 import { buildPieceMesh, WorldView } from '../world/view';
 import { GroundCover } from '../world/groundcover';
 import { Fireflies } from '../world/fireflies';
-import { DistantLand, LOD_TILES } from '../world/lod';
+import { DistantLand } from '../world/lod';
+import { GraphicsSettings } from './graphics';
 import { seaFloor } from '../world/water';
 import { WorkerTiles } from '../world/tilesource';
 import { TILE, tileOf } from '../world/worldgen';
@@ -97,6 +98,9 @@ export class Game {
   private markerTex = makeGlowTexture();
   private lastForagingLevel = 0;
   dev = new DevSettings();
+  graphics = new GraphicsSettings();
+  private lastFrame = -Infinity;
+  private frameNo = 0;
 
   target: Target | null = null;
   action: RunningAction | null = null;
@@ -160,6 +164,7 @@ export class Game {
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    this.renderer.shadowMap.autoUpdate = false;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.0;
     this.camera = new THREE.PerspectiveCamera(72, window.innerWidth / window.innerHeight, 0.08, 7000);
@@ -187,6 +192,7 @@ export class Game {
       gen.useSource(this.tileWorkers);
     } catch { /* no workers: tiles are made on the main thread when needed */ }
     this.groundCover = new GroundCover(world);
+    this.applyGraphics();
     this.scene.add(this.groundCover.group, this.fireflies.points);
     this.view.onStructure = (o) => this.groundCover.invalidate(o.x, o.z, 3);
 
@@ -1295,7 +1301,32 @@ export class Game {
   }
 
   // ---------- main loop
+  /** Put the graphics settings into effect. */
+  applyGraphics() {
+    const q = this.graphics.level;
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, q.pixelRatio));
+    this.renderer.setSize(window.innerWidth, window.innerHeight);
+    const sun = this.sky.sun;
+    sun.castShadow = q.shadowSize > 0;
+    if (q.shadowSize && sun.shadow.mapSize.x !== q.shadowSize) {
+      sun.shadow.mapSize.set(q.shadowSize, q.shadowSize);
+      sun.shadow.map?.dispose();
+      sun.shadow.map = null;
+    }
+    this.groundCover.setDensity(q.plants);
+    this.distant.radius = q.viewTiles;
+  }
+
   private frame(timestamp: number) {
+    // Hold to the frame rate cap: there's no point drawing faster than you'll
+    // notice, and it keeps the computer cool.
+    const cap = this.graphics.fpsCap;
+    if (cap) {
+      const interval = 1000 / cap, since = timestamp - this.lastFrame;
+      if (since < interval - 1) return;
+      // Keep to the cap on average whatever the screen's refresh rate.
+      this.lastFrame = since < interval * 3 ? timestamp - (since % interval) : timestamp;
+    }
     this.timer.update(timestamp);
     const dt = Math.min(0.05, this.timer.getDelta());
     this.renderDt = dt;
@@ -1536,6 +1567,8 @@ export class Game {
     this.sound.ambience({ wind: a.wind, river: a.water, birds: a.birds, night: a.crickets, frogs: a.frogs }, this.renderDt);
     this.view.syncAnimals(this.elapsed);
     this.view.updateFires(p.pos.x, p.pos.z, this.elapsed);
+    this.frameNo++;
+    this.renderer.shadowMap.needsUpdate = this.frameNo % this.graphics.level.shadowEvery === 0;
     this.renderer.render(this.scene, this.camera);
     // First-person hands and tool, on top of the world.
     if (!this.working) {
@@ -1582,7 +1615,8 @@ export class Game {
     if (this.tileWorkers) this.tileWorkers.focus = { x: p.x, z: p.z };
     const tx = tileOf(p.x), tz = tileOf(p.z);
     const want: [number, number, number][] = [];
-    for (let dz = -LOD_TILES; dz <= LOD_TILES; dz++) for (let dx = -LOD_TILES; dx <= LOD_TILES; dx++) {
+    const R = this.distant.radius;
+    for (let dz = -R; dz <= R; dz++) for (let dx = -R; dx <= R; dx++) {
       if (!this.distant.has(tx + dx, tz + dz)) want.push([tx + dx, tz + dz, dx * dx + dz * dz]);
     }
     want.sort((a, b) => a[2] - b[2]);
@@ -1592,7 +1626,7 @@ export class Game {
       else gen.want(x, z);
     }
     this.distant.prune(p.x, p.z);
-    gen.forget(p.x, p.z, (LOD_TILES + 1) * TILE);
+    gen.forget(p.x, p.z, (R + 1) * TILE);
   }
 
   /**

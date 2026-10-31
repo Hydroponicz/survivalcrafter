@@ -124,6 +124,8 @@ export class UI {
           <button data-act="resume">Resume</button>
           <button data-act="save">Save game</button>
           <button data-act="unstuck">Unstuck</button>
+          <button data-act="quality">Graphics: ${g.graphics.level.label}</button>
+          <button data-act="fps">Frame cap: ${g.graphics.fpsLabel}</button>
           <button data-act="help">Controls &amp; guide</button>
           <button data-act="new" class="danger">Abandon world</button>
         </div>
@@ -132,6 +134,16 @@ export class UI {
       const act = (e.target as HTMLElement).dataset.act;
       if (act === 'save') { g.save(); this.log('Game saved.', 'good'); return; }
       if (act === 'unstuck') { g.unstuck(); g.input.lock(); return; }
+      if (act === 'quality') {
+        g.graphics.nextQuality(); g.applyGraphics();
+        (e.target as HTMLElement).textContent = `Graphics: ${g.graphics.level.label}`;
+        return;
+      }
+      if (act === 'fps') {
+        g.graphics.nextFpsCap();
+        (e.target as HTMLElement).textContent = `Frame cap: ${g.graphics.fpsLabel}`;
+        return;
+      }
       if (act === 'help') { this.toggle('help'); return; }
       if (act === 'new') {
         if (confirm('Abandon this world and start a new one? Your save will be deleted.')) {
