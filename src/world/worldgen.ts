@@ -411,6 +411,40 @@ export function buildTile(seed: number, tx: number, tz: number, base = new BaseL
   }
   const clim = climate(H, TN, seed, SEA, ox, oz, CELL);
   const dr = drainage(H, TN, SEA, clim.rain, { cell: CELL, streamAt: STREAM_AT * HILL_STREAM, minLake: 8, lakeDepth: 12, noLake: inChannel });
+  // Lakes belong to the tile their deepest point lies in (see Tile.lake). A
+  // lake this tile only sees in its overlap isn't its own: fill its hollow
+  // back in and let the water run on through it, so streams here don't end
+  // at a lake that isn't there.
+  {
+    const seen = new Uint8Array(n), c0 = PAD / CELL, c1 = c0 + TILE / CELL;
+    for (let i = 0; i < n; i++) {
+      if (dr.kind[i] !== 2 || seen[i]) continue;
+      const cells = [i];
+      seen[i] = 1;
+      let deep = i;
+      for (let q = 0; q < cells.length; q++) {
+        const c = cells[q], cx = c % TN, cz = Math.floor(c / TN);
+        if (H[c] < H[deep]) deep = c;
+        for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const x = cx + dx, z = cz + dz;
+          if (x < 0 || z < 0 || x >= TN || z >= TN) continue;
+          const j = z * TN + x;
+          if (dr.kind[j] === 2 && !seen[j]) { seen[j] = 1; cells.push(j); }
+        }
+      }
+      const dx = deep % TN, dz = Math.floor(deep / TN);
+      if (dx >= c0 && dx < c1 && dz >= c0 && dz < c1) continue;
+      for (const c of cells) { H[c] = Math.max(H[c], dr.F[c] - 0.3); dr.kind[c] = 0; dr.S[c] = NaN; }
+    }
+    // Streams that ran into such a lake carry on along its drainage.
+    for (let i = 0; i < n; i++) {
+      if (dr.kind[i] !== 1) continue;
+      for (let c = dr.recv[i], step = 0; c >= 0 && dr.kind[c] === 0 && step < 200 && dr.catchment[c] >= dr.catchment[i]; c = dr.recv[c], step++) {
+        if (H[c] <= SEA) break;
+        dr.kind[c] = 1; dr.S[c] = H[c] - 0.5;
+      }
+    }
+  }
   // Which channels carry a stream. In the hills a stream starts from much
   // less ground than on the flat (rain runs off steep slopes and gathers
   // fast), and once it's running it carries on down to wherever it goes.
@@ -488,6 +522,26 @@ export function buildTile(seed: number, tx: number, tz: number, base = new BaseL
       const d0 = Math.hypot(bx - px, bz - pz) || 1, into = Math.max(0, d0 - pr * 0.5) / d0;
       small[k + 2] = bx + (px - bx) * into; small[k + 3] = bz + (pz - bz) * into;
       small[k + 5] = Math.min(small[k + 4], ps);
+    }
+  }
+  // A stream ending just short of the sea carries on down into it.
+  {
+    const starts = new Set<string>();
+    for (let k = 0; k < small.length; k += 8) starts.add(`${small[k]},${small[k + 1]}`);
+    const ends = small.length;
+    for (let k = 0; k < ends; k += 8) {
+      const bx = small[k + 2], bz = small[k + 3];
+      if (starts.has(`${bx},${bz}`) || small[k + 5] <= SEA + 0.05) continue;
+      const cx = Math.round((bx - ox) / CELL), cz = Math.round((bz - oz) / CELL);
+      let best = Infinity, sx = 0, sz = 0;
+      for (let dz = -4; dz <= 4; dz++) for (let dx = -4; dx <= 4; dx++) {
+        const x = cx + dx, z = cz + dz;
+        if (x < 0 || z < 0 || x >= TN || z >= TN || H[z * TN + x] > SEA - 0.5) continue;
+        const d = dx * dx + dz * dz;
+        if (d < best) { best = d; sx = ox + x * CELL; sz = oz + z * CELL; }
+      }
+      if (best === Infinity) continue;
+      small.push(bx, bz, sx, sz, small[k + 5], SEA, small[k + 6], small[k + 7]);
     }
   }
   const reaches = big.concat(small);

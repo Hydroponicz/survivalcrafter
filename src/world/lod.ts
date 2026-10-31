@@ -253,7 +253,7 @@ export class DistantLand {
         // At the lake's edge the sheet dips under the bank, so the land cuts
         // its shoreline along the lie of the ground, not the map grid.
         const shore = d.kind[j] !== 2;
-        wpos.push(x, shore ? Math.min(s - 0.6, d.H[j] - 2) : s - 0.6, z);
+        wpos.push(x, shore ? Math.min(s - 0.15, d.H[j] - 2) : s - 0.15, z);
         wdepth.push(shore ? 0 : s - d.H[j]);
       }
       return id;

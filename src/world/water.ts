@@ -179,14 +179,18 @@ vec4 carriedFoam(vec2 p, float scale, float speed) {
   }`}
   wd = max(wd, 0.0);
   // Light is soaked up with depth: clear and pale-green over the shallows, deep blue far down.
- ${o.fresh ? `vec3 shallowCol = vec3(0.045, 0.13, 0.10);
-  vec3 midCol = vec3(0.015, 0.06, 0.065);
-  vec3 deepCol = vec3(0.006, 0.025, 0.04);` : `vec3 shallowCol = vec3(0.055, 0.30, 0.27);
+  vec3 shallowCol = vec3(0.055, 0.30, 0.27);
   vec3 midCol = vec3(0.02, 0.13, 0.17);
-  vec3 deepCol = vec3(0.008, 0.04, 0.075);`}
+  vec3 deepCol = vec3(0.008, 0.04, 0.075);
+  ${o.fresh ? `// Fresh water is darker and peatier, turning to the sea's colours as a
+  // river nears sea level (an estuary), so there's no line where it meets it.
+  float freshness = smoothstep(0.4, 3.0, vWaterPos.y);
+  shallowCol = mix(shallowCol, vec3(0.045, 0.13, 0.10), freshness);
+  midCol = mix(midCol, vec3(0.015, 0.06, 0.065), freshness);
+  deepCol = mix(deepCol, vec3(0.006, 0.025, 0.04), freshness);` : ''}
   vec3 wc = mix(shallowCol, midCol, 1.0 - exp(-wd / 1.8));
   wc = mix(wc, deepCol, 1.0 - exp(-wd / 9.0));
-  float wa = mix(${o.fresh ? '0.4' : '0.2'}, 0.93, smoothstep(0.0, 2.6, wd));
+  float wa = mix(${o.fresh ? 'mix(0.2, 0.4, freshness)' : '0.2'}, 0.93, smoothstep(0.0, 2.6, wd));
   // Foam lapping at the water's edge: a lacy fringe of bubbles that slowly
   // washes in and out, thinning away from the shore.
   vec4 sf = texture2D(uFoam, vWaterPos.xz / 3.2 + vec2(0.004, 0.003) * uWaterTime);
