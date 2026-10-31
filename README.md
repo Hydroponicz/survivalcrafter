@@ -89,7 +89,8 @@ Toggles are remembered per browser; a purple **DEV** badge shows while any cheat
   a climate, with a wide overlap so neighbouring tiles join seamlessly), in background workers so the
   game never stalls. The detailed, diggable voxel terrain streams in around you in 16 m chunks; beyond
   it the land stays visible to the horizon as low-detail distant terrain, wooded wherever the real
-  forests would grow (simple stand-ins beyond the ~230 m where the real trees stand). Trees, bushes, forage and
+  forests would grow (pared-down copies of the real trees beyond the ~230 m where those stand), and
+  carrying the same photographed ground textures as the land near you. Trees, bushes, forage and
   animals are generated region by region as you approach; saves keep only what you changed.
 - **Trees at real scale.** Full-grown trees stand 12–20 m (with the odd giant), mixed with younger
   trees and saplings, in stands and clearings set by the climate. Big trees take longer to fell and

@@ -716,7 +716,7 @@ export const LOD_N = TILE / CELL + 1;
  * Colours for a tile's distant land, one per core map point: grass by the
  * climate, darker canopy where woods grow, rock on steep ground, snow up high.
  */
-export function tileLodColors(d: TileData): Float32Array {
+export function tileLodColors(d: TileData, layers?: Float32Array): Float32Array {
   const out = new Float32Array(LOD_N * LOD_N * 3);
   const off = PAD / CELL;
   const mix = (c: number[], t: number[], k: number) => { k = clamp01(k); return [c[0] + (t[0] - c[0]) * k, c[1] + (t[1] - c[1]) * k, c[2] + (t[2] - c[2]) * k]; };
@@ -735,7 +735,8 @@ export function tileLodColors(d: TileData): Float32Array {
       const crest = Math.max(-1, Math.min(1, (h - ring / 8) / 6 + (h - near / 4) / 4));
       const x = d.tx * TILE + lx * CELL, z = d.tz * TILE + lz * CELL;
       let c: number[];
-      if (h < SEA + 1.4) c = LOD.sand;
+      let wSand = 0, wRock = 0;
+      if (h < SEA + 1.4) { c = LOD.sand; wSand = 1; }
       else {
         c = LOD.grass;
         c = mix(c, LOD.dry, ((0.42 - moist) / 0.3) * 0.85);
@@ -751,10 +752,18 @@ export function tileLodColors(d: TileData): Float32Array {
         // Rock itself varies: beds of paler and darker stone, and weathered patches.
         const tone = 0.82 + 0.12 * Math.sin(h / 9 + snowEdge.noise(x / 300, z / 300) * 3) + 0.14 * snowEdge.noise(x / 90 + 40, z / 90);
         const rock = [LOD.rock[0] * tone, LOD.rock[1] * tone, LOD.rock[2] * tone];
-        c = mix(c, rock, (slope - 0.7) / 0.45 + high * (crest * 1.5 + (slope - 0.45) / 0.4));
+        wRock = clamp01((slope - 0.7) / 0.45 + high * (crest * 1.5 + (slope - 0.45) / 0.4));
+        c = mix(c, rock, wRock);
       }
       // Wind scours snow off the crests and it drifts deep in the gullies.
-      c = mix(c, LOD.snow, snowCover(x, z, temp + crest * 0.03, slope - Math.min(0, crest) * 0.4));
+      const wSnow = snowCover(x, z, temp + crest * 0.03, slope - Math.min(0, crest) * 0.4);
+      c = mix(c, LOD.snow, wSnow);
+      if (layers) {
+        // Ground texture weights (grass, sand, rock, snow) for this point.
+        const L = (lz * LOD_N + lx) * 4, keep = 1 - wSnow;
+        layers[L] = (1 - wSand) * (1 - wRock) * keep; layers[L + 1] = wSand * keep;
+        layers[L + 2] = (1 - wSand) * wRock * keep; layers[L + 3] = wSnow;
+      }
       // A touch of light on the crests and shadow in the gullies, as at a distance.
       const shade = 1 + crest * 0.18;
       c = [c[0] * shade, c[1] * shade, c[2] * shade];

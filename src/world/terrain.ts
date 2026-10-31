@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { hash2, Simplex } from './noise';
 import { type Zone } from './climate';
 import { Rock, Strata } from './geology';
-import { GROUNDS, GroundTextures } from './groundtex';
+import { GROUND_GLSL, GROUNDS, groundUniforms } from './groundtex';
 import { makeWaterMaterial, waterTime } from './water';
 import { SEA, snowCover, WorldGen, type SoilTop } from './worldgen';
 
@@ -1060,14 +1060,9 @@ const GROUND_OF: Partial<Record<Mat, number>> = {
 function makeTerrainMaterial(): THREE.MeshStandardMaterial {
   const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0 });
   const detail = makeDetailTexture();
-  const gt = new GroundTextures();
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.detailMap = { value: detail };
-    shader.uniforms.gColor = { value: gt.color };
-    shader.uniforms.gNormal = { value: gt.normal };
-    shader.uniforms.gOrm = { value: gt.orm };
-    shader.uniforms.gAvg = { value: gt.avg };
-    shader.uniforms.gScale = { value: gt.scale };
+    groundUniforms(shader);
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nattribute vec4 ground;\nattribute vec2 ground2;\nvarying vec4 vG1;\nvarying vec2 vG2;\nvarying vec3 vWPos;\nvarying vec3 vWNrm;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvG1 = ground;\nvG2 = ground2;\nvWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvWNrm = normalize(mat3(modelMatrix) * objectNormal);');
@@ -1078,39 +1073,7 @@ varying vec2 vG2;
 varying vec3 vWPos;
 varying vec3 vWNrm;
 uniform sampler2D detailMap;
-uniform highp sampler2DArray gColor;
-uniform highp sampler2DArray gNormal;
-uniform highp sampler2DArray gOrm;
-uniform vec3 gAvg[${GROUNDS.length}];
-uniform float gScale[${GROUNDS.length}];
-// Blended ground: colour pattern, normal offset (world space), and AO/rough/metal.
-vec3 gPat; vec3 gNrm; vec3 gOrmV;
-void groundLayer(int i, float w, vec3 bw, float mixAB, float near) {
-  float s = 1.0 / gScale[i];
-  float L = float(i);
-  vec3 c = vec3(0.0), n = vec3(0.0), o = vec3(0.0);
-  if (bw.y > 0.02) {
-    vec2 a = vWPos.xz * s, b = mat2(0.8, -0.6, 0.6, 0.8) * vWPos.xz * s * 0.71 + 0.37;
-    c += bw.y * mix(texture(gColor, vec3(a, L)).rgb, texture(gColor, vec3(b, L)).rgb, mixAB);
-    o += bw.y * mix(texture(gOrm, vec3(a, L)).rgb, texture(gOrm, vec3(b, L)).rgb, mixAB);
-    if (near > 0.0) { vec2 t = mix(texture(gNormal, vec3(a, L)).xy, texture(gNormal, vec3(b, L)).xy, mixAB) * 2.0 - 1.0; n += bw.y * vec3(t.x, 0.0, t.y); }
-  }
-  if (bw.x > 0.02) {
-    vec2 a = vWPos.zy * s;
-    c += bw.x * texture(gColor, vec3(a, L)).rgb;
-    o += bw.x * texture(gOrm, vec3(a, L)).rgb;
-    if (near > 0.0) { vec2 t = texture(gNormal, vec3(a, L)).xy * 2.0 - 1.0; n += bw.x * vec3(0.0, t.y, t.x); }
-  }
-  if (bw.z > 0.02) {
-    vec2 a = vWPos.xy * s;
-    c += bw.z * texture(gColor, vec3(a, L)).rgb;
-    o += bw.z * texture(gOrm, vec3(a, L)).rgb;
-    if (near > 0.0) { vec2 t = texture(gNormal, vec3(a, L)).xy * 2.0 - 1.0; n += bw.z * vec3(t.x, t.y, 0.0); }
-  }
-  gPat += w * c / max(gAvg[i], vec3(0.01));
-  gNrm += w * n;
-  gOrmV += w * o;
-}`)
+${GROUND_GLSL}`)
       .replace('#include <color_fragment>', `#include <color_fragment>
         vec3 bw = pow(abs(vWNrm), vec3(4.0));
         bw /= (bw.x + bw.y + bw.z);

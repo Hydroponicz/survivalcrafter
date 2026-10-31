@@ -74,3 +74,60 @@ export class GroundTextures {
     }
   }
 }
+
+let shared: GroundTextures | null = null;
+/** The one set of ground textures, shared by the near and distant terrain. */
+export function groundTextures(): GroundTextures {
+  return shared ??= new GroundTextures();
+}
+
+/** Give a shader the ground texture uniforms (see GROUND_GLSL). */
+export function groundUniforms(shader: THREE.WebGLProgramParametersWithUniforms) {
+  const gt = groundTextures();
+  shader.uniforms.gColor = { value: gt.color };
+  shader.uniforms.gNormal = { value: gt.normal };
+  shader.uniforms.gOrm = { value: gt.orm };
+  shader.uniforms.gAvg = { value: gt.avg };
+  shader.uniforms.gScale = { value: gt.scale };
+}
+
+/**
+ * Fragment shader code for blending ground layers. Needs `vWPos` (world
+ * position). `groundLayer(i, w, bw, mixAB, near)` adds layer i at weight w,
+ * projected along the world axes by weights `bw` (triplanar), into gPat (its
+ * colour pattern, relative to its average), gNrm (bumps, world space; only if
+ * near > 0) and gOrmV (AO, roughness, metal).
+ */
+export const GROUND_GLSL = `
+uniform highp sampler2DArray gColor;
+uniform highp sampler2DArray gNormal;
+uniform highp sampler2DArray gOrm;
+uniform vec3 gAvg[${GROUNDS.length}];
+uniform float gScale[${GROUNDS.length}];
+vec3 gPat; vec3 gNrm; vec3 gOrmV;
+void groundLayer(int i, float w, vec3 bw, float mixAB, float near) {
+  float s = 1.0 / gScale[i];
+  float L = float(i);
+  vec3 c = vec3(0.0), n = vec3(0.0), o = vec3(0.0);
+  if (bw.y > 0.02) {
+    vec2 a = vWPos.xz * s, b = mat2(0.8, -0.6, 0.6, 0.8) * vWPos.xz * s * 0.71 + 0.37;
+    c += bw.y * mix(texture(gColor, vec3(a, L)).rgb, texture(gColor, vec3(b, L)).rgb, mixAB);
+    o += bw.y * mix(texture(gOrm, vec3(a, L)).rgb, texture(gOrm, vec3(b, L)).rgb, mixAB);
+    if (near > 0.0) { vec2 t = mix(texture(gNormal, vec3(a, L)).xy, texture(gNormal, vec3(b, L)).xy, mixAB) * 2.0 - 1.0; n += bw.y * vec3(t.x, 0.0, t.y); }
+  }
+  if (bw.x > 0.02) {
+    vec2 a = vWPos.zy * s;
+    c += bw.x * texture(gColor, vec3(a, L)).rgb;
+    o += bw.x * texture(gOrm, vec3(a, L)).rgb;
+    if (near > 0.0) { vec2 t = texture(gNormal, vec3(a, L)).xy * 2.0 - 1.0; n += bw.x * vec3(0.0, t.y, t.x); }
+  }
+  if (bw.z > 0.02) {
+    vec2 a = vWPos.xy * s;
+    c += bw.z * texture(gColor, vec3(a, L)).rgb;
+    o += bw.z * texture(gOrm, vec3(a, L)).rgb;
+    if (near > 0.0) { vec2 t = texture(gNormal, vec3(a, L)).xy * 2.0 - 1.0; n += bw.z * vec3(t.x, t.y, 0.0); }
+  }
+  gPat += w * c / max(gAvg[i], vec3(0.01));
+  gNrm += w * n;
+  gOrmV += w * o;
+}`;

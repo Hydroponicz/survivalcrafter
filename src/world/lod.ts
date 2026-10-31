@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { FarForest } from './farforest';
+import { FarForest, type StandIns } from './farforest';
+import { GROUND_GLSL, groundUniforms } from './groundtex';
 import { makeWaterMaterial } from './water';
 import { BLEND, CELL, LOD_N, PAD, TILE, TN, tileLodColors, type TileData } from './worldgen';
 
@@ -24,7 +25,7 @@ const N_CELLS = TILE / CELL, B_CELLS = BLEND / CELL, OFF = PAD / CELL;
 
 interface LodTile {
   d: TileData; cols: Float32Array; group: THREE.Group; land: THREE.Mesh;
-  trees: { mesh: THREE.InstancedMesh; counts: [number, number, number] } | null;
+  trees: StandIns[];
 }
 
 export class DistantLand {
@@ -43,7 +44,7 @@ export class DistantLand {
   /** With a world seed, distant land carries forests too. */
   constructor(seed?: number) {
     this.forest = seed === undefined ? null : new FarForest(seed);
-    this.material.onBeforeCompile = (sh) => this.cut(sh);
+    this.material.onBeforeCompile = (sh) => { this.cut(sh); this.textured(sh); };
     // Overlapping river ribbons at the same height shouldn't blend twice.
     this.waterMaterial.depthFunc = THREE.LessDepth;
     // Index buffers for each level of detail: every map point near you, every
@@ -78,7 +79,7 @@ export class DistantLand {
       const d = Math.max(Math.abs((t.d.tx + 0.5) * TILE - x), Math.abs((t.d.tz + 0.5) * TILE - z)) / TILE;
       const level = d < 1.6 ? 0 : d < 2.6 ? 1 : 2;
       if (t.land.geometry.index !== this.indexes[level]) t.land.geometry.setIndex(this.indexes[level]);
-      if (t.trees) t.trees.mesh.count = t.trees.counts[Math.min(2, level + this.forestThin)];
+      for (const tr of t.trees) tr.mesh.count = tr.counts[Math.min(2, level + this.forestThin)];
     }
   }
 
@@ -194,7 +195,10 @@ export class DistantLand {
     const key = `${d.tx},${d.tz}`;
     if (this.tiles.has(key)) return;
     const N = LOD_N;
-    const cols = lod ?? tileLodColors(d);
+    // Colours and ground texture weights (made by the worker, or here).
+    let cols: Float32Array, layers: Float32Array;
+    if (lod && lod.length === N * N * 7) { cols = lod.subarray(0, N * N * 3); layers = lod.subarray(N * N * 3); }
+    else { layers = new Float32Array(N * N * 4); cols = tileLodColors(d, layers); }
     const edge = this.edgeLoop();
     const nv = N * N + edge.length;
     const pos = new Float32Array(nv * 3);
@@ -214,12 +218,16 @@ export class DistantLand {
     geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     geo.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(nv * 3), 3));
     geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(nv * 3), 3));
+    const ground = new Float32Array(nv * 4);
+    ground.set(layers);
+    for (let k = 0; k < edge.length; k++) for (let c = 0; c < 4; c++) ground[(N * N + k) * 4 + c] = layers[edge[k] * 4 + c];
+    geo.setAttribute('ground', new THREE.BufferAttribute(ground, 4));
     geo.setIndex(this.indexes[0]);
     const group = new THREE.Group();
     const land = new THREE.Mesh(geo, this.material);
     group.add(land);
-    const trees = this.forest?.build(d) ?? null;
-    if (trees) group.add(trees.mesh);
+    const trees = this.forest?.build(d) ?? [];
+    for (const tr of trees) group.add(tr.mesh);
     const t: LodTile = { d, cols, group, land, trees };
     this.tiles.set(key, t);
     this.shape(t, false);
@@ -311,6 +319,41 @@ export class DistantLand {
   /** Where the real trees stand (x, z, radius): the distant forests leave that to them. */
   setTreesNear(x: number, z: number, r: number) {
     this.forest?.near.value.set(x, z, r);
+  }
+
+  /**
+   * Patch the land shader to carry the same photographed ground textures as
+   * the near terrain (grass, sand, rock, snow), so the two meet without a
+   * change of look; further off they fade into the colours on their own.
+   */
+  private textured(shader: THREE.WebGLProgramParametersWithUniforms) {
+    groundUniforms(shader);
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute vec4 ground;\nvarying vec4 vG;\nvarying vec3 vWPos;\nvarying vec3 vWNrm;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvG = ground;\nvWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvWNrm = normalize(mat3(modelMatrix) * objectNormal);');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>
+varying vec4 vG;
+varying vec3 vWPos;
+varying vec3 vWNrm;
+${GROUND_GLSL}`)
+      .replace('#include <color_fragment>', `#include <color_fragment>
+        {
+          vec3 bw = pow(abs(vWNrm), vec3(4.0));
+          bw /= (bw.x + bw.y + bw.z);
+          gPat = vec3(0.0); gNrm = vec3(0.0); gOrmV = vec3(0.0);
+          float tot = max(vG.x + vG.y + vG.z + vG.w, 1e-4);
+          // Layers: grass 0, sand 2, rock 4, snow 5.
+          if (vG.x > 0.01) groundLayer(0, vG.x / tot, bw, 0.5, 0.0);
+          if (vG.y > 0.01) groundLayer(2, vG.y / tot, bw, 0.5, 0.0);
+          if (vG.z > 0.01) groundLayer(4, vG.z / tot, bw, 0.5, 0.0);
+          if (vG.w > 0.01) groundLayer(5, vG.w / tot, bw, 0.5, 0.0);
+          // Fine pattern fades with distance (it would only shimmer), leaving the colours.
+          float fade = 1.0 - smoothstep(300.0, 900.0, length(vWPos - cameraPosition));
+          diffuseColor.rgb *= mix(vec3(1.0), gPat * (0.6 + 0.4 * gOrmV.r), fade);
+        }`)
+      .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
+        roughnessFactor = mix(roughnessFactor, gOrmV.g, 0.8);`);
   }
 
   /** Patch a shader to leave out the hole. */

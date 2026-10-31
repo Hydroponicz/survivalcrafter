@@ -19,7 +19,7 @@ const HEARTWOOD = new THREE.Color(0xf6dfae);
 const NOTCH_Y = 0.7;
 
 /** Model multiplier for a typical full-grown tree of each kind: oaks ~20 m, birches ~18 m, pines ~27 m. */
-const GROWN: Record<Species, number> = { oak: 2.7, birch: 2.4, pine: 3.4 };
+export const GROWN: Record<Species, number> = { oak: 2.7, birch: 2.4, pine: 3.4 };
 
 /**
  * How big this tree grows (a multiplier on the model), fixed by its id: a
