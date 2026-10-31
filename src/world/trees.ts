@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { Zone } from './climate';
 import { Simplex } from './noise';
+import { BaseLand } from './worldgen';
 
 // The kinds of tree, what they look like and where they grow. Everything
 // that draws, fells or places trees reads it from here, so a new kind is
@@ -105,7 +106,9 @@ const WOODLAND: Partial<Record<Zone, number>> = { meadow: 0.2, heath: 0.16, mars
 export class TreeCover {
   private stands: Simplex;
   private woods: Simplex;
+  private land: BaseLand;
   constructor(seed: number) {
+    this.land = new BaseLand(seed);
     this.stands = new Simplex(seed + 1234);
     this.woods = new Simplex(seed + 1240);
   }
@@ -116,7 +119,9 @@ export class TreeCover {
     const wood = Math.max(0, Math.min(1, (this.woods.fbm(x / 1700, z / 1700, 2) + 0.15) / 0.35));
     const base = v.trees + (WOODLAND[zone] ?? 0) * wood * wood * (3 - 2 * wood);
     const f = this.stands.fbm(x * 0.02, z * 0.02, 3);
-    return base * Math.max(0.15, Math.min(1.8, 1 + f * 2.2));
+    // The great plains are open grassland: trees in scattered copses and lines, the odd wood.
+    const open = this.land.open(x, z) * (1 - 0.7 * wood);
+    return base * Math.max(0.15, Math.min(1.8, 1 + f * 2.2)) * (1 - 0.9 * open);
   }
 
   /** Which kind of tree, for a roll in 0..1. */

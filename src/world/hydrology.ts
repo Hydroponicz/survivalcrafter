@@ -28,6 +28,8 @@ export interface DrainageOptions {
   lakeDepth: number;
   /** Water arriving from beyond the map's edge, per cell (in cells' worth of rain). */
   inflow?: Float32Array;
+  /** Cells no lake may cover (a river's channel runs through them). */
+  noLake?: Uint8Array;
 }
 
 /** Binary min-heap of cell indices keyed by height. */
@@ -128,7 +130,19 @@ export function drainage(H: Float32Array, w: number, sea: number, rain: Float32A
         if (!seen[j] && F[j] - H[j] >= minDepth && F[j] > sea + 0.3) { seen[j] = 1; stack.push(j); }
       }
     }
-    if (cells.length >= o.minLake && deepest > 1.5) for (const c of cells) kind[c] = 2;
+    // Not right against the sea: there the ridge holding a lake back is too
+    // thin to trust, and it would hang above the shore.
+    let bySea = false;
+    for (const c of cells) {
+      const cx = c % w, cz = (c / w) | 0;
+      for (let dz = -3; dz <= 3 && !bySea; dz++) for (let dx = -3; dx <= 3; dx++) {
+        const x = cx + dx, z = cz + dz;
+        if (x >= 0 && z >= 0 && x < w && z < w && H[z * w + x] <= sea) { bySea = true; break; }
+      }
+      if (bySea) break;
+    }
+    const inRiver = o.noLake ? cells.some((c) => o.noLake![c]) : false;
+    if (cells.length >= o.minLake && deepest > 1.5 && !bySea && !inRiver) for (const c of cells) kind[c] = 2;
   }
 
   // Scoop lake beds into a bowl that deepens away from the shore.

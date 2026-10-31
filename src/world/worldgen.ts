@@ -30,6 +30,10 @@ export const SEA = 0;
 /** Catchment area (km²) where a stream starts, and where it counts as a river (traced regionally). */
 const STREAM_KM2 = 0.15, RIVER_KM2 = 0.6;
 const STREAM_AT = STREAM_KM2 / (CELL * CELL * 1e-6);
+/** In steep hills a stream starts from this share of the ground it needs on the flat. */
+const HILL_STREAM = 0.3;
+/** Least ground (km²) above a spring: streams are traced up their valleys as far as this. */
+const SPRING_KM2 = 0.012;
 /**
  * Rivers are traced over regions this big (metres), each with this margin of
  * land around it, on a grid of this many metres: every tile in a region uses
@@ -65,6 +69,18 @@ export class BaseLand {
     this.hill = new Simplex(seed + 14);
     this.low = new Simplex(seed + 15);
     this.cliffs = new Simplex(seed + 16);
+    this.plain = new Simplex(seed + 17);
+  }
+
+  private plain: Simplex;
+
+  /**
+   * How much a place lies in a great lowland plain (0..1): broad, low, gently
+   * rolling country of open grassland and fields, where the hills die away,
+   * tens of kilometres across.
+   */
+  open(x: number, z: number): number {
+    return smooth(0.02, 0.32, this.plain.fbm(x / 7000 + 4.4, z / 7000, 2));
   }
 
   private cliffs: Simplex;
@@ -93,8 +109,9 @@ export class BaseLand {
     const range = smooth(-0.05, 0.45, this.range.fbm(x / 2400 + 3.1, z / 2400, 2));
     // Bend the ridge lines so they curve and branch like real ranges.
     const wx = x + this.warp.fbm(x / 900 + 21, z / 900, 2) * 280, wz = z + this.warp.fbm(x / 900, z / 900 + 21, 2) * 280;
-    const mount = (range * range * 150 + this.ridges(wx, wz) * range * 330) * inland;
-    const hills = (this.hill.fbm(x / 380, z / 380, 4) * 0.5 + 0.5) * (25 + 30 * range);
+    const flat = this.open(x, z);
+    const mount = (range * range * 150 + this.ridges(wx, wz) * range * 330) * inland * (1 - 0.9 * flat);
+    const hills = (this.hill.fbm(x / 380, z / 380, 4) * 0.5 + 0.5) * (25 + 30 * range) * (1 - 0.75 * flat);
     const plains = 5 + this.low.fbm(x / 1500, z / 1500, 2) * 6;
     let h = land * (plains + hills + mount) + (1 - land) * -45;
     // Cliff bands: the slope gathers into steps, each a gentle ledge then a
@@ -132,7 +149,7 @@ export class BaseLand {
 }
 
 /** Half-width (metres) of a stream or river draining this much land: narrow at its source, then wider as the square root of its catchment, as real rivers are. */
-const riverHalfWidth = (km2: number) => Math.min(60, 0.8 + 10 * Math.max(0, Math.sqrt(km2) - Math.sqrt(STREAM_KM2)));
+const riverHalfWidth = (km2: number) => Math.min(60, Math.max(1.3, 1.0 + 10 * Math.max(0, Math.sqrt(km2) - Math.sqrt(STREAM_KM2 * HILL_STREAM))));
 const riverDepth = (km2: number) => Math.min(5, 0.35 + 0.6 * Math.sqrt(km2));
 
 /**
@@ -332,7 +349,41 @@ export function buildTile(seed: number, tx: number, tz: number, base = new BaseL
     }
   }
   const clim = climate(H, TN, seed, SEA, ox, oz, CELL);
-  const dr = drainage(H, TN, SEA, clim.rain, { cell: CELL, streamAt: STREAM_AT, minLake: 8, lakeDepth: 12 });
+  const dr = drainage(H, TN, SEA, clim.rain, { cell: CELL, streamAt: STREAM_AT * HILL_STREAM, minLake: 8, lakeDepth: 12, noLake: inChannel });
+  // Which channels carry a stream. In the hills a stream starts from much
+  // less ground than on the flat (rain runs off steep slopes and gathers
+  // fast), and once it's running it carries on down to wherever it goes.
+  const slopeAt = (i: number) => {
+    const x = i % TN, z = (i / TN) | 0;
+    if (x < 1 || z < 1 || x > TN - 2 || z > TN - 2) return 0;
+    return Math.hypot(H[i + 1] - H[i - 1], H[i + TN] - H[i - TN]) / (2 * CELL);
+  };
+  const flowing = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    if (dr.kind[i] !== 1 || flowing[i]) continue;
+    const need = STREAM_AT * (1 - (1 - HILL_STREAM) * smooth(0.05, 0.3, slopeAt(i)));
+    if (dr.catchment[i] < need) continue;
+    for (let c = i; c >= 0 && dr.kind[c] === 1 && !flowing[c]; c = dr.recv[c]) flowing[c] = 1;
+  }
+  // Every stream rises at a spring up its valley: follow it uphill, along the
+  // biggest of the hollows feeding it, until the land stops rising or there's
+  // too little ground above to feed a spring.
+  const donor = new Int32Array(n).fill(-1);
+  for (let i = 0; i < n; i++) {
+    const j = dr.recv[i];
+    if (j >= 0 && (donor[j] < 0 || dr.catchment[i] > dr.catchment[donor[j]])) donor[j] = i;
+  }
+  const hasUp = new Uint8Array(n);
+  for (let i = 0; i < n; i++) if (flowing[i] && dr.recv[i] >= 0) hasUp[dr.recv[i]] = 1;
+  const springAt = SPRING_KM2 / (CELL * CELL * 1e-6);
+  for (let i = 0; i < n; i++) {
+    if (!flowing[i] || hasUp[i]) continue;
+    for (let c = donor[i], prev = i, step = 0; c >= 0 && step < 250; prev = c, c = donor[c], step++) {
+      if (H[c] < H[prev] - 0.05 || dr.catchment[c] < springAt || flowing[c] || dr.kind[c] === 2) break;
+      flowing[c] = 1; dr.kind[c] = 1; dr.S[c] = Math.max(SEA, H[c] - 0.5);
+    }
+  }
+  for (let i = 0; i < n; i++) if (dr.kind[i] === 1 && !flowing[i]) { dr.kind[i] = 0; dr.S[i] = NaN; }
   // The land's own streams, until they reach a river. Near a river the map's
   // own drainage mostly just retraces it, so streams are left out there,
   // except a stream coming in from outside, which carries on down into it.
@@ -358,6 +409,9 @@ export function buildTile(seed: number, tx: number, tz: number, base = new BaseL
     climBase: clim.base, moist: clim.moist, reaches: new Float32Array(reaches), wind: clim.wind,
   };
 }
+
+/** How far (map cells) a lake's water may reach past the cells counted as lake, where the land lies low enough. */
+const LAKE_REACH = 3;
 
 /** A tile ready for sampling: its data plus a lookup of river reaches by map cell. */
 class Tile {
@@ -424,14 +478,46 @@ class Tile {
     }
   }
 
-  lake(x: number, z: number): number {
-    for (let oz = 0; oz <= 1; oz++) for (let ox = 0; ox <= 1; ox++) {
-      const jx = Math.floor((x - this.ox) / CELL) + ox, jz = Math.floor((z - this.oz) / CELL) + oz;
-      if (jx < 0 || jz < 0 || jx >= TN || jz >= TN) continue;
-      const i = jz * TN + jx;
-      if (this.d.kind[i] === 2) return this.d.S[i];
+  /**
+   * The lake at a point: its surface, and how far (map cells) the point lies
+   * outside the cells this tile counts as lake (0 inside). Lakes reach a
+   * couple of cells past those, so the shore follows the lie of the land
+   * rather than the map grid. [NaN, Infinity] when there's none.
+   */
+  lake(x: number, z: number): [number, number] {
+    const near = this.nearLake ??= this.findNearLake();
+    if (!near.size) return [NaN, Infinity];
+    const fx = (x - this.ox) / CELL, fz = (z - this.oz) / CELL;
+    const cx = Math.round(fx), cz = Math.round(fz);
+    let best = NaN, bd = Infinity;
+    // The nearest lake cell to this cell or its neighbours (exact distance from the point).
+    for (let dz = -1; dz <= 1; dz++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const j = near.get((cz + dz) * TN + cx + dx);
+        if (j === undefined) continue;
+        const d = Math.max(0, Math.hypot((j % TN) - fx, Math.floor(j / TN) - fz) - 0.75);
+        if (d < bd) { bd = d; best = this.d.S[j]; }
+      }
     }
-    return NaN;
+    return bd <= LAKE_REACH ? [best, bd] : [NaN, Infinity];
+  }
+
+  private nearLake?: Map<number, number>;
+  /** For each cell near a lake, the nearest cell of it. */
+  private findNearLake(): Map<number, number> {
+    const near = new Map<number, number>(), dist = new Map<number, number>();
+    const R = LAKE_REACH + 1;
+    for (let i = 0; i < this.d.kind.length; i++) {
+      if (this.d.kind[i] !== 2) continue;
+      const ix = i % TN, iz = Math.floor(i / TN);
+      for (let dz = -R; dz <= R; dz++) for (let dx = -R; dx <= R; dx++) {
+        const x = ix + dx, z = iz + dz;
+        if (x < 0 || z < 0 || x >= TN || z >= TN) continue;
+        const k = z * TN + x, d = dx * dx + dz * dz;
+        if (d < (dist.get(k) ?? Infinity)) { dist.set(k, d); near.set(k, i); }
+      }
+    }
+    return near;
   }
 }
 
@@ -566,15 +652,29 @@ export class WorldGen {
     return best.hit && best.edge < 12 ? best.hit : null;
   }
 
-  /** A lake the point lies in (its surface), or NaN. */
-  lakeSurface(x: number, z: number): number {
-    let best = NaN, bw = 0;
+  /**
+   * The map height at a point and how deep lake water stands there. Each map
+   * tile says how deep its own lakes are; like the ground, that's blended
+   * across the joins between tiles, so where two tiles disagree about a lake
+   * it shallows out across the join rather than ending in a wall. A lake's
+   * water reaches a little past the cells counted as lake wherever the land
+   * lies below its surface, so the shore follows the land, not the map grid.
+   */
+  private lakeSample(x: number, z: number): { mapH: number; depth: number } {
+    let mapH = 0, depth = 0;
     for (const [t, w] of this.cover(x, z)) {
-      if (w <= bw) continue;
-      const s = t.lake(x, z);
-      if (!Number.isNaN(s) || w > 0.5) { best = s; bw = w; }
+      const h = t.height(x, z);
+      mapH += h * w;
+      const [s, d] = t.lake(x, z);
+      if (!Number.isNaN(s)) depth += w * Math.max(0, Math.min(s - h, (LAKE_REACH - d) * 4));
     }
-    return best;
+    return { mapH, depth };
+  }
+
+  /** The surface of a lake at a point, or NaN. */
+  lakeSurface(x: number, z: number): number {
+    const { mapH, depth } = this.lakeSample(x, z);
+    return depth > 0.05 ? mapH + depth : NaN;
   }
 
   // ---------- detail
@@ -600,17 +700,20 @@ export class WorldGen {
 
   /** Ground height at any point: the map plus local relief, with river channels cut in. */
   height(x: number, z: number): number {
-    const mapH = this.mapHeight(x, z);
+    const { mapH, depth } = this.lakeSample(x, z);
     let h = mapH;
     const slope = this.mapSlope(x, z);
     const ch = this.channel(x, z, mapH);
     // Rugged where the land is steep, gentle in the lowlands, calm by water
     // (so banks don't dip below the waterline).
     const amp = 0.5 + 2.5 * smooth(0.15, 0.9, slope);
-    let calm = Number.isNaN(this.lakeSurface(x, z)) ? 1 : 0.25;
+    let calm = depth > 0.05 ? 0.25 : 1;
     if (ch) calm *= 0.15 + 0.85 * smooth(ch.r, ch.r + 8, ch.d);
     h += (this.detail.fbm(x / 26, z / 26, 4) * amp + this.detail2.fbm(x / 7, z / 7, 2) * amp * 0.25) * calm;
-    if (ch) {
+    // A stream running into a lake ends there: it doesn't cut on through the lake bed.
+    const intoLake = smooth(0.05, 0.6, depth);
+    if (ch && intoLake < 1) {
+      const uncut = h;
       const { d, s, r, depth } = ch;
       if (d < r) {
         // A rounded bed, a little rough.
@@ -621,6 +724,7 @@ export class WorldGen {
         // Banks slope down to the water.
         h = Math.min(h, s + 0.15 + (d - r) * 0.55);
       }
+      h += (uncut - h) * intoLake;
     }
     return h;
   }
@@ -630,8 +734,12 @@ export class WorldGen {
     const ch = this.channel(x, z);
     // Where a river meets the sea, it's the sea.
     if (ch && ch.d < ch.r * 0.97 && ground < ch.s) return ch.sea ? NaN : ch.s;
-    const lake = this.lakeSurface(x, z);
-    if (!Number.isNaN(lake) && ground < lake) return lake;
+    // A lake fills its hollow up to its surface; just past its own cells it
+    // only laps over ground a little below that (not down into a valley beyond).
+    // A lake fills its bed; where a stream has cut a channel far below that,
+    // the channel stays a channel (the water doesn't hang over it).
+    const { mapH, depth } = this.lakeSample(x, z);
+    if (depth > 0.05 && ground < mapH + depth && ground > mapH - 1.5) return mapH + depth;
     return NaN;
   }
 
