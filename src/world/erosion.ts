@@ -142,12 +142,12 @@ export function erode(H: Float32Array, w: number, seed: number, seaLevel: number
 
 /**
  * Rockfall and soil creep: wherever ground stands steeper than `talus`
- * (height per cell), some of it slides down to the lowest neighbour, so
+ * (height per cell, the same everywhere or per cell), some of it slides down to the lowest neighbour, so
  * slopes settle at a natural angle with scree gathered at their feet
  * instead of standing as sheer walls and needle peaks. Moved material is
  * added to `deposit` where it lands.
  */
-export function slump(H: Float32Array, w: number, talus: number, iters: number, deposit?: Float32Array, rate = 0.45) {
+export function slump(H: Float32Array, w: number, talus: number | Float32Array, iters: number, deposit?: Float32Array, rate = 0.45) {
   const delta = new Float32Array(w * w);
   const nb = [-1, 1, -w, w, -w - 1, -w + 1, w - 1, w + 1];
   const dist = [1, 1, 1, 1, Math.SQRT2, Math.SQRT2, Math.SQRT2, Math.SQRT2];
@@ -159,7 +159,7 @@ export function slump(H: Float32Array, w: number, talus: number, iters: number, 
         const i = z * w + x;
         let best = -1, over = 0;
         for (let k = 0; k < 8; k++) {
-          const e = (H[i] - H[i + nb[k]]) - talus * dist[k];
+          const e = (H[i] - H[i + nb[k]]) - (typeof talus === 'number' ? talus : talus[i]) * dist[k];
           if (e > over) { over = e; best = k; }
         }
         if (best < 0) continue;

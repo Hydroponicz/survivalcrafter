@@ -64,6 +64,17 @@ export class BaseLand {
     this.ridge = new Simplex(seed + 13);
     this.hill = new Simplex(seed + 14);
     this.low = new Simplex(seed + 15);
+    this.cliffs = new Simplex(seed + 16);
+  }
+
+  private cliffs: Simplex;
+
+  /**
+   * How cliffy the mountains are here (0..1). Some ranges are built of hard
+   * beds that weather into tiers of sheer rock faces with ledges between.
+   */
+  cliff(x: number, z: number): number {
+    return smooth(0.18, 0.42, this.cliffs.fbm(x / 3200 + 9.7, z / 3200, 2)) * smooth(0.2, 0.6, this.range.fbm(x / 2400 + 3.1, z / 2400, 2));
   }
 
   /** 0 open sea .. 1 inland. Mostly land, with seas, coasts and islands scattered through it. */
@@ -85,7 +96,17 @@ export class BaseLand {
     const mount = (range * range * 150 + this.ridges(wx, wz) * range * 330) * inland;
     const hills = (this.hill.fbm(x / 380, z / 380, 4) * 0.5 + 0.5) * (25 + 30 * range);
     const plains = 5 + this.low.fbm(x / 1500, z / 1500, 2) * 6;
-    return land * (plains + hills + mount) + (1 - land) * -45;
+    let h = land * (plains + hills + mount) + (1 - land) * -45;
+    // Cliff bands: the slope gathers into steps, each a gentle ledge then a
+    // sheer face, their edges wandering with the rock.
+    const c = this.cliff(x, z);
+    if (c > 0 && h > 30) {
+      const step = 34, t = (h - 30 + this.cliffs.fbm(x / 260, z / 260, 2) * 14) / step;
+      const f = t - Math.floor(t);
+      const terraced = 30 + (Math.floor(t) + smooth(0.62, 0.9, f)) * step - this.cliffs.fbm(x / 260, z / 260, 2) * 14;
+      h += (terraced - h) * c * smooth(30, 70, h);
+    }
+    return h;
   }
 
   /**
@@ -182,8 +203,8 @@ interface RegionWater {
 }
 /** How far below the land around it a river's surface runs (metres), on the coarse grid. */
 const RIVER_SINK = 2.5;
-/** How far from a river its valley sides can reach (metres), where it's cut down through high ground. */
-const VALLEY = 220;
+/** How far from a river its valley sides can reach at most (metres), where it's cut deep through high ground. */
+const VALLEY = 260;
 const regionCache = new Map<string, RegionWater>();
 function regionRivers(base: BaseLand, seed: number, rx: number, rz: number): RegionWater {
   const key = `${seed}:${rx},${rz}`;
@@ -249,7 +270,10 @@ export function buildTile(seed: number, tx: number, tz: number, base = new BaseL
     depositRate: 0.28, evaporation: 0.012, gravity: 4, radius: 2, maxDig: 3,
   });
   // Let over-steep crags and gully walls fall back to a natural angle (about 40°).
-  slump(H, TN, CELL * 0.85, 80, er.deposit, 0.9);
+  // Cliff bands are hard rock: they stand far steeper.
+  const talus = new Float32Array(n);
+  for (let k = 0; k < n; k++) talus[k] = CELL * (0.85 + 4 * base.cliff(ox + (k % TN) * CELL, oz + Math.floor(k / TN) * CELL));
+  slump(H, TN, talus, 80, er.deposit, 0.9);
   // Settle the ripples the slides leave.
   const sm = H.slice();
   for (let z = 1; z < TN - 1; z++) {
@@ -274,10 +298,18 @@ export function buildTile(seed: number, tx: number, tz: number, base = new BaseL
   const nearBig = new Uint8Array(n);
   const riverSurface = new Float32Array(n).fill(NaN);
   const inChannel = new Uint8Array(n);
+  const H0 = H.slice();
   for (let k = 0; k < big.length; k += 8) {
     const ax = big[k], az = big[k + 1], dx = big[k + 2] - ax, dz = big[k + 3] - az, r = big[k + 6];
     const len2 = dx * dx + dz * dz;
-    const reach = Math.ceil((r + VALLEY) / CELL) + 2;
+    // How deep the river has to cut here decides how wide a valley it opens:
+    // beside its banks only, where it already runs low, wider where it cuts
+    // through high ground; either way the cut eases out to the land around.
+    const mx = Math.max(0, Math.min(TN - 1, Math.round((ax + dx / 2 - ox) / CELL)));
+    const mz = Math.max(0, Math.min(TN - 1, Math.round((az + dz / 2 - oz) / CELL)));
+    const cut = Math.max(0, H0[mz * TN + mx] - (big[k + 4] + big[k + 5]) / 2);
+    const full = Math.min(VALLEY - 40, 40 + Math.max(0, cut - 14) / 0.7);
+    const reach = Math.ceil((r + full + 40) / CELL) + 2;
     const cx = Math.round((ax - ox) / CELL), cz = Math.round((az - oz) / CELL);
     for (let iz = cz - reach; iz <= cz + reach; iz++) {
       for (let ix = cx - reach; ix <= cx + reach; ix++) {
@@ -285,12 +317,14 @@ export function buildTile(seed: number, tx: number, tz: number, base = new BaseL
         const i = iz * TN + ix, x = ox + ix * CELL, z = oz + iz * CELL;
         const t = len2 > 0 ? clamp01(((x - ax) * dx + (z - az) * dz) / len2) : 0;
         const d = Math.hypot(x - (ax + dx * t), z - (az + dz * t));
-        if (d > r + VALLEY) continue;
+        if (d > r + full + 40) continue;
         const sf = big[k + 4] + (big[k + 5] - big[k + 4]) * t;
         // The channel, a gentle floodplain beside it, then valley sides rising
         // at up to about 35° wherever the river has had to cut down.
         const e = d - r;
-        H[i] = Math.min(H[i], e < 0 ? sf + 0.25 : e < 40 ? sf + 0.3 + e * 0.35 : sf + 14.3 + (e - 40) * 0.7);
+        const line = e < 0 ? sf + 0.25 : e < 40 ? sf + 0.3 + e * 0.35 : sf + 14.3 + (e - 40) * 0.7;
+        const keep = smooth(full, full + 40, e); // 0: cut to the valley side, 1: the land as it was
+        if (H[i] > line) H[i] = line + (H[i] - line) * keep;
         if (d < r + 24) nearBig[i] = 1;
         if (d < r + 2) inChannel[i] = 1;
         if (d < r - CELL * 0.5 && !(riverSurface[i] <= sf)) riverSurface[i] = sf;

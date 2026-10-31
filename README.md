@@ -106,6 +106,9 @@ Toggles are remembered per browser; a purple **DEV** badge shows while any cheat
   over the shallows (the sand and stones show through), green-blue, then deep blue offshore. Foam
   laps along the shore, ripples at three scales drift across the surface and the sky and sun
   reflect off it. Rivers and lakes are darker fresh water, and rapids churn white.
+- **Cliffs.** Some mountain ranges are built of hard rock beds that weather into tiers of sheer faces
+  with ledges between them, their bands of stone showing in the walls: good places to quarry, tunnel in
+  or build above a view.
 - **Mountains that look like mountains.** Ranges rise from broad massifs with long foothill slopes;
   their ridges curve and branch into spurs with rounded crests, and over-steep crags slump to a natural
   angle with scree gathered below. Above the trees the crests are bare, banded rock; snow lies on the
