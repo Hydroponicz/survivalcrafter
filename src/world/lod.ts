@@ -278,7 +278,7 @@ export class DistantLand {
       const sa = R[o + 4] - 0.6, sb = R[o + 5] - 0.6;
       wpos.push(ax - ux * e + px, sa, az - uz * e + pz, ax - ux * e - px, sa, az - uz * e - pz,
         bx + ux * e + px, sb, bz + uz * e + pz, bx + ux * e - px, sb, bz + uz * e - pz);
-      const dp = Math.max(3, R[o + 7]); // seen from afar, rivers read as solid water
+      const dp = R[o + 7]; // as deep as the river itself, so it matches the water close by
       wdepth.push(dp, dp, dp, dp);
       widx.push(base, base + 2, base + 1, base + 1, base + 2, base + 3);
     }

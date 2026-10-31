@@ -175,17 +175,13 @@ export function drainage(H: Float32Array, w: number, sea: number, rain: Float32A
  * covers a place agrees on where its water goes (unlike the flood above,
  * whose routes can depend on the map's edges). Water runs down the steepest
  * slope; from the bottom of a hollow it takes the lowest way out to lower
- * ground within `reach` cells. A hollow between `lakeDepth` and
- * `maxLakeDepth` deep (and no bigger than `maxLakeCells`) fills into a lake up
- * to its way out (`level`, NaN elsewhere); a river cuts its way through any
- * other. Cells on the map's edge whose water leaves it, and the
- * sea, drain nowhere (-1). A closed basin keeps its water as a small lake.
+ * ground within `reach` cells (a river cuts its way out there). Cells on
+ * the map's edge whose water leaves it, the sea, and the bottoms of hollows
+ * with no way out nearby drain nowhere (-1).
  */
-export function localDrainage(H: Float32Array, w: number, sea: number, reach = 40, lakeDepth = 3, maxLakeDepth = 14, maxLakeCells = 260):
-  { recv: Int32Array; catchment: Float32Array; level: Float32Array } {
+export function localDrainage(H: Float32Array, w: number, sea: number, reach = 40): { recv: Int32Array; catchment: Float32Array } {
   const n = w * w;
   const recv = new Int32Array(n).fill(-1);
-  const level = new Float32Array(n).fill(NaN);
   const pits: number[] = [];
   for (let i = 0; i < n; i++) {
     if (H[i] <= sea) continue;
@@ -210,13 +206,10 @@ export function localDrainage(H: Float32Array, w: number, sea: number, reach = 4
     heap.push(H[p], p);
     seen.set(p, -1);
     const px = p % w, pz = (p / w) | 0;
-    let target = -1, spill = H[p];
-    const basin: number[] = [];
+    let target = -1;
     while (heap.size) {
       const c = heap.pop();
       if (c !== p && H[c] < H[p]) { target = c; break; }
-      spill = Math.max(spill, H[c]);
-      basin.push(c);
       const cx = c % w, cz = (c / w) | 0;
       for (let k = 0; k < 8; k++) {
         const x = cx + NX[k], z = cz + NZ[k];
@@ -227,16 +220,7 @@ export function localDrainage(H: Float32Array, w: number, sea: number, reach = 4
         heap.push(H[j], j);
       }
     }
-    if (target < 0) {
-      // A closed basin: its water stays, as a small lake in the bottom.
-      for (const c of basin) if (H[c] < H[p] + lakeDepth) level[c] = Math.max(level[c] || -Infinity, H[p] + lakeDepth);
-      continue;
-    }
-    const depth = spill - H[p];
-    if (depth >= lakeDepth && depth <= maxLakeDepth) {
-      const under = basin.filter((c) => H[c] < spill);
-      if (under.length <= maxLakeCells) for (const c of under) level[c] = Math.max(level[c] || -Infinity, spill);
-    }
+    if (target < 0) continue; // no way out nearby
     // Route the hollow out along the way the search came.
     for (let c = target, prev = seen.get(target)!; prev >= 0; c = prev, prev = seen.get(prev)!) recv[prev] = c;
   }
@@ -254,5 +238,5 @@ export function localDrainage(H: Float32Array, w: number, sea: number, reach = 4
   }
   // Anything left in a loop (it shouldn't happen) drains nowhere.
   for (let i = 0; i < n; i++) if (indeg[i] > 0) recv[i] = -1;
-  return { recv, catchment, level };
+  return { recv, catchment };
 }

@@ -121,13 +121,13 @@ Toggles are remembered per browser; a purple **DEV** badge shows while any cheat
   granite): find an outcrop and follow it. Soil is thin on ridges and deep in hollows, fast rivers run
   over gravel, and scree piles up below cliffs.
 - **Rivers and lakes.** Rivers are traced from the lie of the land around each place, so neighbouring
-  parts of the world always agree and every river runs unbroken from its source into a lake or the sea;
-  streams carry on down into the rivers they feed. Water only ever runs downhill: hollows fill into lakes
-  that spill out over their lowest point, and where a river has to cross higher ground it cuts a valley
-  through it. Streams start narrow and rivers widen with the land they drain, as real ones do: a few-metre
-  creek in the hills becomes a broad river 40–120 m across in the lowlands, visible from afar. River beds
-  are sand and grit, lake beds silty clay, and the banks are where you dig clay. Drink from any of them;
-  wading through a stream slows you down.
+  parts of the world always agree and every river runs unbroken from its source to the sea; streams carry
+  on down into the rivers they feed. Water only ever runs downhill: where a river has to cross higher
+  ground it cuts a valley through it, with sides easing up to about 35°. Streams start narrow and rivers
+  widen with the land they drain, as real ones do: a few-metre creek in the hills becomes a broad river
+  40–120 m across in the lowlands, visible from afar. Basins in the land fill into lakes deep enough to
+  swim in. River beds are sand and grit, lake beds silty clay, and the banks are where you dig clay.
+  Drink from any of them; wading through a stream slows you down.
 - **Voxel terrain you can reshape anywhere.** The world is a smooth voxel landscape (Surface Nets on a
   1 m grid, like Enshrouded). With a shovel you **dig**, **raise**, **smooth** and **level ground to your
   feet** (Valheim-style); a pickaxe mines rock in any direction, so you can tunnel into hills, find caves
