@@ -603,6 +603,10 @@ const LINK_REACH = 60;
 class Tile {
   readonly ox: number; readonly oz: number;
   private buckets = new Map<number, number[]>();
+  /** Lake surfaces as finally settled against the real (blended) ground; see WorldGen.settleLakes. */
+  level?: Float32Array;
+  /** Stretches carrying streams on from a lake's old shore down to its settled one. */
+  readonly lakeLinks: number[] = [];
   /** Stretches of stream that leave this tile (indices into its reaches). */
   readonly exits: number[] = [];
   lastUsed = 0;
@@ -698,13 +702,20 @@ class Tile {
         const j = near.get((cz + dz) * TN + cx + dx);
         if (j === undefined) continue;
         const d = Math.max(0, Math.hypot((j % TN) - fx, Math.floor(j / TN) - fz) - 0.75);
-        if (d < bd) { bd = d; best = this.d.S[j]; }
+        const lv = this.level ? this.level[j] : this.d.S[j];
+        if (d < bd && !Number.isNaN(lv)) { bd = d; best = lv; }
       }
     }
     return bd <= LAKE_REACH ? [best, bd] : [NaN, Infinity];
   }
 
   private nearLake?: Map<number, number>;
+  /** Cells of the lakes this tile owns. */
+  owned?: Uint8Array;
+  ownedLakes(): Uint8Array {
+    if (!this.owned) this.nearLake = this.findNearLake();
+    return this.owned!;
+  }
   /**
    * For each cell near a lake this tile owns, the nearest cell of it. A lake
    * reaching across the join between tiles is worked out by both, a little
@@ -734,6 +745,7 @@ class Tile {
       const dx = deep % TN, dz = Math.floor(deep / TN);
       if (dx >= x0 && dx < x1 && dz >= x0 && dz < x1) for (const c of cells) owned[c] = 1;
     }
+    this.owned = owned;
     const near = new Map<number, number>(), dist = new Map<number, number>();
     const R = LAKE_REACH + 1;
     for (let i = 0; i < n; i++) {
@@ -879,6 +891,22 @@ export class WorldGen {
     const best = { hit: null as RiverHit | null, edge: Infinity };
     const cover = this.cover(x, z);
     for (const [t] of cover) t.river(x, z, best);
+    for (const [t] of cover) {
+      this.settleLakes(t);
+      const L = t.lakeLinks;
+      for (let o = 0; o < L.length; o += 8) {
+        const ax = L[o], az = L[o + 1], dx = L[o + 2] - ax, dz = L[o + 3] - az;
+        if (Math.abs(x - ax) > 200 || Math.abs(z - az) > 200) continue;
+        const len2 = dx * dx + dz * dz;
+        const tt = len2 > 0 ? clamp01(((x - ax) * dx + (z - az) * dz) / len2) : 0;
+        const d = Math.hypot(x - (ax + dx * tt), z - (az + dz * tt));
+        const edge = d - L[o + 6];
+        if (edge < best.edge) {
+          best.edge = edge;
+          best.hit = { d, s: L[o + 4] + (L[o + 5] - L[o + 4]) * tt, r: L[o + 6], depth: L[o + 7], fall: len2 > 0 ? Math.abs(L[o + 4] - L[o + 5]) / Math.sqrt(len2) : 0 };
+        }
+      }
+    }
     // Where a stream crosses into this point's tile, the link joining it to
     // this tile's own version of it.
     const tx = Math.floor(x / TILE), tz = Math.floor(z / TILE), fx = x - tx * TILE, fz = z - tz * TILE;
@@ -924,7 +952,9 @@ export class WorldGen {
       if ((oz < 0 && fz > PAD) || (oz > 0 && TILE - fz > PAD)) continue;
       for (let ox = -1; ox <= 1; ox++) {
         if ((ox < 0 && fx > PAD) || (ox > 0 && TILE - fx > PAD)) continue;
-        const [ls, d] = this.tile(tx + ox, tz + oz).lake(x, z);
+        const lt = this.tile(tx + ox, tz + oz);
+        this.settleLakes(lt);
+        const [ls, d] = lt.lake(x, z);
         if (!Number.isNaN(ls) && d < bd) { bd = d; s = ls; }
       }
     }
@@ -935,6 +965,76 @@ export class WorldGen {
     // the lake in, rather than the water ending in a wall.
     if (bd > 0 && s - mapH > 0.6 + 0.4 * bd) return { mapH: s + 0.25 - 0.1 * bd, depth: 0 };
     return { mapH, depth: Math.max(0, Math.min(s - mapH, (LAKE_REACH - bd) * 4)) };
+  }
+
+  /**
+   * A lake can't stand higher than the ground holding it in. Each tile
+   * worked out its lakes on its own map, but near its edges the real ground
+   * is blended with the neighbours' and can lie lower; so every lake's
+   * surface is brought down to the lowest point of the real ground round its
+   * shore (and a lake left too shallow goes).
+   */
+  /**
+   * A tile's lake surfaces as settled (NaN where none), if the tiles around
+   * it are already made (settling needs their ground); else undefined.
+   */
+  settledLakes(tx: number, tz: number): Float32Array | undefined {
+    const t = this.tiles.get(`${tx},${tz}`);
+    if (!t) return undefined;
+    if (!t.level) {
+      for (let oz = -1; oz <= 1; oz++) for (let ox = -1; ox <= 1; ox++) if (!this.tiles.has(`${tx + ox},${tz + oz}`)) return undefined;
+      this.settleLakes(t);
+    }
+    return t.level;
+  }
+
+  private settleLakes(t: Tile) {
+    if (t.level) return;
+    const d = t.d, n = d.kind.length, owned = t.ownedLakes();
+    const level = new Float32Array(n).fill(NaN);
+    const seen = new Uint8Array(n);
+    for (let i = 0; i < n; i++) {
+      if (!owned[i] || seen[i]) continue;
+      const cells = [i];
+      seen[i] = 1;
+      let rim = d.S[i], bed = Infinity;
+      for (let q = 0; q < cells.length; q++) {
+        const c = cells[q], cx = c % TN, cz = Math.floor(c / TN);
+        bed = Math.min(bed, d.H[c]);
+        for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const x = cx + dx, z = cz + dz;
+          if (x < 0 || z < 0 || x >= TN || z >= TN) continue;
+          const j = z * TN + x;
+          if (owned[j]) { if (!seen[j]) { seen[j] = 1; cells.push(j); } continue; }
+          // Just outside the lake: the real ground there, a little beyond.
+          const wx = t.ox + (x + dx) * CELL, wz = t.oz + (z + dz) * CELL;
+          rim = Math.min(rim, this.mapHeight(t.ox + x * CELL, t.oz + z * CELL), this.mapHeight(wx, wz));
+        }
+      }
+      const s = Math.min(d.S[i], rim - 0.15);
+      if (s - bed < 0.8) continue;
+      for (const c of cells) level[c] = s;
+      // Streams that ran in at the old shore carry on down to the new one.
+      if (s < d.S[i] - 0.3) {
+        const wet = cells.filter((c) => d.H[c] < s - 0.2);
+        const R = d.reaches;
+        for (let k = 0; k < R.length; k += 8) {
+          const bx = R[k + 2], bz = R[k + 3];
+          const cx = Math.round((bx - t.ox) / CELL), cz = Math.round((bz - t.oz) / CELL);
+          let near = false;
+          for (let dz = -3; dz <= 3 && !near; dz++) for (let dx = -3; dx <= 3; dx++) {
+            const x = cx + dx, z = cz + dz;
+            if (x >= 0 && z >= 0 && x < TN && z < TN && owned[z * TN + x] && seen[z * TN + x] && cells.includes(z * TN + x)) { near = true; break; }
+          }
+          if (!near) continue;
+          let best = -1, bd = Infinity;
+          for (const c of wet) { const dd = Math.hypot(t.ox + (c % TN) * CELL - bx, t.oz + Math.floor(c / TN) * CELL - bz); if (dd < bd) { bd = dd; best = c; } }
+          if (best < 0 || bd < 2) continue;
+          t.lakeLinks.push(bx, bz, t.ox + (best % TN) * CELL, t.oz + Math.floor(best / TN) * CELL, R[k + 5], s, R[k + 6], R[k + 7]);
+        }
+      }
+    }
+    t.level = level;
   }
 
   private linkCache = new Map<string, Float32Array>();

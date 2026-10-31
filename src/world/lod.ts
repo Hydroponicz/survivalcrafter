@@ -26,6 +26,9 @@ const N_CELLS = TILE / CELL, B_CELLS = BLEND / CELL, OFF = PAD / CELL;
 interface LodTile {
   d: TileData; cols: Float32Array; group: THREE.Group; land: THREE.Mesh;
   trees: StandIns[];
+  water?: THREE.Mesh;
+  /** Whether its lakes were drawn at their settled levels. */
+  settled?: boolean;
 }
 
 export class DistantLand {
@@ -37,6 +40,8 @@ export class DistantLand {
   private tiles = new Map<string, LodTile>();
   /** Tiles of distant land drawn around you (a graphics setting, up to LOD_TILES). */
   radius = LOD_TILES;
+  /** Lake surfaces as finally settled for a tile, where known (they can sit lower than its map says). */
+  lakeLevels?: (tx: number, tz: number) => Float32Array | undefined;
   /** Thin the distant forests by this many levels (a graphics setting). */
   forestThin = 0;
   private forest: FarForest | null;
@@ -190,6 +195,69 @@ export class DistantLand {
     geo.computeBoundingSphere();
   }
 
+  /** (Re)build a tile's lakes and wide rivers, as sheets at their surface. */
+  private buildWater(t: LodTile) {
+    const N = LOD_N, d = t.d, off = OFF, group = t.group;
+    const x0 = d.tx * TILE, z0 = d.tz * TILE;
+    if (t.water) { group.remove(t.water); t.water.geometry.dispose(); t.water = undefined; }
+    const levels = this.lakeLevels?.(d.tx, d.tz);
+    t.settled = !!levels;
+    const wpos: number[] = [], widx: number[] = [], wdepth: number[] = [];
+    const vid = new Map<number, number>();
+    const v = (lx: number, lz: number, s: number) => {
+      const key2 = lz * (N + 1) + lx;
+      let id = vid.get(key2);
+      if (id === undefined) {
+        id = wpos.length / 3;
+        vid.set(key2, id);
+        const x = x0 + lx * CELL, z = z0 + lz * CELL, j = (lz + off) * TN + lx + off;
+        // At the lake's edge the sheet dips under the bank, so the land cuts
+        // its shoreline along the lie of the ground, not the map grid.
+        const shore = Number.isNaN(levels ? (d.kind[j] === 2 ? levels[j] : NaN) : d.kind[j] === 2 ? d.S[j] : NaN) || d.H[j] > s - 0.2;
+        wpos.push(x, shore ? Math.min(s - 0.15, d.H[j] - 2) : s - 0.15, z);
+        wdepth.push(shore ? 0 : s - d.H[j]);
+      }
+      return id;
+    };
+    for (let lz = 0; lz < N - 1; lz++) {
+      for (let lx = 0; lx < N - 1; lx++) {
+        const i = (lz + off) * TN + lx + off;
+        const lvAt = (j: number) => (d.kind[j] !== 2 ? NaN : levels ? levels[j] : d.S[j]);
+        let s = NaN;
+        for (const j of [i, i + 1, i + TN, i + TN + 1]) if (!Number.isNaN(lvAt(j))) { s = lvAt(j); break; }
+        if (Number.isNaN(s)) continue;
+        const a = v(lx, lz, s), b = v(lx + 1, lz, s), c = v(lx, lz + 1, s), dd = v(lx + 1, lz + 1, s);
+        widx.push(a, c, b, b, c, dd);
+      }
+    }
+    // Wide rivers, as ribbons along their course (each reach a little longer
+    // than itself, so the bends join up).
+    const R = d.reaches;
+    for (let k = 0; k < R.length / 8; k++) {
+      const o = k * 8, r = R[o + 6];
+      if (r < 6 || R[o] < x0 || R[o] >= x0 + TILE || R[o + 1] < z0 || R[o + 1] >= z0 + TILE) continue;
+      const ax = R[o], az = R[o + 1], bx = R[o + 2], bz = R[o + 3];
+      const len = Math.hypot(bx - ax, bz - az) || 1, ux = (bx - ax) / len, uz = (bz - az) / len;
+      const e = r * 0.45, px = -uz * r, pz = ux * r;
+      const base = wpos.length / 3;
+      const sa = R[o + 4] - 0.6, sb = R[o + 5] - 0.6;
+      wpos.push(ax - ux * e + px, sa, az - uz * e + pz, ax - ux * e - px, sa, az - uz * e - pz,
+        bx + ux * e + px, sb, bz + uz * e + pz, bx + ux * e - px, sb, bz + uz * e - pz);
+      const dp = R[o + 7]; // as deep as the river itself, so it matches the water close by
+      wdepth.push(dp, dp, dp, dp);
+      widx.push(base, base + 2, base + 1, base + 1, base + 2, base + 3);
+    }
+    if (widx.length) {
+      const wg = new THREE.BufferGeometry();
+      wg.setAttribute('position', new THREE.Float32BufferAttribute(wpos, 3));
+      wg.setAttribute('depth', new THREE.Float32BufferAttribute(wdepth, 1));
+      wg.setIndex(widx);
+      wg.computeVertexNormals();
+      t.water = new THREE.Mesh(wg, this.waterMaterial);
+      group.add(t.water);
+    }
+  }
+
   /** A tile's map is ready: build its distant land (colours may come from the worker). */
   addTile(d: TileData, lod?: Float32Array) {
     const key = `${d.tx},${d.tz}`;
@@ -238,67 +306,15 @@ export class DistantLand {
         if (o) this.shape(o, true, -ox, -oz);
       }
     }
-    const off = OFF;
-
-    // Lakes and wide rivers, as sheets at their surface.
-    const wpos: number[] = [], widx: number[] = [], wdepth: number[] = [];
-    const vid = new Map<number, number>();
-    const v = (lx: number, lz: number, s: number) => {
-      const key2 = lz * (N + 1) + lx;
-      let id = vid.get(key2);
-      if (id === undefined) {
-        id = wpos.length / 3;
-        vid.set(key2, id);
-        const x = x0 + lx * CELL, z = z0 + lz * CELL, j = (lz + off) * TN + lx + off;
-        // At the lake's edge the sheet dips under the bank, so the land cuts
-        // its shoreline along the lie of the ground, not the map grid.
-        const shore = d.kind[j] !== 2;
-        wpos.push(x, shore ? Math.min(s - 0.15, d.H[j] - 2) : s - 0.15, z);
-        wdepth.push(shore ? 0 : s - d.H[j]);
-      }
-      return id;
-    };
-    for (let lz = 0; lz < N - 1; lz++) {
-      for (let lx = 0; lx < N - 1; lx++) {
-        const i = (lz + off) * TN + lx + off;
-        if (d.kind[i] !== 2 && d.kind[i + 1] !== 2 && d.kind[i + TN] !== 2 && d.kind[i + TN + 1] !== 2) continue;
-        let s = NaN;
-        for (const j of [i, i + 1, i + TN, i + TN + 1]) if (d.kind[j] === 2) { s = d.S[j]; break; }
-        const a = v(lx, lz, s), b = v(lx + 1, lz, s), c = v(lx, lz + 1, s), dd = v(lx + 1, lz + 1, s);
-        widx.push(a, c, b, b, c, dd);
-      }
-    }
-    // Wide rivers, as ribbons along their course (each reach a little longer
-    // than itself, so the bends join up).
-    const R = d.reaches;
-    for (let k = 0; k < R.length / 8; k++) {
-      const o = k * 8, r = R[o + 6];
-      if (r < 6 || R[o] < x0 || R[o] >= x0 + TILE || R[o + 1] < z0 || R[o + 1] >= z0 + TILE) continue;
-      const ax = R[o], az = R[o + 1], bx = R[o + 2], bz = R[o + 3];
-      const len = Math.hypot(bx - ax, bz - az) || 1, ux = (bx - ax) / len, uz = (bz - az) / len;
-      const e = r * 0.45, px = -uz * r, pz = ux * r;
-      const base = wpos.length / 3;
-      const sa = R[o + 4] - 0.6, sb = R[o + 5] - 0.6;
-      wpos.push(ax - ux * e + px, sa, az - uz * e + pz, ax - ux * e - px, sa, az - uz * e - pz,
-        bx + ux * e + px, sb, bz + uz * e + pz, bx + ux * e - px, sb, bz + uz * e - pz);
-      const dp = R[o + 7]; // as deep as the river itself, so it matches the water close by
-      wdepth.push(dp, dp, dp, dp);
-      widx.push(base, base + 2, base + 1, base + 1, base + 2, base + 3);
-    }
-    if (widx.length) {
-      const wg = new THREE.BufferGeometry();
-      wg.setAttribute('position', new THREE.Float32BufferAttribute(wpos, 3));
-      wg.setAttribute('depth', new THREE.Float32BufferAttribute(wdepth, 1));
-      wg.setIndex(widx);
-      wg.computeVertexNormals();
-      group.add(new THREE.Mesh(wg, this.waterMaterial));
-    }
+    this.buildWater(t);
     this.group.add(group);
   }
 
   /** Drop distant land too far from a point to see. */
   prune(x: number, z: number) {
     this.lastTx = NaN;
+    // Lakes first drawn before their neighbours were made: redraw them settled.
+    for (const t of this.tiles.values()) if (!t.settled && this.lakeLevels?.(t.d.tx, t.d.tz)) this.buildWater(t);
     this.refine(x, z);
     for (const [key, t] of this.tiles) {
       const g = t.group, tx = t.d.tx, tz = t.d.tz;
