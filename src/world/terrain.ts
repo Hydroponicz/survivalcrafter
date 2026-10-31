@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { hash2, Simplex } from './noise';
 import { type Zone } from './climate';
 import { Rock, Strata } from './geology';
+import { GROUNDS, GroundTextures } from './groundtex';
 import { makeWaterMaterial, waterTime } from './water';
 import { SEA, snowCover, WorldGen, type SoilTop } from './worldgen';
 
@@ -337,6 +338,9 @@ export class Terrain {
    * where dry, deep green where wet, dark up high) and snow lies on cold,
    * gentle ground. `ny` is the surface normal's up component.
    */
+  /** How much snow the last `surfaceColor` call laid on (0..1). */
+  lastSnow = 0;
+
   surfaceColor(m: Mat, x: number, y: number, z: number, ny: number, out: number[] = [0, 0, 0]): number[] {
     const base = LIN[m] ?? LIN[Mat.Dirt];
     let r = base[0], g = base[1], b = base[2];
@@ -348,7 +352,8 @@ export class Terrain {
       mix(GRASS_LUSH, clamp01((mo - 0.55) / 0.3) * 0.7);
       mix(GRASS_COLD, clamp01((0.45 - temp) / 0.2) * 0.8);
     }
-    mix(SNOW, snowCover(x, z, temp, Math.sqrt(Math.max(0, 1 - ny * ny)) / Math.max(0.05, ny)));
+    this.lastSnow = snowCover(x, z, temp, Math.sqrt(Math.max(0, 1 - ny * ny)) / Math.max(0.05, ny));
+    mix(SNOW, this.lastSnow);
     out[0] = r; out[1] = g; out[2] = b;
     return out;
   }
@@ -793,7 +798,7 @@ export class Terrain {
     this.empty.delete(id);
 
     const vid = new Int32Array(S * S * S).fill(-1);
-    const pos: number[] = [], nor: number[] = [], col: number[] = [], grass: number[] = [], index: number[] = [];
+    const pos: number[] = [], nor: number[] = [], col: number[] = [], ground: number[] = [], ground2: number[] = [], index: number[] = [];
     const c = new Float32Array(8);
     let nv = 0;
     for (let lz = 0; lz < S; lz++) {
@@ -840,7 +845,10 @@ export class Terrain {
           pos.push(wx, wy, wz);
           nor.push(nx, ny, nz);
           col.push(r * j * wet, gC * j * wet, b * j * wet);
-          grass.push(m === Mat.Grass ? 1 : 0);
+          // Which ground texture: grass, dirt, sand, gravel, rock, with snow over any of them.
+          const layer = GROUND_OF[m] ?? 1, snow = this.lastSnow;
+          for (let k = 0; k < 4; k++) ground.push(layer === k ? 1 - snow : 0);
+          ground2.push(layer === 4 ? 1 - snow : 0, snow);
           vid[(lz * S + ly) * S + lx] = nv++;
         }
       }
@@ -879,7 +887,8 @@ export class Terrain {
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
     g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-    g.setAttribute('grass', new THREE.Float32BufferAttribute(grass, 1));
+    g.setAttribute('ground', new THREE.Float32BufferAttribute(ground, 4));
+    g.setAttribute('ground2', new THREE.Float32BufferAttribute(ground2, 2));
     g.setIndex(index);
     g.computeBoundingSphere();
     if (old) {
@@ -1035,91 +1044,97 @@ function unrle(b64: string): Uint8Array {
   return new Uint8Array(out);
 }
 
-/** Average colour (linear) of the grass photo, so its pattern can be laid over other colours. */
-const GRASS_PHOTO_AVG = [0.316, 0.232, 0.099];
-
-/** A photographed ground texture set (colour, OpenGL normal map, and AO/roughness/metal packed). */
-function loadGround(name: string) {
-  const loader = new THREE.TextureLoader();
-  const load = (file: string, colour: boolean) => {
-    const t = loader.load(`textures/terrain/${name}_${file}.jpg`);
-    t.wrapS = t.wrapT = THREE.RepeatWrapping;
-    t.colorSpace = colour ? THREE.SRGBColorSpace : THREE.NoColorSpace;
-    t.anisotropy = 8;
-    return t;
-  };
-  return { color: load('color', true), normal: load('normal', false), orm: load('orm', false) };
-}
+/** Ground texture layer (see groundtex.ts) for each material. */
+const GROUND_OF: Partial<Record<Mat, number>> = {
+  [Mat.Grass]: 0, [Mat.Dirt]: 1, [Mat.Field]: 1, [Mat.Clay]: 1, [Mat.Sand]: 2, [Mat.Gravel]: 3,
+  [Mat.Rock]: 4, [Mat.Sandstone]: 4, [Mat.Shale]: 4, [Mat.Iron]: 4,
+};
 
 /**
- * The terrain: vertex colours (material, climate, snow) with triplanar detail
- * noise, and photographed ground textures where there's grass. The texture's
- * pattern is laid over the climate colour (so dry, lush and cold grass still
- * differ), sampled at two scales and angles blended by a broad noise so its
- * repeats don't show, with its bumps and roughness close up.
+ * The terrain: vertex colours (material, climate, snow) carrying photographed
+ * ground textures. Each vertex says how much of each layer it is, and the
+ * fragments blend them. Textures are projected from above on gentle ground
+ * and from the sides on steep ground (triplanar), and from above are sampled
+ * at two scales and angles blended by broad noise so repeats don't show.
  */
 function makeTerrainMaterial(): THREE.MeshStandardMaterial {
   const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0 });
   const detail = makeDetailTexture();
-  const grass = loadGround('grass');
+  const gt = new GroundTextures();
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.detailMap = { value: detail };
-    shader.uniforms.grassColor = { value: grass.color };
-    shader.uniforms.grassNormal = { value: grass.normal };
-    shader.uniforms.grassOrm = { value: grass.orm };
+    shader.uniforms.gColor = { value: gt.color };
+    shader.uniforms.gNormal = { value: gt.normal };
+    shader.uniforms.gOrm = { value: gt.orm };
+    shader.uniforms.gAvg = { value: gt.avg };
+    shader.uniforms.gScale = { value: gt.scale };
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute float grass;\nvarying float vGrass;\nvarying vec3 vWPos;\nvarying vec3 vWNrm;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvGrass = grass;\nvWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvWNrm = normalize(mat3(modelMatrix) * objectNormal);');
+      .replace('#include <common>', '#include <common>\nattribute vec4 ground;\nattribute vec2 ground2;\nvarying vec4 vG1;\nvarying vec2 vG2;\nvarying vec3 vWPos;\nvarying vec3 vWNrm;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvG1 = ground;\nvG2 = ground2;\nvWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvWNrm = normalize(mat3(modelMatrix) * objectNormal);');
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>
-varying float vGrass;
+varying vec4 vG1;
+varying vec2 vG2;
 varying vec3 vWPos;
 varying vec3 vWNrm;
 uniform sampler2D detailMap;
-uniform sampler2D grassColor;
-uniform sampler2D grassNormal;
-uniform sampler2D grassOrm;
-// Two samplings of a ground texture, blended by broad noise so it doesn't visibly repeat.
-vec2 groundUv1;
-vec2 groundUv2;
-float groundMix;
-vec4 ground(sampler2D t) {
-  return mix(texture2D(t, groundUv1), texture2D(t, groundUv2), groundMix);
+uniform highp sampler2DArray gColor;
+uniform highp sampler2DArray gNormal;
+uniform highp sampler2DArray gOrm;
+uniform vec3 gAvg[${GROUNDS.length}];
+uniform float gScale[${GROUNDS.length}];
+// Blended ground: colour pattern, normal offset (world space), and AO/rough/metal.
+vec3 gPat; vec3 gNrm; vec3 gOrmV;
+void groundLayer(int i, float w, vec3 bw, float mixAB, float near) {
+  float s = 1.0 / gScale[i];
+  float L = float(i);
+  vec3 c = vec3(0.0), n = vec3(0.0), o = vec3(0.0);
+  if (bw.y > 0.02) {
+    vec2 a = vWPos.xz * s, b = mat2(0.8, -0.6, 0.6, 0.8) * vWPos.xz * s * 0.71 + 0.37;
+    c += bw.y * mix(texture(gColor, vec3(a, L)).rgb, texture(gColor, vec3(b, L)).rgb, mixAB);
+    o += bw.y * mix(texture(gOrm, vec3(a, L)).rgb, texture(gOrm, vec3(b, L)).rgb, mixAB);
+    if (near > 0.0) { vec2 t = mix(texture(gNormal, vec3(a, L)).xy, texture(gNormal, vec3(b, L)).xy, mixAB) * 2.0 - 1.0; n += bw.y * vec3(t.x, 0.0, t.y); }
+  }
+  if (bw.x > 0.02) {
+    vec2 a = vWPos.zy * s;
+    c += bw.x * texture(gColor, vec3(a, L)).rgb;
+    o += bw.x * texture(gOrm, vec3(a, L)).rgb;
+    if (near > 0.0) { vec2 t = texture(gNormal, vec3(a, L)).xy * 2.0 - 1.0; n += bw.x * vec3(0.0, t.y, t.x); }
+  }
+  if (bw.z > 0.02) {
+    vec2 a = vWPos.xy * s;
+    c += bw.z * texture(gColor, vec3(a, L)).rgb;
+    o += bw.z * texture(gOrm, vec3(a, L)).rgb;
+    if (near > 0.0) { vec2 t = texture(gNormal, vec3(a, L)).xy * 2.0 - 1.0; n += bw.z * vec3(t.x, t.y, 0.0); }
+  }
+  gPat += w * c / max(gAvg[i], vec3(0.01));
+  gNrm += w * n;
+  gOrmV += w * o;
 }`)
       .replace('#include <color_fragment>', `#include <color_fragment>
         vec3 bw = pow(abs(vWNrm), vec3(4.0));
         bw /= (bw.x + bw.y + bw.z);
-        float d1 = texture2D(detailMap, vWPos.zy * 0.45).r * bw.x + texture2D(detailMap, vWPos.xz * 0.45).r * bw.y + texture2D(detailMap, vWPos.xy * 0.45).r * bw.z;
         float d2 = texture2D(detailMap, vWPos.zy * 0.06).g * bw.x + texture2D(detailMap, vWPos.xz * 0.06).g * bw.y + texture2D(detailMap, vWPos.xy * 0.06).g * bw.z;
-        groundUv1 = vWPos.xz / 2.6;
-        groundUv2 = mat2(0.8, -0.6, 0.6, 0.8) * vWPos.xz / 3.7 + 0.37;
-        groundMix = smoothstep(0.3, 0.7, texture2D(detailMap, vWPos.xz * 0.021).g);
-        float grassW = smoothstep(0.2, 0.9, vGrass);
-        vec3 plain = diffuseColor.rgb * (0.8 + 0.4 * d1) * (0.82 + 0.36 * d2);
-        if (grassW > 0.0) {
-          // The photo's pattern, relative to its average colour, over the climate's grass colour.
-          vec3 photo = ground(grassColor).rgb;
-          vec3 pattern = photo / vec3(${GRASS_PHOTO_AVG.map((v) => v.toFixed(4)).join(', ')});
-          vec3 textured = mix(diffuseColor.rgb * pattern, photo * 0.55, 0.25) * (0.88 + 0.24 * d2);
-          plain = mix(plain, textured, grassW);
+        float mixAB = smoothstep(0.3, 0.7, texture2D(detailMap, vWPos.xz * 0.021).g);
+        float gNear = 1.0 - smoothstep(25.0, 60.0, length(vWPos - cameraPosition));
+        float gw[${GROUNDS.length}];
+        gw[0] = vG1.x; gw[1] = vG1.y; gw[2] = vG1.z; gw[3] = vG1.w; gw[4] = vG2.x; gw[5] = vG2.y;
+        float gTotal = 0.0;
+        for (int i = 0; i < ${GROUNDS.length}; i++) gTotal += gw[i];
+        gPat = vec3(0.0); gNrm = vec3(0.0); gOrmV = vec3(0.0);
+        for (int i = 0; i < ${GROUNDS.length}; i++) {
+          float w = gw[i] / max(gTotal, 1e-4);
+          if (w > 0.01) groundLayer(i, w, bw, mixAB, gNear);
         }
-        diffuseColor.rgb = plain;`)
+        diffuseColor.rgb *= gPat * (0.86 + 0.28 * d2) * (0.6 + 0.4 * gOrmV.r);`)
       .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
-        if (grassW > 0.0) {
-          vec3 orm = ground(grassOrm).rgb;
-          roughnessFactor = mix(roughnessFactor, orm.g, grassW);
-          diffuseColor.rgb *= mix(1.0, 0.55 + 0.45 * orm.r, grassW);
-        }`)
+        roughnessFactor = gOrmV.g;`)
       .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
-        {
-          // Close up, the grass's bumps (they'd only shimmer further off).
-          float near = grassW * (1.0 - smoothstep(25.0, 60.0, length(vWPos - cameraPosition)));
-          if (near > 0.0) {
-            vec3 tn = ground(grassNormal).xyz * 2.0 - 1.0;
-            vec3 wn = normalize((vec4(normal, 0.0) * viewMatrix).xyz);
-            vec3 bumped = normalize(wn + vec3(tn.x, 0.0, tn.y) * 0.9);
-            normal = normalize((viewMatrix * vec4(normalize(mix(wn, bumped, near)), 0.0)).xyz);
-          }
+        if (gNear > 0.0) {
+          // Close up, the ground's bumps (they'd only shimmer further off).
+          vec3 wn = normalize((vec4(normal, 0.0) * viewMatrix).xyz);
+          vec3 bumped = normalize(wn + gNrm * 0.9);
+          normal = normalize((viewMatrix * vec4(normalize(mix(wn, bumped, gNear)), 0.0)).xyz);
         }`);
   };
   return mat;

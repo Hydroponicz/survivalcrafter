@@ -97,9 +97,10 @@ Toggles are remembered per browser; a purple **DEV** badge shows while any cheat
 - **Weathered, eroded landscapes.** Each world is shaped by simulated rain: ~170,000 droplets run
   downhill, carving gullies into the mountains and laying sediment along valley floors. Soil is thick
   where sediment settled and thin where water stripped it; clay lines the well-watered valley bottoms.
-- **Photographed ground.** Grass uses a photographed ground texture (colour, surface bumps and
-  roughness), laid over the climate's grass colour so dry, lush and cold grass still differ, and sampled
-  at two scales and angles so it never visibly repeats. More ground types slot in the same way.
+- **Photographed ground.** Grass, dirt, sand, gravel, rock and snow use photographed textures (colour,
+  surface bumps and roughness), laid over the terrain's own colour so dry, lush and cold grass, or granite
+  and sandstone, still differ. They blend smoothly where materials meet, wrap around cliffs from the side
+  as well as from above, and are sampled at two scales and angles so they never visibly repeat.
 - **Water you can see into.** The sea, lakes and rivers take their colour from their depth: clear
   over the shallows (the sand and stones show through), green-blue, then deep blue offshore. Foam
   laps along the shore, ripples at three scales drift across the surface and the sky and sun
