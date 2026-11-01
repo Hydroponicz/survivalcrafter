@@ -82,6 +82,9 @@ export function treeGeometries(species: Species, detail: 0 | 1 = 1): { trunk: TH
   return { trunk, leaves: parts.length > 1 ? mergeGeometries(parts.map((g) => (g.index ? g.toNonIndexed() : g)))! : parts[0] };
 }
 
+/** Kinds whose trunk and branches come from a model (rather than a plain tapering trunk). */
+export const MODEL_TRUNK: Partial<Record<Species, true>> = { birch: true };
+
 /**
  * The birch, from its model: the real trunk and branches near you (a plain
  * tapering trunk from afar), with low-poly leaf clumps where the model's

@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { hash2 } from './noise';
 import type { Terrain } from './terrain';
-import { SPECIES, TREES } from './trees';
+import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { MODEL_TRUNK, SPECIES, treeGeometries, TREES } from './trees';
 import type { Species, Stump, TreeObj } from './world';
 
 // Visual life of a tree being chopped: a V-notch that deepens with each hit,
@@ -32,6 +33,40 @@ export function treeScale(o: { id: number; age: number; species: Species }) {
   // Taller than they are wide: real trees are tall, not lollipops.
   const hs = 1.15 + hash2(o.id, 2) * 0.35;
   return { s, hs, yaw: hash2(o.id, 1) * Math.PI * 2 };
+}
+
+/**
+ * A model trunk made ready to have a notch cut into it: around the notch's
+ * height (`y` ± `span`, model units) its triangles are split into small
+ * ones, so the cut can take a clean V shape; the rest stays as modelled.
+ */
+function notchable(src: THREE.BufferGeometry, y: number, span: number): THREE.BufferGeometry {
+  let p = Array.from((src.index ? src.toNonIndexed() : src).attributes.position.array as Float32Array);
+  const MAX = 0.04;
+  for (let pass = 0; pass < 6; pass++) {
+    const out: number[] = [];
+    let split = false;
+    for (let t = 0; t < p.length; t += 9) {
+      const tri = p.slice(t, t + 9);
+      const lo = Math.min(tri[1], tri[4], tri[7]), hi = Math.max(tri[1], tri[4], tri[7]);
+      const edge = Math.max(
+        Math.hypot(tri[0] - tri[3], tri[1] - tri[4], tri[2] - tri[5]),
+        Math.hypot(tri[3] - tri[6], tri[4] - tri[7], tri[5] - tri[8]),
+        Math.hypot(tri[6] - tri[0], tri[7] - tri[1], tri[8] - tri[2]));
+      if (hi < y - span || lo > y + span || edge <= MAX) { out.push(...tri); continue; }
+      split = true;
+      // Into four, at the edges' midpoints.
+      const m = (a: number, b: number) => [0, 1, 2].map((k) => (tri[a * 3 + k] + tri[b * 3 + k]) / 2);
+      const A = tri.slice(0, 3), B = tri.slice(3, 6), C = tri.slice(6, 9), ab = m(0, 1), bc = m(1, 2), ca = m(2, 0);
+      out.push(...A, ...ab, ...ca, ...ab, ...B, ...bc, ...ca, ...bc, ...C, ...ab, ...bc, ...ca);
+    }
+    p = out;
+    if (!split) break;
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(p, 3));
+  // Shared corners joined again, for smooth shading.
+  return mergeVertices(g, 1e-4);
 }
 
 interface Particle {
@@ -95,7 +130,9 @@ export class TreeFx {
     let a = this.actors.get(t.id);
     if (a) return a;
     const dims = TRUNK[t.species];
-    const geo = new THREE.CylinderGeometry(dims.r1, dims.r0, dims.h, 18, 36).translate(0, dims.h / 2, 0);
+    const geo = MODEL_TRUNK[t.species]
+      ? notchable(treeGeometries(t.species).trunk, NOTCH_Y / treeScale(t).hs, 0.9)
+      : new THREE.CylinderGeometry(dims.r1, dims.r0, dims.h, 18, 36).translate(0, dims.h / 2, 0);
     const bark = new THREE.Color(BARK[t.species]);
     const col = new Float32Array(geo.attributes.position.count * 3);
     for (let i = 0; i < col.length; i += 3) { col[i] = bark.r; col[i + 1] = bark.g; col[i + 2] = bark.b; }
@@ -148,11 +185,13 @@ export class TreeFx {
     const bark = new THREE.Color(BARK[t.species]);
     const ny = NOTCH_Y / hs;
     const band = (0.2 + 0.22 * chop) / hs;
+    const reach = TRUNK[t.species].r0 * 1.6;
     for (let i = 0; i < pos.count; i++) {
       const x = a.base[i * 3], y = a.base[i * 3 + 1], z = a.base[i * 3 + 2];
       const r = Math.hypot(x, z);
       let cut = 0;
-      if (r > 1e-4 && chop > 0) {
+      // Into the trunk itself (not a root flare reaching out beside it).
+      if (r > 1e-4 && r < reach && chop > 0) {
         const facing = (x * fx + z * fz) / r; // 1 = straight at the chopper
         const across = Math.max(0, (facing - 0.1) / 0.9);
         const along = Math.max(0, 1 - Math.abs(y - ny) / band);
