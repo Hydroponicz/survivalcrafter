@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { SPECIES, treeGeometries, TREES } from './trees';
+import { leafMaterial, SPECIES, treeGeometries, TREES } from './trees';
 import { STRUCTURES, totalMaterials } from '../data/structures';
 import { FORAGE, FORAGE_SPECIES } from '../data/forage';
 import { forageGeometry, forageScale } from './forageProps';
@@ -214,8 +214,9 @@ export class WorldView implements WorldListener {
       const g = treeGeometries(s);
       this.trunks[s] = new InstancePool(g.trunk, mat(trunkMat[s]), 9000);
       this.trunksLo[s] = new InstancePool(treeGeometries(s, 0).trunk, mat(trunkMat[s]), 9000);
-      this.leaves[s] = new PackedPool(g.leaves, mat(0xffffff, { flatShading: true }), 9000);
-      this.leavesLo[s] = new PackedPool(treeGeometries(s, 0).leaves, mat(0xffffff, { flatShading: true }), 9000);
+      this.leaves[s] = new PackedPool(g.leaves, leafMaterial(g.leaves), 9000);
+      const lo = treeGeometries(s, 0).leaves;
+      this.leavesLo[s] = new PackedPool(lo, leafMaterial(lo), 9000);
       this.leafBase[s] = leafMat[s];
       this.group.add(this.trunks[s].mesh, this.trunksLo[s].mesh, this.leaves[s].mesh, this.leavesLo[s].mesh);
     }

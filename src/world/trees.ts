@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { Zone } from './climate';
-import { Simplex } from './noise';
+import { mulberry32, Simplex } from './noise';
 import { BaseLand } from './worldgen';
 import { BIRCH } from './models/birch';
 
@@ -106,11 +106,93 @@ function birchGeometries(detail: 0 | 1): { trunk: THREE.BufferGeometry; leaves: 
   const clumps = detail ? BIRCH.clumps : BIRCH.clumps.slice(0, 5);
   // A little fuller than the model's own leaves, so the clumps run together into a crown.
   const F = detail ? 1.35 : 1.6;
-  const parts = clumps.map(([x, y, z, rx, ry, rz]) => {
-    const g = new THREE.IcosahedronGeometry(1, detail).scale(rx * F, ry * F, Math.max(rz, rx * 0.85) * F).translate(x, y, z);
-    return g.index ? g.toNonIndexed() : g;
-  });
-  return { trunk, leaves: mergeGeometries(parts)! };
+  const radii = (rx: number, ry: number, rz: number) => [rx * F, ry * F, Math.max(rz, rx * 0.85) * F];
+  if (!detail) {
+    // From afar, plain clumps (the leaves are too small to make out).
+    const parts = clumps.map(([x, y, z, rx, ry, rz]) => {
+      const [a, b, c] = radii(rx, ry, rz);
+      return new THREE.IcosahedronGeometry(1, 0).scale(a, b, c).translate(x, y, z).toNonIndexed();
+    });
+    return { trunk, leaves: withColour(mergeGeometries(parts)!, 1) };
+  }
+  return { trunk, leaves: leafClusters(clumps.map(([x, y, z, rx, ry, rz]) => [x, y, z, ...radii(rx, ry, rz)]), 2711) };
+}
+
+/**
+ * The material for a kind of tree's leaves (white: each tree's tint comes as
+ * its instance colour). Leaves made of separate leaves (they carry their own
+ * shades) are seen from both sides, lit as their clump's rounded surface
+ * from either side (not turned dark on the back, as a flat card would be).
+ */
+export function leafMaterial(leaves: THREE.BufferGeometry): THREE.MeshStandardMaterial {
+  if (!leaves.attributes.color) return new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, metalness: 0, flatShading: true });
+  const m = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85, metalness: 0, vertexColors: true, side: THREE.DoubleSide });
+  m.onBeforeCompile = (sh) => { sh.fragmentShader = sh.fragmentShader.replace('normal *= faceDirection;', ''); };
+  m.customProgramCacheKey = () => 'leaf-clusters';
+  return m;
+}
+
+/** A geometry all one shade (as vertex colours), so it can share a material with leaves that vary. */
+function withColour(g: THREE.BufferGeometry, v: number): THREE.BufferGeometry {
+  g.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(g.attributes.position.count * 3).fill(v), 3));
+  return g;
+}
+
+/**
+ * Crowns of real leaves rather than solid blobs: each clump (centre and
+ * radii) is a cluster of small leaves, each slightly folded along its middle,
+ * scattered round its outside at all angles, over a darker core that keeps
+ * you from seeing straight through. The leaves are lit as if they were the
+ * clump's rounded surface, so the crown still has a sunny side and a shaded
+ * side rather than a glitter of flat cards; each leaf is a slightly
+ * different shade.
+ */
+function leafClusters(clumps: number[][], seed: number): THREE.BufferGeometry {
+  const rnd = mulberry32(seed);
+  const pos: number[] = [], nor: number[] = [], col: number[] = [];
+  const u = new THREE.Vector3(), a = new THREE.Vector3(), b = new THREE.Vector3(), n = new THREE.Vector3();
+  const p = new THREE.Vector3(), c = new THREE.Vector3(), q = new THREE.Vector3();
+  for (const [cx, cy, cz, rx, ry, rz] of clumps) {
+    c.set(cx, cy, cz);
+    // The core.
+    const core = new THREE.IcosahedronGeometry(1, 0).scale(rx * 0.8, ry * 0.8, rz * 0.8).translate(cx, cy, cz).toNonIndexed();
+    core.computeVertexNormals();
+    pos.push(...(core.attributes.position.array as Float32Array));
+    nor.push(...(core.attributes.normal.array as Float32Array));
+    for (let i = 0; i < core.attributes.position.count; i++) col.push(0.78, 0.8, 0.74);
+    // The leaves: more on a bigger clump.
+    const count = Math.round(Math.min(170, Math.max(60, 150 * Math.cbrt(rx * ry * rz))));
+    for (let k = 0; k < count; k++) {
+      // Somewhere on the outside of the clump (a little in or out).
+      u.set(rnd() * 2 - 1, rnd() * 2 - 1, rnd() * 2 - 1);
+      if (u.lengthSq() > 1 || u.lengthSq() < 0.01) { k--; continue; }
+      u.normalize();
+      const shell = 0.72 + 0.38 * rnd();
+      p.set(cx + u.x * rx * shell, cy + u.y * ry * shell, cz + u.z * rz * shell);
+      // Lying roughly across the outward direction, tipped at random.
+      a.set(rnd() - 0.5, rnd() - 0.5, rnd() - 0.5).addScaledVector(u, 0.6 * (rnd() - 0.5)).cross(u).normalize();
+      b.crossVectors(u, a).normalize();
+      const L = 0.24 + 0.12 * rnd(), W = L * (0.5 + 0.15 * rnd());
+      // Base, the two edges (folded up a little along the midrib), the tip.
+      const base = p.clone().addScaledVector(a, -L / 2), tip = p.clone().addScaledVector(a, L / 2);
+      const e1 = p.clone().addScaledVector(b, W / 2).addScaledVector(u, -W * 0.2);
+      const e2 = p.clone().addScaledVector(b, -W / 2).addScaledVector(u, -W * 0.2);
+      const shade = 0.82 + 0.3 * rnd(), warm = 0.06 * (rnd() - 0.3);
+      for (const v of [base, e1, tip, base, tip, e2]) {
+        pos.push(v.x, v.y, v.z);
+        // Lit like the clump's surface where the leaf sits.
+        q.copy(v).sub(c);
+        n.set(q.x / (rx * rx), q.y / (ry * ry), q.z / (rz * rz)).normalize();
+        nor.push(n.x, n.y, n.z);
+        col.push(shade + warm, shade + warm * 0.6, shade - warm);
+      }
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  return g;
 }
 
 /** What grows in each climate zone: tree density per 4 m², species mix, stature, berry bushes. */

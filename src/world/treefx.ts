@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { hash2 } from './noise';
 import type { Terrain } from './terrain';
 import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { MODEL_TRUNK, SPECIES, treeGeometries, TREES } from './trees';
+import { leafMaterial, MODEL_TRUNK, SPECIES, treeGeometries, TREES } from './trees';
 import type { Species, Stump, TreeObj } from './world';
 
 // Visual life of a tree being chopped: a V-notch that deepens with each hit,
@@ -138,7 +138,9 @@ export class TreeFx {
     for (let i = 0; i < col.length; i += 3) { col[i] = bark.r; col[i + 1] = bark.g; col[i + 2] = bark.b; }
     geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
     const trunk = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 }));
-    const leaves = new THREE.Mesh(this.leafGeoFor(t.species), new THREE.MeshStandardMaterial({ color: this.leafColor(t), roughness: 0.9, flatShading: true }));
+    const leafGeo = this.leafGeoFor(t.species), leafMat = leafMaterial(leafGeo);
+    leafMat.color.copy(this.leafColor(t));
+    const leaves = new THREE.Mesh(leafGeo, leafMat);
     trunk.castShadow = leaves.castShadow = true;
     trunk.receiveShadow = leaves.receiveShadow = true;
     const group = new THREE.Group();
