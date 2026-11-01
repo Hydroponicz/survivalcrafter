@@ -28,7 +28,7 @@ function painted(g: THREE.BufferGeometry, hex: number): THREE.BufferGeometry {
 
 /** A pared-down copy of a kind of real tree, trunk and crown painted in its colours. */
 function standIn(kind: Species): THREE.BufferGeometry {
-  const g = treeGeometries(kind, 0);
+  const g = treeGeometries(kind, 0, true);
   const merged = mergeGeometries([painted(g.trunk, TREES[kind].bark), painted(g.leaves, TREES[kind].leaf)])!;
   merged.computeVertexNormals();
   return merged;
@@ -41,7 +41,7 @@ function standIn(kind: Species): THREE.BufferGeometry {
  * of the drawing.
  */
 function outline(kind: Species): THREE.BufferGeometry {
-  const leaves = treeGeometries(kind, 0).leaves;
+  const leaves = treeGeometries(kind, 0, true).leaves;
   leaves.computeBoundingBox();
   const b = leaves.boundingBox!, r = Math.max(b.max.x - b.min.x, b.max.z - b.min.z) / 2;
   const conifer = kind === 'pine' || kind === 'spruce';

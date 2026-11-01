@@ -42,10 +42,10 @@ export const TREES: Record<Species, TreeKind> = {
  * A tree's trunk and leaves, in model units (about 6 m tall; scaled per
  * tree). `detail` 0 is a pared-down version for the distant forests.
  */
-export function treeGeometries(species: Species, detail: 0 | 1 = 1): { trunk: THREE.BufferGeometry; leaves: THREE.BufferGeometry } {
+export function treeGeometries(species: Species, detail: 0 | 1 = 1, standIn = false): { trunk: THREE.BufferGeometry; leaves: THREE.BufferGeometry } {
   const sides = detail ? 7 : 4, coneSides = detail ? 7 : 5, ico = detail;
   const t = TREES[species].trunk;
-  if (species === 'birch') return birchGeometries(detail);
+  if (species === 'birch') return birchGeometries(detail, standIn);
   const trunk = new THREE.CylinderGeometry(t.r1, t.r0, t.h, sides, 1, !detail).translate(0, t.h / 2, 0);
   const blob = (r: number, x: number, y: number, z: number, sx = 1, sy = 1) =>
     new THREE.IcosahedronGeometry(r, ico).scale(sx, sy, sx).translate(x, y, z);
@@ -91,27 +91,46 @@ export const MODEL_TRUNK: Partial<Record<Species, true>> = { birch: true };
  * leaves were (the biggest few from afar). The model is flat front to back,
  * so each clump is made nearly as deep as it is wide.
  */
-function birchGeometries(detail: 0 | 1): { trunk: THREE.BufferGeometry; leaves: THREE.BufferGeometry } {
+function birchGeometries(detail: 0 | 1, standIn = false): { trunk: THREE.BufferGeometry; leaves: THREE.BufferGeometry } {
   let trunk: THREE.BufferGeometry;
   if (detail) {
     trunk = new THREE.BufferGeometry();
     trunk.setAttribute('position', new THREE.Float32BufferAttribute(BIRCH.positions, 3));
     trunk.setIndex(BIRCH.indices);
     trunk.computeVertexNormals();
-  } else {
-    // Without its branches, the plain trunk runs on up into the crown.
+  } else if (standIn) {
+    // Far off: a plain trunk running on up into the crown.
     const t = BIRCH.trunk, top = Math.max(t.h, ...BIRCH.clumps.map((c) => c[1]));
     trunk = new THREE.CylinderGeometry(t.r1 * 0.6, t.r0, top, 4, 1, true).translate(0, top / 2, 0);
+  } else {
+    // Further off: a plain trunk tapering up through the crown, and a thin
+    // limb out to each clump, leaving the trunk at its own height and rising
+    // toward the clump as branches do.
+    const t = BIRCH.trunk, top = Math.max(...BIRCH.clumps.map((c) => c[1]));
+    const parts: THREE.BufferGeometry[] = [new THREE.CylinderGeometry(t.r1 * 0.3, t.r0, top, 5, 1, true).translate(0, top / 2, 0).toNonIndexed()];
+    for (const [x, y, z] of BIRCH.clumps) {
+      const out = Math.hypot(x, z);
+      const from = new THREE.Vector3(0, Math.max(t.h * 0.85, Math.min(y - 0.3, y - out * 0.85)), 0);
+      const to = new THREE.Vector3(x, y, z), len = to.distanceTo(from);
+      const limb = new THREE.CylinderGeometry(t.r1 * 0.12, t.r1 * 0.35, len, 3, 1, true).translate(0, len / 2, 0);
+      limb.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), to.clone().sub(from).normalize()));
+      parts.push(limb.translate(from.x, from.y, from.z).toNonIndexed());
+    }
+    trunk = mergeGeometries(parts)!;
   }
-  const clumps = detail ? BIRCH.clumps : BIRCH.clumps.slice(0, 5);
+  const clumps = detail || !standIn ? BIRCH.clumps : BIRCH.clumps.slice(0, 5);
   // A little fuller than the model's own leaves, so the clumps run together into a crown.
   const F = detail ? 1.35 : 1.6;
   const radii = (rx: number, ry: number, rz: number) => [rx * F, ry * F, Math.max(rz, rx * 0.85) * F];
+  if (!detail && !standIn) {
+    // Further off: the same kind of crown, in fewer twigs of bigger leaves.
+    return { trunk, leaves: leafClusters(clumps.map(([x, y, z, rx, ry, rz]) => [x, y, z, ...radii(rx, ry, rz)]), 2711, 0.3) };
+  }
   if (!detail) {
-    // From afar, plain clumps (the leaves are too small to make out).
+    // Far off (the distant forests), plain clumps: the leaves are too small to make out.
     const parts = clumps.map(([x, y, z, rx, ry, rz]) => {
       const [a, b, c] = radii(rx, ry, rz);
-      return new THREE.IcosahedronGeometry(1, 0).scale(a, b, c).translate(x, y, z).toNonIndexed();
+      return new THREE.IcosahedronGeometry(1, 0).scale(a, b, c).translate(x, y, z);
     });
     return { trunk, leaves: withColour(mergeGeometries(parts)!, 1) };
   }
@@ -139,52 +158,69 @@ function withColour(g: THREE.BufferGeometry, v: number): THREE.BufferGeometry {
 }
 
 /**
- * Crowns of real leaves rather than solid blobs: each clump (centre and
- * radii) is a cluster of small leaves, each slightly folded along its middle,
- * scattered round its outside at all angles, over a darker core that keeps
- * you from seeing straight through. The leaves are lit as if they were the
- * clump's rounded surface, so the crown still has a sunny side and a shaded
- * side rather than a glitter of flat cards; each leaf is a slightly
- * different shade.
+ * Crowns of real leaves rather than solid blobs, built the way foliage
+ * grows: from where each branch ends (a clump: centre and radii), a spray of
+ * thin twigs reaches out every way, each carrying small leaves along it,
+ * alternating side to side and turned up and out toward the light. There's
+ * sky between the twigs, so a crown looks light and open, not solid. Leaves
+ * are lit partly as the clump's rounded surface and partly as themselves, so
+ * the crown keeps a sunny and a shaded side without looking flat; each spray
+ * and each leaf is a slightly different shade.
  */
-function leafClusters(clumps: number[][], seed: number): THREE.BufferGeometry {
+function leafClusters(clumps: number[][], seed: number, fewer = 1): THREE.BufferGeometry {
   const rnd = mulberry32(seed);
   const pos: number[] = [], nor: number[] = [], col: number[] = [];
-  const u = new THREE.Vector3(), a = new THREE.Vector3(), b = new THREE.Vector3(), n = new THREE.Vector3();
-  const p = new THREE.Vector3(), c = new THREE.Vector3(), q = new THREE.Vector3();
+  const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
+  const up = V(0, 1, 0);
+  const push = (pts: THREE.Vector3[], n: THREE.Vector3[], c: number[]) => {
+    for (let k = 0; k < pts.length; k++) { pos.push(pts[k].x, pts[k].y, pts[k].z); nor.push(n[k].x, n[k].y, n[k].z); col.push(c[0], c[1], c[2]); }
+  };
   for (const [cx, cy, cz, rx, ry, rz] of clumps) {
-    c.set(cx, cy, cz);
-    // The core.
-    const core = new THREE.IcosahedronGeometry(1, 0).scale(rx * 0.8, ry * 0.8, rz * 0.8).translate(cx, cy, cz).toNonIndexed();
-    core.computeVertexNormals();
-    pos.push(...(core.attributes.position.array as Float32Array));
-    nor.push(...(core.attributes.normal.array as Float32Array));
-    for (let i = 0; i < core.attributes.position.count; i++) col.push(0.78, 0.8, 0.74);
-    // The leaves: more on a bigger clump.
-    const count = Math.round(Math.min(170, Math.max(60, 150 * Math.cbrt(rx * ry * rz))));
-    for (let k = 0; k < count; k++) {
-      // Somewhere on the outside of the clump (a little in or out).
-      u.set(rnd() * 2 - 1, rnd() * 2 - 1, rnd() * 2 - 1);
-      if (u.lengthSq() > 1 || u.lengthSq() < 0.01) { k--; continue; }
-      u.normalize();
-      const shell = 0.72 + 0.38 * rnd();
-      p.set(cx + u.x * rx * shell, cy + u.y * ry * shell, cz + u.z * rz * shell);
-      // Lying roughly across the outward direction, tipped at random.
-      a.set(rnd() - 0.5, rnd() - 0.5, rnd() - 0.5).addScaledVector(u, 0.6 * (rnd() - 0.5)).cross(u).normalize();
-      b.crossVectors(u, a).normalize();
-      const L = 0.24 + 0.12 * rnd(), W = L * (0.5 + 0.15 * rnd());
-      // Base, the two edges (folded up a little along the midrib), the tip.
-      const base = p.clone().addScaledVector(a, -L / 2), tip = p.clone().addScaledVector(a, L / 2);
-      const e1 = p.clone().addScaledVector(b, W / 2).addScaledVector(u, -W * 0.2);
-      const e2 = p.clone().addScaledVector(b, -W / 2).addScaledVector(u, -W * 0.2);
-      const shade = 0.82 + 0.3 * rnd(), warm = 0.06 * (rnd() - 0.3);
-      for (const v of [base, e1, tip, base, tip, e2]) {
-        pos.push(v.x, v.y, v.z);
-        // Lit like the clump's surface where the leaf sits.
-        q.copy(v).sub(c);
-        n.set(q.x / (rx * rx), q.y / (ry * ry), q.z / (rz * rz)).normalize();
-        nor.push(n.x, n.y, n.z);
-        col.push(shade + warm, shade + warm * 0.6, shade - warm);
+    const c = V(cx, cy, cz);
+    // Away from the trunk: the clump's own outward lean.
+    const out = V(cx, 0, cz).normalize();
+    const size = Math.cbrt(rx * ry * rz);
+    const sprays = Math.max(3, Math.round(Math.min(30, Math.max(14, 34 * size)) * fewer));
+    for (let s = 0; s < sprays; s++) {
+      const dir = V(rnd() * 2 - 1, rnd() * 2 - 1, rnd() * 2 - 1);
+      if (dir.lengthSq() > 1 || dir.lengthSq() < 0.02) { s--; continue; }
+      dir.normalize().addScaledVector(up, 0.35).addScaledVector(out, 0.4).normalize();
+      const reach = 0.85 + 0.3 * rnd();
+      const start = c.clone().addScaledVector(V(dir.x * rx, dir.y * ry, dir.z * rz), 0.12);
+      const end = c.clone().add(V(dir.x * rx, dir.y * ry, dir.z * rz).multiplyScalar(reach));
+      const along = end.clone().sub(start), len = along.length();
+      along.normalize();
+      const side0 = V().crossVectors(along, up);
+      if (side0.lengthSq() < 1e-4) side0.set(1, 0, 0);
+      side0.normalize();
+      const shade = 0.86 + 0.24 * rnd(), warm = 0.05 * (rnd() - 0.3);
+      // The twig itself: a thin dark sliver.
+      const tw = 0.012;
+      push([start.clone().addScaledVector(side0, -tw), start.clone().addScaledVector(side0, tw), end.clone(),
+      ], [up, up, up], [0.32, 0.3, 0.28]);
+      // Its leaves, alternating sides, with a few clustered at the tip.
+      const n = Math.max(3, Math.round(Math.max(7, Math.round(len / 0.055)) * fewer));
+      for (let k = 0; k < n + 3; k++) {
+        const t = k < n ? 0.22 + 0.78 * (k / n) : 1;
+        const sideSign = k % 2 ? 1 : -1;
+        const p = start.clone().lerp(end, t).addScaledVector(V(rnd() - 0.5, rnd() - 0.5, rnd() - 0.5), 0.03);
+        // Out from the twig at an angle, drooping a little.
+        const spin = (rnd() - 0.5) * 1.2 + (k >= n ? (k - n) * 2.1 : 0);
+        const side = side0.clone().applyAxisAngle(along, spin).multiplyScalar(sideSign);
+        const a = along.clone().multiplyScalar(0.55).add(side).addScaledVector(up, -0.15).normalize();
+        // Facing up and out, toward the light.
+        const face = up.clone().multiplyScalar(0.75).addScaledVector(dir, 0.45).add(V(rnd() - 0.5, rnd() - 0.5, rnd() - 0.5).multiplyScalar(0.5)).normalize();
+        const b = V().crossVectors(face, a).normalize();
+        a.crossVectors(b, face).normalize();
+        const L = (0.12 + 0.06 * rnd()) / Math.sqrt(fewer), W = L * (0.52 + 0.12 * rnd());
+        const base = p, tip = p.clone().addScaledVector(a, L);
+        const mid = p.clone().addScaledVector(a, L * 0.42).addScaledVector(face, -W * 0.15);
+        const e1 = mid.clone().addScaledVector(b, W / 2), e2 = mid.clone().addScaledVector(b, -W / 2);
+        // Lit half as the clump's surface, half as the leaf itself.
+        const q = mid.clone().sub(c);
+        const nc = V(q.x / (rx * rx), q.y / (ry * ry), q.z / (rz * rz)).normalize().multiplyScalar(0.55).addScaledVector(face, 0.45).normalize();
+        const v = shade * (0.92 + 0.16 * rnd());
+        push([base, e1, tip, base, tip, e2], [nc, nc, nc, nc, nc, nc], [v + warm, v + warm * 0.6, v - warm]);
       }
     }
   }
