@@ -197,6 +197,8 @@ export class BaseLand {
 
 /** Half-width (metres) of a stream or river draining this much land: narrow at its source, then wider as the square root of its catchment, as real rivers are. */
 const riverHalfWidth = (km2: number) => Math.min(60, Math.max(1.3, 1.0 + 10 * Math.max(0, Math.sqrt(km2) - Math.sqrt(STREAM_KM2 * HILL_STREAM))));
+/** The catchment (km²) a stream of this half-width drains (riverHalfWidth backwards). */
+const widthArea = (r: number) => r <= 1.3 ? 0 : ((r - 1) / 10 + Math.sqrt(STREAM_KM2 * HILL_STREAM)) ** 2;
 const riverDepth = (km2: number) => Math.min(5, 0.35 + 0.6 * Math.sqrt(km2));
 
 /**
@@ -209,7 +211,7 @@ const riverDepth = (km2: number) => Math.min(5, 0.35 + 0.6 * Math.sqrt(km2));
 function layRivers(
   w: number, cell: number, ox: number, oz: number, H: Float32Array, recv: Int32Array, catchment: Float32Array,
   isRiver: (i: number) => boolean, km2: (c: number) => number, sink: number, wander?: (x: number, z: number) => number,
-  lake?: (i: number) => number,
+  lake?: (i: number) => number, springs = true,
 ): number[] {
   const n = w * w;
   const rivers: number[] = [];
@@ -263,7 +265,8 @@ function layRivers(
     const a = km2(catchment[i]);
     // A spring: the stream seeps out of the ground, narrow and shallow at
     // first, rather than starting at full size.
-    const sp = Math.min(1, along[i] / 40);
+    // (A big river starts where streams have already gathered: full size.)
+    const sp = springs ? Math.min(1, along[i] / 40) : 1;
     out.push(PX[i], PZ[i], bx, bz, S[i], sb, riverHalfWidth(a) * (0.45 + 0.55 * sp), riverDepth(a) * (0.15 + 0.85 * sp));
   }
   return out;
@@ -296,7 +299,7 @@ function regionRivers(base: BaseLand, seed: number, rx: number, rz: number): Reg
   const meander = new Simplex(seed + 77);
   const coarse = layRivers(BN, B, gx0, gz0, Hc, dr.recv, dr.catchment,
     (i) => km2(dr.catchment[i]) >= RIVER_KM2 && Hc[i] > SEA, km2, RIVER_SINK,
-    (x, z) => meander.fbm(x / 420, z / 420, 2) * 30);
+    (x, z) => meander.fbm(x / 420, z / 420, 2) * 30, undefined, false);
   // Where the coarse grid has a river end at the sea but the finer land runs on
   // a little further, carry it on (gently down to sea level) until it reaches the shore.
   const starts = new Set<string>();
@@ -609,6 +612,12 @@ class Tile {
   readonly lakeLinks: number[] = [];
   /** Stretches of stream that leave this tile (indices into its reaches). */
   readonly exits: number[] = [];
+  /** Whether streams coming in from the neighbours have widened this tile's (see WorldGen.inherit). */
+  inherited = false;
+  /** Each stretch's half-width as the tile itself measured it, before inherit. */
+  readonly rawWidth: Float32Array;
+  /** Stretches not drawn: this tile's version of a stream above where a neighbour's version joins it. */
+  hidden?: Uint8Array;
   lastUsed = 0;
   constructor(readonly d: TileData) {
     this.ox = d.tx * TILE - PAD;
@@ -623,9 +632,19 @@ class Tile {
     for (let k = 0; k < R.length / 8; k++) {
       if (inCore(R[k * 8], R[k * 8 + 1]) && !inCore(R[k * 8 + 2], R[k * 8 + 3])) this.exits.push(k);
     }
+    this.rawWidth = new Float32Array(R.length / 8);
+    for (let k = 0; k < this.rawWidth.length; k++) this.rawWidth[k] = R[k * 8 + 6];
+    this.index();
+  }
+
+  /** Bucket the stretches this tile owns by the map cells they come near. */
+  index() {
+    const R = this.d.reaches, x0 = this.d.tx * TILE, z0 = this.d.tz * TILE;
+    const inCore = (x: number, z: number) => x >= x0 && x < x0 + TILE && z >= z0 && z < z0 + TILE;
+    const buckets = this.buckets;
+    buckets.clear();
     for (let k = 0; k < R.length / 8; k++) {
-      if (!inCore(R[k * 8], R[k * 8 + 1])) continue;
-      const buckets = this.buckets;
+      if (!inCore(R[k * 8], R[k * 8 + 1]) || this.hidden?.[k]) continue;
       const r = R[k * 8 + 6], len = Math.hypot(R[k * 8 + 2] - R[k * 8], R[k * 8 + 3] - R[k * 8 + 1]);
       const reach = Math.ceil((r + 12 + len) / CELL) + 1;
       const cx = Math.round((R[k * 8] - this.ox) / CELL), cz = Math.round((R[k * 8 + 1] - this.oz) / CELL);
@@ -890,7 +909,7 @@ export class WorldGen {
   river(x: number, z: number): RiverHit | null {
     const best = { hit: null as RiverHit | null, edge: Infinity };
     const cover = this.cover(x, z);
-    for (const [t] of cover) t.river(x, z, best);
+    for (const [t] of cover) { this.inherit(t); t.river(x, z, best); }
     for (const [t] of cover) {
       this.settleLakes(t);
       const L = t.lakeLinks;
@@ -988,8 +1007,84 @@ export class WorldGen {
     return t.level;
   }
 
+  /**
+   * Streams keep their size from tile to tile. Each tile measures a stream
+   * by the land it can see draining into it, so a river coming in from the
+   * next tile reads there as only the creek its last few hundred metres
+   * would make. Where a neighbour's stream runs in, this tile's version of
+   * it (and everything below) takes on the catchment it was missing.
+   * Uses the neighbours as they were made, so it never depends on the
+   * order tiles come in.
+   */
+  private inherit(t: Tile) {
+    if (t.inherited) return;
+    t.inherited = true;
+    const R = t.d.reaches, n = R.length / 8;
+    const x0 = t.d.tx * TILE, z0 = t.d.tz * TILE;
+    const inHome = (x: number, z: number) => x >= x0 && x < x0 + TILE && z >= z0 && z < z0 + TILE;
+    const startAt = new Map<string, number>();
+    const endAt = new Map<string, number[]>();
+    for (let k = 0; k < n; k++) {
+      startAt.set(`${R[k * 8]},${R[k * 8 + 1]}`, k);
+      const key = `${R[k * 8 + 2]},${R[k * 8 + 3]}`;
+      const l = endAt.get(key);
+      if (l) l.push(k); else endAt.set(key, [k]);
+    }
+    const add = new Float32Array(n);
+    for (let oz = -1; oz <= 1; oz++) for (let ox = -1; ox <= 1; ox++) {
+      if (!ox && !oz) continue;
+      const nb = this.tile(t.d.tx + ox, t.d.tz + oz), NR = nb.d.reaches;
+      for (const e of nb.exits) {
+        const o = e * 8, ex = NR[o + 2], ez = NR[o + 3];
+        if (!inHome(ex, ez)) continue;
+        const r = nb.rawWidth[e];
+        let bd = Infinity, bj = -1;
+        for (let j = 0; j < n; j++) {
+          const q = j * 8;
+          if (Math.abs(R[q] - ex) > LINK_REACH || Math.abs(R[q + 1] - ez) > LINK_REACH || !inHome(R[q], R[q + 1])) continue;
+          const ax = R[q], az = R[q + 1], dx = R[q + 2] - ax, dz = R[q + 3] - az, l2 = dx * dx + dz * dz;
+          const tt = l2 > 0 ? clamp01(((ex - ax) * dx + (ez - az) * dz) / l2) : 0;
+          const d = Math.hypot(ex - ax - dx * tt, ez - az - dz * tt);
+          if (d < bd) { bd = d; bj = j; }
+        }
+        if (bj < 0 || bd > LINK_REACH * 0.6) continue;
+        add[bj] = Math.max(add[bj], widthArea(r) - widthArea(t.rawWidth[bj]));
+        // This tile's own course above the join runs beside the neighbour's
+        // (which is joined in there): leave just the one. (Not where a smaller
+        // stream runs into a bigger one: that's a tributary, not the same water.)
+        for (let c = bj, step = 0; step < 12 && t.rawWidth[bj] < r * 1.3 + 0.5; step++) {
+          const ups = endAt.get(`${R[c * 8]},${R[c * 8 + 1]}`);
+          if (!ups || ups.length !== 1) break;
+          const u = ups[0], q = u * 8;
+          if (!inHome(R[q], R[q + 1]) || Math.hypot(R[q] - ex, R[q + 1] - ez) > LINK_REACH) break;
+          (t.hidden ??= new Uint8Array(n))[u] = 1;
+          c = u;
+        }
+      }
+    }
+    const extra = new Float32Array(n);
+    let any = false;
+    for (let j = 0; j < n; j++) {
+      if (add[j] <= 0.005) continue;
+      any = true;
+      for (let c: number | undefined = j, step = 0; c !== undefined && step < 2000; step++) {
+        extra[c] += add[j];
+        c = startAt.get(`${R[c * 8 + 2]},${R[c * 8 + 3]}`);
+      }
+    }
+    if (!any) { if (t.hidden) t.index(); return; }
+    for (let k = 0; k < n; k++) {
+      if (!extra[k]) continue;
+      const a = widthArea(t.rawWidth[k]) + extra[k];
+      R[k * 8 + 6] = Math.max(R[k * 8 + 6], riverHalfWidth(a));
+      R[k * 8 + 7] = Math.max(R[k * 8 + 7], riverDepth(a));
+    }
+    t.index();
+  }
+
   private settleLakes(t: Tile) {
     if (t.level) return;
+    this.inherit(t);
     const d = t.d, n = d.kind.length, owned = t.ownedLakes();
     const level = new Float32Array(n).fill(NaN);
     const seen = new Uint8Array(n);
@@ -1096,26 +1191,66 @@ export class WorldGen {
     let L = this.linkCache.get(key);
     if (L) return L;
     const home = this.tile(tx, tz), nb = this.tile(tx + ox, tz + oz);
+    this.inherit(home); this.inherit(nb);
     const H = home.d.reaches, R = nb.d.reaches, out: number[] = [];
     const x0 = tx * TILE, z0 = tz * TILE;
     const inHome = (x: number, z: number) => x >= x0 && x < x0 + TILE && z >= z0 && z < z0 + TILE;
     const startAt = new Map<string, number>();
     for (let k = 0; k < R.length / 8; k++) startAt.set(`${R[k * 8]},${R[k * 8 + 1]}`, k);
+    const homeStart = new Map<string, number>();
+    for (let k = 0; k < H.length / 8; k++) homeStart.set(`${H[k * 8]},${H[k * 8 + 1]}`, k);
+    // Whether home's stretch j runs on back out to where the stream came in
+    // from (the two tiles route water hugging their edge opposite ways): it
+    // is upstream of it, not where it goes.
+    const backInto = (j: number, sx: number, sz: number) => {
+      for (let c: number | undefined = j, step = 0; c !== undefined && step < 16; step++) {
+        const q = c * 8;
+        if (!inHome(H[q + 2], H[q + 3]) && Math.hypot(H[q + 2] - sx, H[q + 3] - sz) < 20) return true;
+        c = homeStart.get(`${H[q + 2]},${H[q + 3]}`);
+      }
+      return false;
+    };
     for (const k of nb.exits) {
       const o = k * 8, ex = R[o + 2], ez = R[o + 3];
       if (!inHome(ex, ez)) continue;
       const r = R[o + 6], se = R[o + 5];
+      // A stream that only strays over the edge a little way and comes back
+      // (water hugging the seam) is drawn along its own course over here.
+      let strays = false;
+      for (let j = startAt.get(`${ex},${ez}`), step = 0; j !== undefined && step < 16; step++) {
+        const q = j * 8;
+        if (!inHome(R[q], R[q + 1])) { strays = true; break; }
+        j = startAt.get(`${R[q + 2]},${R[q + 3]}`);
+      }
+      if (strays) {
+        for (let j = startAt.get(`${ex},${ez}`); j !== undefined;) {
+          const q = j * 8;
+          if (!inHome(R[q], R[q + 1])) break;
+          for (let c = 0; c < 8; c++) out.push(R[q + c]);
+          j = startAt.get(`${R[q + 2]},${R[q + 3]}`);
+        }
+        continue;
+      }
       // The nearest stretch of home's own stream of about this size or bigger.
-      let bd = Infinity, px = 0, pz = 0, ps = 0, pr = 0, pdep = 0;
+      let bd = Infinity, bs = Infinity, px = 0, pz = 0, ps = 0, pr = 0, pdep = 0, back = false;
       for (let j = 0; j < H.length; j += 8) {
-        if (!inHome(H[j], H[j + 1]) || H[j + 6] < r * 0.6) continue;
+        if (!inHome(H[j], H[j + 1]) || home.hidden?.[j / 8]) continue;
         const ax = H[j], az = H[j + 1], dx = H[j + 2] - ax, dz = H[j + 3] - az;
         if (Math.abs(ax - ex) > LINK_REACH + 20 || Math.abs(az - ez) > LINK_REACH + 20) continue;
         const l2 = dx * dx + dz * dz;
         const t = l2 > 0 ? clamp01(((ex - ax) * dx + (ez - az) * dz) / l2) : 0;
         const cx = ax + dx * t, cz = az + dz * t, d = Math.hypot(ex - cx, ez - cz);
-        if (d < bd) { bd = d; px = cx; pz = cz; ps = H[j + 4] + (H[j + 5] - H[j + 4]) * t; pr = H[j + 6]; pdep = H[j + 7]; }
+        if (backInto(j / 8, R[o], R[o + 1])) {
+          // Home's version runs back out alongside, carrying this water on
+          // over there (see below): nothing to join.
+          if (d < 12) back = true;
+          continue;
+        }
+        // Rather the same stream (about as big) than a little one beside it.
+        const score = d + (H[j + 6] < r * 0.6 ? 20 : 0);
+        if (score < bs) { bs = score; bd = d; px = cx; pz = cz; ps = H[j + 4] + (H[j + 5] - H[j + 4]) * t; pr = H[j + 6]; pdep = H[j + 7]; }
       }
+      if (back) continue;
       if (bd < LINK_REACH) {
         if (bd > 0.5) out.push(ex, ez, px, pz, se, Math.min(se, ps), Math.min(r, pr), Math.min(R[o + 7], pdep));
         continue;
