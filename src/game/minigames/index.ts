@@ -52,7 +52,7 @@ export const RECIPE_MINIGAMES: Record<string, MinigameSpec> = {
   shaft: { kind: 'carve', passes: 2 },
   kindling_log: { kind: 'strike', variant: 'split', hits: 3 },
   split_planks: { kind: 'strike', variant: 'split', hits: 3 },
-  saw_planks: { kind: 'saw', cuts: 2 },
+  saw_planks: { kind: 'saw', cuts: 4 },
   wooden_shovel: { kind: 'carve', passes: 2, wide: true },
   clay_jar: { kind: 'center' },
   fire_jar: { kind: 'heat', variant: 'fire' },

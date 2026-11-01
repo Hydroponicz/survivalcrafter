@@ -18,13 +18,13 @@ export interface Tutorial {
 const T: Record<string, Tutorial> = {
   saw: {
     title: 'Sawing planks',
-    what: 'You saw the log lengthways along the red lines to cut it into planks.',
+    what: 'You saw the log lengthways, along each chalk line on top, and every cut gives you a board.',
     steps: [
-      { gesture: 'updown', text: 'Hold the left button and move the mouse up and down to work the saw back and forth.' },
-      { gesture: 'leftright', text: 'Nudge left or right to keep the blade on the red line as the grain pulls it off.' },
-      { gesture: 'release', text: 'Don’t rush. Saw too fast and the blade binds — let go of the button and ease back in.' },
+      { gesture: 'leftright', text: 'Hold the left button and sweep the mouse left and right, like working a saw. The cut runs along the red line.' },
+      { gesture: 'wait', text: 'Keep the Stroke speed in its green zone. Rush it and the blade binds until you slow down.' },
+      { gesture: 'updown', text: 'The grain pulls the blade aside: nudge the mouse up or down to keep it on the line. Green blade: on it. Red: off.' },
     ],
-    quality: 'Staying on the line makes better planks. Speed doesn’t matter; straightness does.',
+    quality: 'Straighter cuts make better planks. The dark groove shows where your blade really went.',
   },
   bowdrill: {
     title: 'Lighting a fire',

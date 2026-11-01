@@ -3,107 +3,208 @@ import { benchMesh, box, clamp01, cyl, fireMesh, logMesh, Minigame, type Meter, 
 import type { Gesture } from './tutorials';
 
 /**
- * Saw a log into planks. Hold the left button and move the mouse up and down
- * to draw the saw; keep it on the marked line by steering left/right. Rushing
- * makes the blade bind.
+ * Saw a log into planks, along its length. The log lies across the view with
+ * chalk lines along its top, one for each cut. Hold the left button and sweep
+ * the mouse left and right, as the saw goes: each stroke runs the cut further
+ * along the line. Steady strokes cut; rushing makes the blade bind. The grain
+ * pulls the blade aside: nudge the mouse up or down to keep it on the line
+ * (the groove shows where it really went). Each finished cut drops a board.
  */
 export class SawGame extends Minigame {
-  readonly title = 'Sawing';
-  readonly instructions = 'Hold left button and move the mouse up/down to saw. Steer left/right to stay on the line. Don’t rush.';
+  readonly title = 'Sawing planks';
+  readonly instructions = 'Hold left button and sweep the mouse left/right to saw along the chalk line. Nudge up/down to stay on it. Steady strokes: too fast and the blade binds.';
   showPointer = false;
   private readonly R = 0.2;
-  private cuts: number[];
+  private readonly LEN = 2.0;
+  private readonly logY = 0.32;
+  /** Where each cut runs (across the log), and which one you're on. */
+  private lines: number[];
   private cut = 0;
-  private depth = 0;
+  /** How far along the log the current cut has got (-LEN/2 .. LEN/2). */
+  private front: number;
+  /** The saw: where it is in its stroke, and how far off the line. */
   private stroke = 0;
   private offset = 0;
   private drift = 0;
+  /** Stroke speed (pixels a second, smoothed), and how close the blade is to binding. */
+  private speed = 0;
   private bind = 0;
   private stuck = false;
+  private calm = 0;
+  private idle = 0;
+  private lastKerf: number;
   private saw = new THREE.Group();
-  private guide: THREE.Mesh;
-  private kerfs: THREE.Mesh[] = [];
-  private logY = 0.32;
+  private blade: THREE.Mesh;
+  private chalk: THREE.Mesh[] = [];
+  private boards = 0;
+  private falling: { mesh: THREE.Mesh; t: number; from: THREE.Vector3; to: THREE.Vector3 }[] = [];
 
   constructor(ease: number, cuts: number) {
     super(ease);
-    this.cuts = Array.from({ length: cuts }, (_, i) => -0.55 + ((i + 1) * 1.1) / (cuts + 1));
+    this.front = -this.LEN / 2;
+    this.lastKerf = this.front;
+    // The cuts, evenly across the log (the outside slabs are waste).
+    // Nearest to you first.
+    this.lines = Array.from({ length: cuts }, (_, i) => this.R * 0.72 - (i * this.R * 1.44) / Math.max(1, cuts - 1));
     this.scene.add(benchMesh());
-    for (const x of [-0.85, 0.85]) {
-      const trestle = box(0.1, 0.24, 0.5, 0x6e4e30);
-      trestle.position.set(x, 0.12, 0);
+    for (const x of [-0.75, 0.75]) {
+      const trestle = box(0.1, 0.14, 0.5, 0x6e4e30);
+      trestle.position.set(x, 0.07, 0);
       this.scene.add(trestle);
     }
-    const log = logMesh(2.0, this.R);
+    const log = logMesh(this.LEN, this.R, 0x8a7a68);
     log.position.y = this.logY;
     this.scene.add(log);
-    this.guide = box(0.006, 0.006, 0.42, 0xff4030, { emissive: 0xff2010, emissiveIntensity: 1.5 });
-    this.scene.add(this.guide);
-    const blade = box(0.006, 0.12, 0.85, 0xb8bcc2, { metalness: 0.7, roughness: 0.35 });
-    blade.position.set(0, 0.06, 0);
-    const handle = box(0.04, 0.16, 0.14, 0x7a5634);
-    handle.position.set(0, 0.1, 0.48);
-    this.saw.add(blade, handle);
+    // Chalk lines along the top of the log.
+    for (const z of this.lines) {
+      const line = box(this.LEN, 0.003, 0.008, 0xffffff, { emissive: 0xffffff, emissiveIntensity: 0.35 });
+      line.position.set(0, this.topAt(z) + 0.002, z);
+      this.scene.add(line);
+      this.chalk.push(line);
+    }
+    // The saw, lying along the log: its blade upright in the cut.
+    this.blade = box(0.9, 0.07, 0.005, 0xb8bcc2, { metalness: 0.6, roughness: 0.4 });
+    this.blade.position.set(0, 0.02, 0);
+    const handle = box(0.16, 0.1, 0.04, 0x7a5634);
+    handle.position.set(-0.52, 0.07, 0);
+    this.saw.add(this.blade, handle);
     this.scene.add(this.saw);
-    this.look([0.55, 1.05, 1.15], [0, 0.28, 0]);
-    this.placeGuide();
+    this.look([0, 2.0, 1.25], [0, 0.22, 0.05]);
+    this.highlight();
   }
 
-  private placeGuide() {
-    this.guide.position.set(this.cuts[this.cut], this.logY + this.R + 0.004, 0);
+  /** Height of the log's top at a point across it. */
+  private topAt(z: number) {
+    return this.logY + Math.sqrt(Math.max(0, this.R * this.R - z * z));
   }
+
+  /** The line being cut stands out; the ones done fade. */
+  private highlight() {
+    this.chalk.forEach((m, i) => {
+      const mt = m.material as THREE.MeshStandardMaterial;
+      mt.color.set(i === this.cut ? 0xff5a3c : i < this.cut ? 0x6a5040 : 0xffffff);
+      mt.emissive.set(i === this.cut ? 0xff3010 : 0x000000);
+      mt.emissiveIntensity = i === this.cut ? 1.2 : 0;
+    });
+  }
+
+  private get tolerance() { return 0.008 + 0.022 * this.ease; }
+  /** The range of stroke speeds (pixels a second) that cut well. */
+  private get band(): [number, number] { return [220, 1000 + 600 * this.ease]; }
 
   hint(): { x: number; y: number; text: string; gesture?: Gesture } | null {
-    const p = this.toScreen(this.saw.position);
-    if (this.stuck) return { x: p.x + 40, y: p.y - 40, text: 'it\u2019s binding: let go, then ease back in', gesture: 'release' };
-    return { x: p.x + 40, y: p.y - 40, text: 'hold and move up/down to saw; stay on the red line', gesture: 'updown' };
+    if (this.done) return null;
+    const p = this.toScreen(this.saw.position.clone().add(new THREE.Vector3(0, 0.12, 0)));
+    const at = (text: string, gesture: Gesture) => ({ x: p.x + 30, y: p.y - 60, text, gesture });
+    if (this.stuck) return at('too fast: the blade is stuck. Slow right down', 'wait');
+    if (this.idle > 1.2) return at('hold the button and sweep left and right to saw', 'leftright');
+    if (Math.abs(this.offset) > this.tolerance * 1.5) return at(this.offset > 0 ? 'off the line: nudge the mouse up' : 'off the line: nudge the mouse down', 'updown');
+    if (this.speed < this.band[0] && this.idle > 0.4) return at('longer, quicker strokes', 'leftright');
+    return null;
   }
 
   update(dt: number, i: MgInput) {
-    const tol = 0.012 + 0.03 * this.ease;
-    // The grain pulls the blade off line unless you correct it.
-    this.drift += (Math.random() - 0.5) * dt * 0.06 * (1.2 - this.ease);
-    this.drift *= 0.98;
-    this.offset += this.drift * dt + i.dx * 0.0012;
-    this.offset = Math.max(-0.08, Math.min(0.08, this.offset));
-    const prev = this.stroke;
-    if (i.down && !this.stuck) this.stroke = Math.max(-0.3, Math.min(0.3, this.stroke + i.dy * 0.004));
-    const moved = Math.abs(this.stroke - prev);
-    const speed = moved / Math.max(dt, 1e-3);
-    const align = clamp01(1 - Math.abs(this.offset) / tol);
+    if (this.done) { this.animateBoards(dt); return; }
+    const [lo, hi] = this.band;
+    // Stroke speed: how fast you're sweeping (only while holding the saw).
+    const sweep = i.down ? Math.abs(i.dx) / Math.max(dt, 1e-3) : 0;
+    this.speed += (sweep - this.speed) * Math.min(1, dt * 8);
+    this.idle = i.down && Math.abs(i.dx) > 0.5 ? 0 : this.idle + dt;
+    // The saw follows your hand back and forth.
+    if (i.down) this.stroke = Math.max(-0.28, Math.min(0.28, this.stroke + i.dx * 0.0016));
 
-    if (speed > 1.6 + this.ease * 1.2) this.bind += dt * 3;
-    else this.bind = Math.max(0, this.bind - dt * 1.2);
-    if (this.bind >= 1 && !this.stuck) { this.stuck = true; this.say('The saw binds! Let go and ease off.', false, 1.4); }
-    if (this.stuck && !i.down && this.bind < 0.4) this.stuck = false;
-
-    if (i.down && !this.stuck && moved > 0) {
-      this.depth += moved * 0.085 * (0.25 + 0.75 * align);
-      this.sample(align, moved);
-      if (align < 0.3 && Math.random() < dt * 6) this.say('Off the line!', false, 0.6);
-      if (Math.random() < moved * 40) this.burst(new THREE.Vector3(this.cuts[this.cut] + this.offset, this.logY + this.R - this.depth, 0.2), 0xd9b88a, 2, 0.5);
+    // Rushing binds the blade; it frees once you slow down.
+    if (this.speed > hi) this.bind = Math.min(1, this.bind + dt * 1.6);
+    else this.bind = Math.max(0, this.bind - dt * 1.1);
+    if (this.bind >= 1 && !this.stuck) { this.stuck = true; this.say('The saw binds! Slow down.', false, 1.4); }
+    if (this.stuck) {
+      this.calm = this.speed < hi * 0.6 ? this.calm + dt : 0;
+      if (this.calm > 0.35) { this.stuck = false; this.bind = 0.5; this.calm = 0; }
     }
-    const full = this.R * 2;
-    if (this.depth >= full) {
-      const kerf = box(0.012, full + 0.01, this.R * 2.02, 0x2a1c10);
-      kerf.position.set(this.cuts[this.cut] + this.offset * 0.5, this.logY, 0);
-      this.scene.add(kerf);
-      this.kerfs.push(kerf);
+
+    // The grain pulls the blade aside as you saw; nudge up/down to correct.
+    const sawing = i.down && !this.stuck && this.speed > lo * 0.5;
+    if (sawing) {
+      this.drift += (Math.random() - 0.5) * dt * 0.05 * (1.3 - this.ease);
+      this.drift *= 0.985;
+      this.offset += this.drift * dt * 6;
+    }
+    this.offset = Math.max(-0.06, Math.min(0.06, this.offset + i.dy * 0.0005));
+    const tol = this.tolerance;
+    const align = clamp01(1 - Math.abs(this.offset) / (tol * 2));
+
+    // Cutting: steady strokes in the green run the cut along the line.
+    if (sawing) {
+      const rate = this.speed >= lo && this.speed <= hi ? 1 : this.speed < lo ? this.speed / lo : 0.5;
+      const before = this.front;
+      this.front = Math.min(this.LEN / 2, this.front + dt * 0.42 * rate);
+      this.sample(align, this.front - before);
+      // The groove, where the blade really went.
+      const z = this.lines[this.cut] + this.offset;
+      while (this.lastKerf + 0.035 <= this.front) {
+        const k = box(0.04, 0.004, 0.01, 0x2a1c10);
+        k.position.set(this.lastKerf + 0.0175, this.topAt(z) + 0.001, z);
+        this.scene.add(k);
+        this.lastKerf += 0.035;
+      }
+      if (Math.random() < dt * 10 * rate) this.burst(new THREE.Vector3(this.front, this.topAt(z), z + 0.03), 0xe0c290, 2, 0.45);
+    }
+    // The blade shows whether it's on the line: green on it, red off.
+    const bm = this.blade.material as THREE.MeshStandardMaterial;
+    bm.emissive.setRGB(1 - align, align, 0.1).multiplyScalar(0.25);
+
+    if (this.front >= this.LEN / 2) {
+      this.dropBoard();
       this.cut++;
-      this.depth = 0;
+      // The last cut leaves two boards: the one cut off and what's left.
+      if (this.cut >= this.lines.length) { this.cut--; this.dropBoard(); this.cut++; }
+      if (this.cut >= this.lines.length) {
+        this.say('All the boards are cut!', true, 1.5);
+        this.done = true; this.progress = 1;
+        return;
+      }
+      this.say(`Board ${this.cut} cut! ${this.lines.length - this.cut} to go.`, true, 1.2);
+      this.front = -this.LEN / 2;
+      this.lastKerf = this.front;
       this.offset = 0;
-      this.say(this.cut < this.cuts.length ? 'Cut through! Next line.' : 'Done!', true);
-      if (this.cut >= this.cuts.length) { this.done = true; this.progress = 1; return; }
-      this.placeGuide();
+      this.drift = 0;
+      this.highlight();
     }
-    this.progress = (this.cut + this.depth / full) / this.cuts.length;
-    const x = this.cuts[this.cut] + this.offset;
-    this.saw.position.set(x, this.logY + this.R - this.depth + 0.02, this.stroke);
-    this.saw.rotation.x = -0.15;
+    this.progress = (this.cut + (this.front + this.LEN / 2) / this.LEN) / this.lines.length;
+    // The saw sits in the cut, its teeth at the front of it.
+    const z = this.lines[this.cut] + this.offset;
+    this.saw.position.set(this.front - 0.3 + this.stroke, this.topAt(z) - 0.02, z);
+    this.animateBoards(dt);
+  }
+
+  /** A finished board slides off onto the pile beside the bench. */
+  private dropBoard() {
+    const board = box(this.LEN * 0.95, 0.025, 0.09, 0xd8b483);
+    const from = new THREE.Vector3(0, this.topAt(this.lines[this.cut]), this.lines[this.cut]);
+    const to = new THREE.Vector3(0, 0.02 + this.boards * 0.027, 0.45);
+    board.position.copy(from);
+    this.scene.add(board);
+    this.falling.push({ mesh: board, t: 0, from, to });
+    this.boards++;
+    this.burst(from, 0xe0c290, 10, 0.8);
+  }
+
+  private animateBoards(dt: number) {
+    for (const f of this.falling) {
+      if (f.t >= 1) continue;
+      f.t = Math.min(1, f.t + dt * 2.2);
+      const e = f.t * f.t * (3 - 2 * f.t);
+      f.mesh.position.lerpVectors(f.from, f.to, e);
+      f.mesh.position.y += Math.sin(e * Math.PI) * 0.15;
+    }
   }
 
   meters(): Meter[] {
-    return [{ label: 'Blade bind', value: clamp01(this.bind), band: [0, 0.7], color: '#ef7d6a' }];
+    const [lo, hi] = this.band, top = hi * 1.3;
+    return [
+      { label: 'Stroke speed', value: clamp01(this.speed / top), band: [lo / top, hi / top], color: this.stuck ? '#ef7d6a' : '#e8c66a' },
+      { label: 'On the line', value: clamp01(1 - Math.abs(this.offset) / (this.tolerance * 3)), band: [0.5, 1], color: '#8ad06a' },
+    ];
   }
 }
 
