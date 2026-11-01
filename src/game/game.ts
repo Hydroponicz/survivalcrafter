@@ -194,6 +194,7 @@ export class Game {
     // background as you travel, and each becomes distant land when it arrives.
     const gen = world.terrain.gen;
     this.distant = new DistantLand(gen.seed);
+    this.distant.lakeLevels = (tx, tz) => gen.settledLakes(tx, tz);
     this.scene.add(this.distant.group);
     gen.onTile = (d, lod, forest) => { this.distant.addTile(d, lod, forest); seaFloor.changed(); };
     gen.forEachTile((d) => this.distant.addTile(d));

@@ -22,6 +22,6 @@ self.onmessage = (e: MessageEvent<{ seed: number; tx: number; tz: number }>) => 
   lod.set(layers, cols.length);
   // Where its distant forests stand, too.
   const forest = planStandIns(seed, cover!, d);
-  const buffers = [d.H, d.dep, d.flow, d.kind, d.S, d.climBase, d.moist, d.reaches, d.lakeL, d.lakeB, lod, ...forest.flatMap((f) => [f.mats, f.cols])].map((a) => a.buffer as ArrayBuffer);
+  const buffers = [d.H, d.dep, d.flow, d.kind, d.S, d.climBase, d.moist, d.reaches, lod, ...forest.flatMap((f) => [f.mats, f.cols])].map((a) => a.buffer as ArrayBuffer);
   (self as unknown as Worker).postMessage({ d, lod, forest }, buffers);
 };

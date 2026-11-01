@@ -1,5 +1,5 @@
 import { erode, slump } from './erosion';
-import { latticeKey, NET_CELL, NET_REGION, regionNet } from './network';
+import { drainage, localDrainage } from './hydrology';
 import { climate, SNOW_TEMP, tempAt, zoneOf, type Zone } from './climate';
 import { hash2, Simplex } from './noise';
 import type { StandInPlan } from './farforest';
@@ -28,6 +28,21 @@ export const TN = (TILE + 2 * PAD) / CELL + 1;
 export const BLEND = 128;
 export const SEA = 0;
 
+/** Catchment area (km²) where a stream starts, and where it counts as a river (traced regionally). */
+const STREAM_KM2 = 0.15, RIVER_KM2 = 0.6;
+const STREAM_AT = STREAM_KM2 / (CELL * CELL * 1e-6);
+/** In steep hills a stream starts from this share of the ground it needs on the flat. */
+const HILL_STREAM = 0.3;
+/** Least ground (km²) above a spring: streams are traced up their valleys as far as this. */
+const SPRING_KM2 = 0.012;
+/**
+ * Rivers are traced over regions this big (metres), each with this margin of
+ * land around it, on a grid of this many metres: every tile in a region uses
+ * the same network, so a river runs on unbroken from tile to tile.
+ */
+const REGION = 8192, REGION_MARGIN = 6144, BASIN_CELL = 64;
+const BASIN_N = (REGION + 2 * REGION_MARGIN) / BASIN_CELL + 1;
+
 /** A point's river: distance from its line, surface, half-width, depth, and how steeply it falls (rise over run). */
 export interface RiverHit { d: number; s: number; r: number; depth: number; fall?: number }
 
@@ -39,8 +54,6 @@ export interface TileData {
   climBase: Float32Array; moist: Float32Array;
   /** River reaches, 8 numbers each: ax, az, bx, bz, sa, sb, r, depth (world metres). */
   reaches: Float32Array;
-  /** Lakes on the water network's grid over the map (LW × LW): surface and bed (NaN where none). */
-  lakeL: Float32Array; lakeB: Float32Array;
   /** Where its distant forests stand, if a worker worked it out. */
   forest?: StandInPlan[];
   wind: [number, number];
@@ -185,8 +198,148 @@ export class BaseLand {
   }
 }
 
+/** Half-width (metres) of a stream or river draining this much land: narrow at its source, then wider as the square root of its catchment, as real rivers are. */
+const riverHalfWidth = (km2: number) => Math.min(60, Math.max(1.3, 1.0 + 10 * Math.max(0, Math.sqrt(km2) - Math.sqrt(STREAM_KM2 * HILL_STREAM))));
+/** The catchment (km²) a stream of this half-width drains (riverHalfWidth backwards). */
+const widthArea = (r: number) => r <= 1.3 ? 0 : ((r - 1) / 10 + Math.sqrt(STREAM_KM2 * HILL_STREAM)) ** 2;
+const riverDepth = (km2: number) => Math.min(5, 0.35 + 0.6 * Math.sqrt(km2));
+
+/**
+ * Lay a drainage network out as river reaches (8 numbers each, as in
+ * TileData). Water surfaces only ever fall downstream: where the ground rises
+ * in the way, the river cuts down through it rather than running uphill.
+ * Courses are smoothed along the flow so they curve instead of stepping
+ * along the grid; `wander` (metres) lets them meander.
+ */
+function layRivers(
+  w: number, cell: number, ox: number, oz: number, H: Float32Array, recv: Int32Array, catchment: Float32Array,
+  isRiver: (i: number) => boolean, km2: (c: number) => number, sink: number, wander?: (x: number, z: number) => number,
+  lake?: (i: number) => number, springs = true,
+): number[] {
+  const n = w * w;
+  const rivers: number[] = [];
+  for (let i = 0; i < n; i++) if (isRiver(i)) rivers.push(i);
+  // Upstream first: catchment always grows downstream.
+  rivers.sort((a, b) => catchment[a] - catchment[b]);
+  const S = new Float32Array(n).fill(Infinity), cap = new Float32Array(n).fill(Infinity);
+  const PX = new Float32Array(n), PZ = new Float32Array(n), up = new Int32Array(n).fill(-1);
+  for (const i of rivers) {
+    S[i] = Math.max(SEA, Math.min(H[i] - sink, cap[i]));
+    const j = recv[i];
+    if (j >= 0) cap[j] = Math.min(cap[j], S[i]);
+    PX[i] = ox + (i % w) * cell; PZ[i] = oz + Math.floor(i / w) * cell;
+    if (j >= 0 && isRiver(j) && (up[j] < 0 || catchment[i] > catchment[up[j]])) up[j] = i;
+  }
+  const pos = (i: number, a: Float32Array, b: Float32Array) => isRiver(i) ? [a[i], b[i]] : [ox + (i % w) * cell, oz + Math.floor(i / w) * cell];
+  for (let it = 0; it < 4; it++) {
+    const qx = PX.slice(), qz = PZ.slice();
+    for (const i of rivers) {
+      const j = recv[i], u = up[i];
+      if (u < 0 || j < 0 || !isRiver(j)) continue;
+      PX[i] = 0.5 * qx[i] + 0.25 * (qx[u] + qx[j]);
+      PZ[i] = 0.5 * qz[i] + 0.25 * (qz[u] + qz[j]);
+    }
+  }
+  if (wander) {
+    const qx = PX.slice(), qz = PZ.slice();
+    for (const i of rivers) {
+      const j = recv[i], u = up[i];
+      if (u < 0 || j < 0 || !isRiver(j)) continue;
+      const dx = qx[j] - qx[u], dz = qz[j] - qz[u], l = Math.hypot(dx, dz) || 1;
+      const off = wander(ox + (i % w) * cell, oz + Math.floor(i / w) * cell) * Math.min(1, riverHalfWidth(km2(catchment[i])) / 6);
+      PX[i] += (-dz / l) * off; PZ[i] += (dx / l) * off;
+    }
+  }
+  // How far each point lies below its stream's spring (a stream fed by others has none).
+  const along = new Float32Array(n).fill(Infinity);
+  for (const i of rivers) if (up[i] < 0) along[i] = 0;
+  for (const i of rivers) {
+    const j = recv[i];
+    if (j >= 0 && isRiver(j)) along[j] = Math.min(along[j], along[i] + Math.hypot(PX[j] - PX[i], PZ[j] - PZ[i]));
+  }
+  const out: number[] = [];
+  for (const i of rivers) {
+    const j = recv[i];
+    if (j < 0) continue;
+    const [bx, bz] = pos(j, PX, PZ);
+    // Into a lake: down to its surface (not its bed). Otherwise down to the ground it runs into.
+    const lj = lake ? lake(j) : NaN;
+    const sb = isRiver(j) ? S[j] : Math.max(SEA, Math.min(S[i], Number.isNaN(lj) ? H[j] : lj));
+    const a = km2(catchment[i]);
+    // A spring: the stream seeps out of the ground, narrow and shallow at
+    // first, rather than starting at full size.
+    // (A big river starts where streams have already gathered: full size.)
+    const sp = springs ? Math.min(1, along[i] / 40) : 1;
+    out.push(PX[i], PZ[i], bx, bz, S[i], sb, riverHalfWidth(a) * (0.45 + 0.55 * sp), riverDepth(a) * (0.15 + 0.85 * sp));
+  }
+  return out;
+}
+
+/**
+ * The rivers of one region, traced on a coarse grid over the region and the
+ * land around it (so it knows where water comes from), as reaches split into
+ * short pieces. Kept for reuse, since every tile in the region needs them.
+ */
+interface RegionWater {
+  /** River reaches (as in TileData). */
+  reaches: Float32Array;
+}
+/** How far below the land around it a river's surface runs (metres), on the coarse grid. */
+const RIVER_SINK = 2.5;
 /** How far from a river its valley sides can reach at most (metres), where it's cut deep through high ground. */
 const VALLEY = 260;
+const regionCache = new Map<string, RegionWater>();
+function regionRivers(base: BaseLand, seed: number, rx: number, rz: number): RegionWater {
+  const key = `${seed}:${rx},${rz}`;
+  const hit = regionCache.get(key);
+  if (hit) return hit;
+  const B = BASIN_CELL, BN = BASIN_N;
+  const gx0 = rx * REGION - REGION_MARGIN, gz0 = rz * REGION - REGION_MARGIN;
+  const Hc = new Float32Array(BN * BN);
+  for (let k = 0; k < Hc.length; k++) Hc[k] = base.height(gx0 + (k % BN) * B, gz0 + Math.floor(k / BN) * B);
+  const dr = localDrainage(Hc, BN, SEA);
+  const km2 = (c: number) => c * B * B * 1e-6;
+  const meander = new Simplex(seed + 77);
+  const coarse = layRivers(BN, B, gx0, gz0, Hc, dr.recv, dr.catchment,
+    (i) => km2(dr.catchment[i]) >= RIVER_KM2 && Hc[i] > SEA, km2, RIVER_SINK,
+    (x, z) => meander.fbm(x / 420, z / 420, 2) * 30, undefined, false);
+  // Where the coarse grid has a river end at the sea but the finer land runs on
+  // a little further, carry it on (gently down to sea level) until it reaches the shore.
+  const starts = new Set<string>();
+  for (let k = 0; k < coarse.length; k += 8) starts.add(`${Math.round(coarse[k])},${Math.round(coarse[k + 1])}`);
+  const ends = coarse.length;
+  for (let k = 0; k < ends; k += 8) {
+    let bx = coarse[k + 2], bz = coarse[k + 3];
+    if (starts.has(`${Math.round(bx)},${Math.round(bz)}`)) continue;
+    const ei = Math.round((bz - gz0) / B) * BN + Math.round((bx - gx0) / B);
+    if (!(Hc[ei] <= SEA)) continue; // it ends in a closed hollow, not the sea
+    const dx = bx - coarse[k], dz = bz - coarse[k + 1], l = Math.hypot(dx, dz) || 1;
+    let s0 = coarse[k + 5];
+    for (let step = 0; step < 30 && base.height(bx, bz) > SEA - 1; step++) {
+      const nx = bx + (dx / l) * 16, nz = bz + (dz / l) * 16, s1 = Math.max(SEA, s0 - 0.3);
+      coarse.push(bx, bz, nx, nz, s0, s1, coarse[k + 6], coarse[k + 7]);
+      bx = nx; bz = nz; s0 = s1;
+    }
+  }
+  // Keep the region's own (plus a little), in pieces about 16 m long.
+  const out: number[] = [];
+  const lo = -600, hi = REGION + 600;
+  for (let k = 0; k < coarse.length; k += 8) {
+    const ax = coarse[k], az = coarse[k + 1], bx = coarse[k + 2], bz = coarse[k + 3];
+    const lx = ax - rx * REGION, lz = az - rz * REGION;
+    if (lx < lo || lz < lo || lx > hi || lz > hi) continue;
+    const pieces = Math.max(1, Math.round(Math.hypot(bx - ax, bz - az) / 16));
+    for (let p = 0; p < pieces; p++) {
+      const t0 = p / pieces, t1 = (p + 1) / pieces;
+      out.push(ax + (bx - ax) * t0, az + (bz - az) * t0, ax + (bx - ax) * t1, az + (bz - az) * t1,
+        coarse[k + 4] + (coarse[k + 5] - coarse[k + 4]) * t0, coarse[k + 4] + (coarse[k + 5] - coarse[k + 4]) * t1, coarse[k + 6], coarse[k + 7]);
+    }
+  }
+  const res: RegionWater = { reaches: new Float32Array(out) };
+  regionCache.set(key, res);
+  if (regionCache.size > 6) regionCache.delete(regionCache.keys().next().value!);
+  return res;
+}
 
 /** Simulate one map tile (with its overlap). Pure: safe to run in a worker. */
 export function buildTile(seed: number, tx: number, tz: number, base = new BaseLand(seed)): TileData {
@@ -212,159 +365,300 @@ export function buildTile(seed: number, tx: number, tz: number, base = new BaseL
       H[i] = sm[i] * 0.5 + (sm[i - 1] + sm[i + 1] + sm[i - TN] + sm[i + TN]) * 0.125;
     }
   }
-  // Lake hollows, as the water network traced them (dug after the
-  // weathering, which would silt them up).
-  for (let k = 0; k < n; k++) {
-    const x = ox + (k % TN) * CELL, z = oz + Math.floor(k / TN) * CELL;
-    const dip = base.lakeDip(x, z, H[k]);
-    if (dip > 0) H[k] -= dip;
+  // The region's rivers that run through this map: cut their channels and
+  // valleys into it first, so the land's own streams find their way into them.
+  const span = TN * CELL;
+  const big: number[] = [];
+  const rx = Math.floor((tx * TILE + TILE / 2) / REGION), rz = Math.floor((tz * TILE + TILE / 2) / REGION);
+  const region = regionRivers(base, seed, rx, rz);
+  const R = region.reaches;
+  for (let k = 0; k < R.length; k += 8) {
+    const m = R[k + 6] + 40;
+    if (Math.max(R[k], R[k + 2]) < ox - m || Math.min(R[k], R[k + 2]) > ox + span + m) continue;
+    if (Math.max(R[k + 1], R[k + 3]) < oz - m || Math.min(R[k + 1], R[k + 3]) > oz + span + m) continue;
+    for (let q = 0; q < 8; q++) big.push(R[k + q]);
   }
-  // The water network over this map, from every region it reaches into.
-  const span = TN * CELL, margin = 320;
-  const reaches: number[] = [];
-  const lakeL = new Float32Array(LW * LW).fill(NaN), lakeB = new Float32Array(LW * LW).fill(NaN);
-  const ix0 = ox / NET_CELL, iz0 = oz / NET_CELL;
-  for (let rz = Math.floor((oz - margin) / NET_REGION); rz <= Math.floor((oz + span + margin) / NET_REGION); rz++) {
-    for (let rx = Math.floor((ox - margin) / NET_REGION); rx <= Math.floor((ox + span + margin) / NET_REGION); rx++) {
-      const net = regionNet(base, seed, rx, rz), R = net.reaches;
-      for (let k = 0; k < R.length; k += 8) {
-        const m = R[k + 6] + margin;
-        if (Math.max(R[k], R[k + 2]) < ox - m || Math.min(R[k], R[k + 2]) > ox + span + m) continue;
-        if (Math.max(R[k + 1], R[k + 3]) < oz - m || Math.min(R[k + 1], R[k + 3]) > oz + span + m) continue;
-        for (let q = 0; q < 8; q++) reaches.push(R[k + q]);
-      }
-      for (let lz = 0; lz < LW; lz++) for (let lx = 0; lx < LW; lx++) {
-        const v = net.lakes.get(latticeKey(ix0 + lx, iz0 + lz));
-        if (v) { lakeL[lz * LW + lx] = v[0]; lakeB[lz * LW + lx] = v[1]; }
-      }
-    }
-  }
-  const { kind, S } = fitLand(H, ox, oz, reaches, lakeL, lakeB);
-  const clim = climate(H, TN, seed, SEA, ox, oz, CELL);
-  for (let i = 0; i < n; i++) if (kind[i]) clim.moist[i] = Math.min(1, clim.moist[i] + 0.25);
-  return {
-    tx, tz, H, dep: er.deposit, flow: er.flow, kind, S,
-    climBase: clim.base, moist: clim.moist, reaches: new Float32Array(reaches), wind: clim.wind, lakeL, lakeB,
-  };
-}
-
-/** Points per side of a tile's lake grid (the water network's grid, over the map with its overlap). */
-export const LW = (TILE + 2 * PAD) / NET_CELL + 1;
-
-/**
- * A map point's lake, from the lake grid around it: how much it's under one
- * (0..1, a lake's edge at 0.5), the lake's surface, and its bed there.
- */
-function lakeAt(lakeL: Float32Array, lakeB: Float32Array, fx: number, fz: number): { m: number; level: number; bed: number } {
-  const ix = Math.max(0, Math.min(LW - 2, Math.floor(fx))), iz = Math.max(0, Math.min(LW - 2, Math.floor(fz)));
-  const tx = clamp01(fx - ix), tz = clamp01(fz - iz);
-  let m = 0, level = NaN, bed = 0, wb = 0;
-  for (const [dx, dz, w] of [[0, 0, (1 - tx) * (1 - tz)], [1, 0, tx * (1 - tz)], [0, 1, (1 - tx) * tz], [1, 1, tx * tz]]) {
-    const j = (iz + dz) * LW + ix + dx, l = lakeL[j];
-    if (l !== l) continue;
-    m += w; bed += lakeB[j] * w; wb += w;
-    if (!(level >= l)) level = l;
-  }
-  return { m, level, bed: wb > 0 ? bed / wb : NaN };
-}
-
-/**
- * Shape a map's land to its water, both ways: lake beds and stream channels
- * are cut down below their surfaces, and wherever the land beside them lies
- * too low to hold the water in, it's built up into a bank. Streams cut
- * valleys in proportion to how far they've had to cut down. Returns which
- * cells are under water (1 stream, 2 lake, 3 wide river) and its surface.
- */
-function fitLand(H: Float32Array, ox: number, oz: number, R: number[], lakeL: Float32Array, lakeB: Float32Array) {
-  const n = TN * TN;
-  const kind = new Uint8Array(n), S = new Float32Array(n).fill(NaN);
-  // Lakes: beds below the surface, a low bank all round.
-  const lakeM = new Float32Array(n);
-  for (let i = 0; i < n; i++) {
-    const { m, level, bed } = lakeAt(lakeL, lakeB, ((i % TN) * CELL) / NET_CELL, (Math.floor(i / TN) * CELL) / NET_CELL);
-    lakeM[i] = m;
-    if (m <= 0) continue;
-    if (m >= 0.5) {
-      const floor = level - 0.4 - Math.max(0, level - 0.4 - bed) * smooth(0.5, 1, m);
-      if (H[i] > floor) H[i] = floor;
-      kind[i] = 2; S[i] = level;
-    } else {
-      const bank = level + 0.35 + (0.5 - m) * 1.5;
-      if (H[i] < bank) H[i] = bank;
-    }
-  }
+  const nearBig = new Uint8Array(n);
+  /** Within a big river's valley floor: no lake basins dug there. */
+  const inValley = new Uint8Array(n);
+  const riverSurface = new Float32Array(n).fill(NaN);
+  const inChannel = new Uint8Array(n);
   const H0 = H.slice();
-  const each = (k: number, extra: number, f: (i: number, d: number, e: number, sf: number) => void) => {
-    const ax = R[k], az = R[k + 1], dx = R[k + 2] - ax, dz = R[k + 3] - az, r = R[k + 6];
+  for (let k = 0; k < big.length; k += 8) {
+    const ax = big[k], az = big[k + 1], dx = big[k + 2] - ax, dz = big[k + 3] - az, r = big[k + 6];
     const len2 = dx * dx + dz * dz;
-    const reach = Math.ceil((r + extra) / CELL) + 1;
-    const cx = Math.round((ax + dx / 2 - ox) / CELL), cz = Math.round((az + dz / 2 - oz) / CELL);
-    const half = Math.ceil(Math.sqrt(len2) / 2 / CELL);
-    for (let iz = cz - reach - half; iz <= cz + reach + half; iz++) {
-      if (iz < 0 || iz >= TN) continue;
-      for (let ix = cx - reach - half; ix <= cx + reach + half; ix++) {
-        if (ix < 0 || ix >= TN) continue;
+    // How deep the river has to cut here decides how wide a valley it opens:
+    // beside its banks only, where it already runs low, wider where it cuts
+    // through high ground; either way the cut eases out to the land around.
+    const mx = Math.max(0, Math.min(TN - 1, Math.round((ax + dx / 2 - ox) / CELL)));
+    const mz = Math.max(0, Math.min(TN - 1, Math.round((az + dz / 2 - oz) / CELL)));
+    const cut = Math.max(0, H0[mz * TN + mx] - (big[k + 4] + big[k + 5]) / 2);
+    const full = Math.min(VALLEY - 40, 40 + Math.max(0, cut - 14) / 0.7);
+    const reach = Math.ceil((r + full + 40) / CELL) + 2;
+    const cx = Math.round((ax - ox) / CELL), cz = Math.round((az - oz) / CELL);
+    for (let iz = cz - reach; iz <= cz + reach; iz++) {
+      for (let ix = cx - reach; ix <= cx + reach; ix++) {
+        if (ix < 0 || iz < 0 || ix >= TN || iz >= TN) continue;
         const i = iz * TN + ix, x = ox + ix * CELL, z = oz + iz * CELL;
         const t = len2 > 0 ? clamp01(((x - ax) * dx + (z - az) * dz) / len2) : 0;
         const d = Math.hypot(x - (ax + dx * t), z - (az + dz * t));
-        if (d > r + extra) continue;
-        f(i, d, d - r, R[k + 4] + (R[k + 5] - R[k + 4]) * t);
+        if (d > r + full + 40) continue;
+        const sf = big[k + 4] + (big[k + 5] - big[k + 4]) * t;
+        // The channel, a gentle floodplain beside it, then valley sides rising
+        // at up to about 35° wherever the river has had to cut down.
+        const e = d - r;
+        const line = e < 0 ? sf + 0.25 : e < 40 ? sf + 0.3 + e * 0.35 : sf + 14.3 + (e - 40) * 0.7;
+        const keep = smooth(full, full + 40, e); // 0: cut to the valley side, 1: the land as it was
+        if (H[i] > line) H[i] = line + (H[i] - line) * keep;
+        if (d < r + 24) nearBig[i] = 1;
+        if (d < r + 70) inValley[i] = 1;
+        if (d < r + 2) inChannel[i] = 1;
+        if (d < r - CELL * 0.5 && !(riverSurface[i] <= sf)) riverSurface[i] = sf;
       }
     }
+  }
+  // Lake basins are dug after the weathering (which would silt them up), the
+  // same for every tile, so neighbouring maps agree about them.
+  for (let k = 0; k < n; k++) {
+    const x = ox + (k % TN) * CELL, z = oz + Math.floor(k / TN) * CELL;
+    // Not beside a big river (its valley floor is the river's).
+    const dip = inValley[k] ? 0 : base.lakeDip(x, z, H[k]);
+    if (dip > 0) H[k] -= dip;
+  }
+  const clim = climate(H, TN, seed, SEA, ox, oz, CELL);
+  const dr = drainage(H, TN, SEA, clim.rain, { cell: CELL, streamAt: STREAM_AT * HILL_STREAM, minLake: 8, lakeDepth: 12, noLake: inChannel });
+  // Lakes belong to the tile their deepest point lies in (see Tile.lake). A
+  // lake this tile only sees in its overlap isn't its own: fill its hollow
+  // back in and let the water run on through it, so streams here don't end
+  // at a lake that isn't there.
+  {
+    const seen = new Uint8Array(n), c0 = PAD / CELL, c1 = c0 + TILE / CELL;
+    for (let i = 0; i < n; i++) {
+      if (dr.kind[i] !== 2 || seen[i]) continue;
+      const cells = [i];
+      seen[i] = 1;
+      let deep = i;
+      for (let q = 0; q < cells.length; q++) {
+        const c = cells[q], cx = c % TN, cz = Math.floor(c / TN);
+        if (H[c] < H[deep]) deep = c;
+        for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const x = cx + dx, z = cz + dz;
+          if (x < 0 || z < 0 || x >= TN || z >= TN) continue;
+          const j = z * TN + x;
+          if (dr.kind[j] === 2 && !seen[j]) { seen[j] = 1; cells.push(j); }
+        }
+      }
+      const dx = deep % TN, dz = Math.floor(deep / TN);
+      if (dx >= c0 && dx < c1 && dz >= c0 && dz < c1) continue;
+      for (const c of cells) { H[c] = Math.max(H[c], dr.F[c] - 0.3); dr.kind[c] = 0; dr.S[c] = NaN; }
+    }
+    // Streams that ran into such a lake carry on along its drainage.
+    for (let i = 0; i < n; i++) {
+      if (dr.kind[i] !== 1) continue;
+      for (let c = dr.recv[i], step = 0; c >= 0 && dr.kind[c] === 0 && step < 200 && dr.catchment[c] >= dr.catchment[i]; c = dr.recv[c], step++) {
+        if (H[c] <= SEA) break;
+        dr.kind[c] = 1; dr.S[c] = H[c] - 0.5;
+      }
+    }
+  }
+  // Which channels carry a stream. In the hills a stream starts from much
+  // less ground than on the flat (rain runs off steep slopes and gathers
+  // fast), and once it's running it carries on down to wherever it goes.
+  const slopeAt = (i: number) => {
+    const x = i % TN, z = (i / TN) | 0;
+    if (x < 1 || z < 1 || x > TN - 2 || z > TN - 2) return 0;
+    return Math.hypot(H[i + 1] - H[i - 1], H[i + TN] - H[i - TN]) / (2 * CELL);
   };
-  // Banks first, wherever the land beside a stream lies lower than its water
-  // (not out in a lake: there the stream has arrived).
-  for (let k = 0; k < R.length; k += 8) {
-    each(k, 5, (i, _d, e, sf) => {
-      if (lakeM[i] > 0.3) return;
-      const bank = sf + 0.3 + Math.max(0, e) * 0.15;
-      if (H[i] < bank) H[i] = bank;
-    });
+  const flowing = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    if (dr.kind[i] !== 1 || flowing[i]) continue;
+    const need = STREAM_AT * (1 - (1 - HILL_STREAM) * smooth(0.05, 0.3, slopeAt(i)));
+    if (dr.catchment[i] < need) continue;
+    for (let c = i; c >= 0 && dr.kind[c] === 1 && !flowing[c]; c = dr.recv[c]) flowing[c] = 1;
   }
-  // Then the channels and their valleys: a floodplain beside the water, then
-  // valley sides rising at up to about 35°, as wide as the stream has had to
-  // cut down through the land; either way the cut eases out to the land around.
-  for (let k = 0; k < R.length; k += 8) {
-    const r = R[k + 6];
-    const mx = Math.max(0, Math.min(TN - 1, Math.round(((R[k] + R[k + 2]) / 2 - ox) / CELL)));
-    const mz = Math.max(0, Math.min(TN - 1, Math.round(((R[k + 1] + R[k + 3]) / 2 - oz) / CELL)));
-    const fp = Math.min(40, 3 + 2.5 * r), rise = 0.3 + fp * 0.35;
-    const cut = Math.max(0, H0[mz * TN + mx] - (R[k + 4] + R[k + 5]) / 2);
-    const full = Math.min(VALLEY - 40, fp + Math.max(0, cut - rise) / 0.7);
-    const ease = 10 + 30 * Math.min(1, r / 8);
-    each(k, full + ease, (i, d, e, sf) => {
-      const line = e < 0 ? sf + 0.25 : e < fp ? sf + 0.3 + e * 0.35 : sf + rise + (e - fp) * 0.7;
-      const keep = smooth(full, full + ease, e);
-      if (H[i] > line) H[i] = line + (H[i] - line) * keep;
-      if (d < r && kind[i] !== 2) { kind[i] = r > 4 ? 3 : 1; if (!(S[i] <= sf)) S[i] = sf; }
-    });
+  // Every stream rises at a spring up its valley: follow it uphill, along the
+  // biggest of the hollows feeding it, until the land stops rising or there's
+  // too little ground above to feed a spring.
+  const donor = new Int32Array(n).fill(-1);
+  for (let i = 0; i < n; i++) {
+    const j = dr.recv[i];
+    if (j >= 0 && (donor[j] < 0 || dr.catchment[i] > dr.catchment[donor[j]])) donor[j] = i;
   }
-  return { kind, S };
+  const hasUp = new Uint8Array(n);
+  for (let i = 0; i < n; i++) if (flowing[i] && dr.recv[i] >= 0) hasUp[dr.recv[i]] = 1;
+  const springAt = SPRING_KM2 / (CELL * CELL * 1e-6);
+  for (let i = 0; i < n; i++) {
+    if (!flowing[i] || hasUp[i]) continue;
+    for (let c = donor[i], prev = i, step = 0; c >= 0 && step < 250; prev = c, c = donor[c], step++) {
+      if (H[c] < H[prev] - 0.05 || dr.catchment[c] < springAt || flowing[c] || dr.kind[c] === 2) break;
+      flowing[c] = 1; dr.kind[c] = 1; dr.S[c] = Math.max(SEA, H[c] - 0.5);
+    }
+  }
+  for (let i = 0; i < n; i++) if (dr.kind[i] === 1 && !flowing[i]) { dr.kind[i] = 0; dr.S[i] = NaN; }
+  // Streams running side by side on flat ground join: where a stream comes
+  // within ~20 m of a bigger one that isn't already just downstream of it,
+  // it turns and runs into it there, and its own old course below that dries.
+  const recv2 = dr.recv.slice();
+  {
+    const hasUp = new Uint8Array(n);
+    for (let i = 0; i < n; i++) if (dr.kind[i] === 1 && dr.recv[i] >= 0) hasUp[dr.recv[i]] = 1;
+    const down = new Set<number>();
+    for (let i = 0; i < n; i++) {
+      if (dr.kind[i] !== 1) continue;
+      down.clear();
+      for (let c = dr.recv[i], k = 0; c >= 0 && k < 8; c = dr.recv[c], k++) down.add(c);
+      const ix = i % TN, iz = Math.floor(i / TN);
+      let best = -1, bd = Infinity;
+      for (let dz = -2; dz <= 2; dz++) for (let dx = -2; dx <= 2; dx++) {
+        const x = ix + dx, z = iz + dz;
+        if ((dx === 0 && dz === 0) || x < 0 || z < 0 || x >= TN || z >= TN) continue;
+        const j = z * TN + x, d = dx * dx + dz * dz;
+        if (d > 6.5 || dr.kind[j] !== 1 || down.has(j) || dr.catchment[j] <= dr.catchment[i] || H[j] > H[i] + 0.2) continue;
+        if (d < bd) { bd = d; best = j; }
+      }
+      if (best >= 0) recv2[i] = best;
+    }
+    // What still flows: everything downstream of the springs (and of streams
+    // coming in over the map's edge) along the new courses.
+    const still = new Uint8Array(n);
+    for (let i = 0; i < n; i++) {
+      if (dr.kind[i] !== 1 || hasUp[i]) continue;
+      for (let c = i; c >= 0 && dr.kind[c] === 1 && !still[c]; c = recv2[c]) still[c] = 1;
+    }
+    for (let i = 0; i < n; i++) if (dr.kind[i] === 1 && !still[i]) { dr.kind[i] = 0; dr.S[i] = NaN; }
+  }
+  // The land's own streams, until they reach a river. Near a river the map's
+  // own drainage mostly just retraces it, so streams are left out there,
+  // except a stream coming in from outside, which carries on down into it.
+  const feeds = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    if (dr.kind[i] !== 1 || nearBig[i]) continue;
+    let c = dr.recv[i];
+    if (c < 0 || !nearBig[c]) continue;
+    for (let step = 0; c >= 0 && !inChannel[c] && !feeds[c] && step < 16; step++, c = dr.recv[c]) feeds[c] = 1;
+  }
+  const isStream = (i: number) => dr.kind[i] === 1 && (!nearBig[i] || feeds[i] === 1);
+  const small = layRivers(TN, CELL, ox, oz, H, recv2, dr.catchment, isStream, (c) => c * CELL * CELL * 1e-6, 0.5,
+    undefined, (i) => (dr.kind[i] === 2 ? dr.S[i] : NaN));
+  for (let i = 0; i < n; i++) if (dr.kind[i] === 1 && !isStream(i)) { dr.kind[i] = 0; dr.S[i] = NaN; }
+  // Wide rivers on the map itself (kind 3), so they show from afar as well.
+  for (let i = 0; i < n; i++) {
+    if (Number.isNaN(riverSurface[i]) || dr.kind[i] === 2 || riverSurface[i] <= SEA + 0.1) continue;
+    dr.kind[i] = 3; dr.S[i] = riverSurface[i];
+  }
+  for (let i = 0; i < n; i++) if (dr.kind[i]) clim.moist[i] = Math.min(1, clim.moist[i] + 0.25);
+  // A stream running into a river carries on down its bank into the water:
+  // its last stretch ends well inside the river, at the river's own level
+  // (the map point it drains to may still be up on the bank).
+  if (big.length) {
+    const starts = new Set<string>();
+    for (let k = 0; k < small.length; k += 8) starts.add(`${small[k]},${small[k + 1]}`);
+    for (let k = 0; k < small.length; k += 8) {
+      const bx = small[k + 2], bz = small[k + 3];
+      if (starts.has(`${bx},${bz}`)) continue; // it carries on as another stream
+      let best = Infinity, px = 0, pz = 0, ps = 0, pr = 0;
+      for (let j = 0; j < big.length; j += 8) {
+        const ax = big[j], az = big[j + 1], dx = big[j + 2] - ax, dz = big[j + 3] - az;
+        if (Math.abs(ax - bx) > 120 || Math.abs(az - bz) > 120) continue;
+        const l2 = dx * dx + dz * dz;
+        const t = l2 > 0 ? clamp01(((bx - ax) * dx + (bz - az) * dz) / l2) : 0;
+        const cx = ax + dx * t, cz = az + dz * t, d = Math.hypot(bx - cx, bz - cz) - big[j + 6];
+        if (d < best) { best = d; px = cx; pz = cz; ps = big[j + 4] + (big[j + 5] - big[j + 4]) * t; pr = big[j + 6]; }
+      }
+      if (best > 12) continue;
+      // Into the river by about half its width (and never past the middle).
+      const d0 = Math.hypot(bx - px, bz - pz) || 1, into = Math.max(0, d0 - pr * 0.5) / d0;
+      small[k + 2] = bx + (px - bx) * into; small[k + 3] = bz + (pz - bz) * into;
+      small[k + 5] = Math.min(small[k + 4], ps);
+    }
+  }
+  // A stream ending just short of the sea carries on down into it.
+  {
+    const starts = new Set<string>();
+    for (let k = 0; k < small.length; k += 8) starts.add(`${small[k]},${small[k + 1]}`);
+    const ends = small.length;
+    for (let k = 0; k < ends; k += 8) {
+      const bx = small[k + 2], bz = small[k + 3];
+      if (starts.has(`${bx},${bz}`) || small[k + 5] <= SEA + 0.05) continue;
+      const cx = Math.round((bx - ox) / CELL), cz = Math.round((bz - oz) / CELL);
+      let best = Infinity, sx = 0, sz = 0;
+      for (let dz = -4; dz <= 4; dz++) for (let dx = -4; dx <= 4; dx++) {
+        const x = cx + dx, z = cz + dz;
+        if (x < 0 || z < 0 || x >= TN || z >= TN || H[z * TN + x] > SEA - 0.5) continue;
+        const d = dx * dx + dz * dz;
+        if (d < best) { best = d; sx = ox + x * CELL; sz = oz + z * CELL; }
+      }
+      if (best === Infinity) continue;
+      small.push(bx, bz, sx, sz, small[k + 5], SEA, small[k + 6], small[k + 7]);
+    }
+  }
+  const reaches = big.concat(small);
+  return {
+    tx, tz, H, dep: er.deposit, flow: er.flow, kind: dr.kind, S: dr.S,
+    climBase: clim.base, moist: clim.moist, reaches: new Float32Array(reaches), wind: clim.wind,
+  };
 }
+
+/** How far (map cells) a lake's water may reach past the cells counted as lake, where the land lies low enough. */
+const LAKE_REACH = 3;
+
+const EMPTY = new Float32Array(0);
+
+/** How far (metres) a stream crossing between tiles may be joined to the other tile's version of it. */
+const LINK_REACH = 60;
 
 /** A tile ready for sampling: its data plus a lookup of river reaches by map cell. */
 class Tile {
   readonly ox: number; readonly oz: number;
   private buckets = new Map<number, number[]>();
+  /** Lake surfaces as finally settled against the real (blended) ground; see WorldGen.settleLakes. */
+  level?: Float32Array;
+  /** Stretches carrying streams on from a lake's old shore down to its settled one. */
+  readonly lakeLinks: number[] = [];
+  /** Stretches of stream that leave this tile (indices into its reaches). */
+  readonly exits: number[] = [];
+  /** Whether streams coming in from the neighbours have widened this tile's (see WorldGen.inherit). */
+  inherited = false;
+  /** Each stretch's half-width as the tile itself measured it, before inherit. */
+  readonly rawWidth: Float32Array;
+  /** Stretches not drawn: this tile's version of a stream above where a neighbour's version joins it. */
+  hidden?: Uint8Array;
   lastUsed = 0;
   constructor(readonly d: TileData) {
     this.ox = d.tx * TILE - PAD;
     this.oz = d.tz * TILE - PAD;
-    // Every tile holds the same network where they overlap; each stretch is
-    // looked up from the tile it starts in, so it's found once.
-    const R = d.reaches, x0 = d.tx * TILE, z0 = d.tz * TILE;
+    const R = d.reaches;
+    const x0 = d.tx * TILE, z0 = d.tz * TILE;
+    const inCore = (x: number, z: number) => x >= x0 && x < x0 + TILE && z >= z0 && z < z0 + TILE;
+    // Each stretch of stream belongs to the tile it starts in, so where tiles
+    // overlap it's drawn once (neighbours trace the same water a little
+    // differently, and both would show). Streams leaving this tile are
+    // joined to the next tile's version of them (see WorldGen.links).
     for (let k = 0; k < R.length / 8; k++) {
-      const ax = R[k * 8], az = R[k * 8 + 1];
-      if (ax < x0 || ax >= x0 + TILE || az < z0 || az >= z0 + TILE) continue;
-      const r = R[k * 8 + 6], len = Math.hypot(R[k * 8 + 2] - ax, R[k * 8 + 3] - az);
+      if (inCore(R[k * 8], R[k * 8 + 1]) && !inCore(R[k * 8 + 2], R[k * 8 + 3])) this.exits.push(k);
+    }
+    this.rawWidth = new Float32Array(R.length / 8);
+    for (let k = 0; k < this.rawWidth.length; k++) this.rawWidth[k] = R[k * 8 + 6];
+    this.index();
+  }
+
+  /** Bucket the stretches this tile owns by the map cells they come near. */
+  index() {
+    const R = this.d.reaches, x0 = this.d.tx * TILE, z0 = this.d.tz * TILE;
+    const inCore = (x: number, z: number) => x >= x0 && x < x0 + TILE && z >= z0 && z < z0 + TILE;
+    const buckets = this.buckets;
+    buckets.clear();
+    for (let k = 0; k < R.length / 8; k++) {
+      if (!inCore(R[k * 8], R[k * 8 + 1]) || this.hidden?.[k]) continue;
+      const r = R[k * 8 + 6], len = Math.hypot(R[k * 8 + 2] - R[k * 8], R[k * 8 + 3] - R[k * 8 + 1]);
       const reach = Math.ceil((r + 12 + len) / CELL) + 1;
-      const cx = Math.round((ax - this.ox) / CELL), cz = Math.round((az - this.oz) / CELL);
+      const cx = Math.round((R[k * 8] - this.ox) / CELL), cz = Math.round((R[k * 8 + 1] - this.oz) / CELL);
       for (let oz = -reach; oz <= reach; oz++) for (let ox = -reach; ox <= reach; ox++) {
         const bx = cx + ox, bz = cz + oz;
         if (bx < 0 || bz < 0 || bx >= TN || bz >= TN) continue;
         const key = bz * TN + bx;
-        let list = this.buckets.get(key);
-        if (!list) this.buckets.set(key, (list = []));
+        let list = buckets.get(key);
+        if (!list) buckets.set(key, (list = []));
         list.push(k);
       }
     }
@@ -414,9 +708,81 @@ class Tile {
     }
   }
 
-  /** The lake at a point (see lakeAt): how much it's under one, and the surface. */
-  lake(x: number, z: number) {
-    return lakeAt(this.d.lakeL, this.d.lakeB, (x - this.ox) / NET_CELL, (z - this.oz) / NET_CELL);
+  /**
+   * The lake at a point: its surface, and how far (map cells) the point lies
+   * outside the cells this tile counts as lake (0 inside). Lakes reach a
+   * couple of cells past those, so the shore follows the lie of the land
+   * rather than the map grid. [NaN, Infinity] when there's none.
+   */
+  lake(x: number, z: number): [number, number] {
+    const near = this.nearLake ??= this.findNearLake();
+    if (!near.size) return [NaN, Infinity];
+    const fx = (x - this.ox) / CELL, fz = (z - this.oz) / CELL;
+    const cx = Math.round(fx), cz = Math.round(fz);
+    let best = NaN, bd = Infinity;
+    // The nearest lake cell to this cell or its neighbours (exact distance from the point).
+    for (let dz = -1; dz <= 1; dz++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const j = near.get((cz + dz) * TN + cx + dx);
+        if (j === undefined) continue;
+        const d = Math.max(0, Math.hypot((j % TN) - fx, Math.floor(j / TN) - fz) - 0.75);
+        const lv = this.level ? this.level[j] : this.d.S[j];
+        if (d < bd && !Number.isNaN(lv)) { bd = d; best = lv; }
+      }
+    }
+    return bd <= LAKE_REACH ? [best, bd] : [NaN, Infinity];
+  }
+
+  private nearLake?: Map<number, number>;
+  /** Cells of the lakes this tile owns. */
+  owned?: Uint8Array;
+  ownedLakes(): Uint8Array {
+    if (!this.owned) this.nearLake = this.findNearLake();
+    return this.owned!;
+  }
+  /**
+   * For each cell near a lake this tile owns, the nearest cell of it. A lake
+   * reaching across the join between tiles is worked out by both, a little
+   * differently; it belongs to the tile its deepest point lies in, and only
+   * that tile's version is used, so its shore never ends in a straight line
+   * where one tile's say gives out.
+   */
+  private findNearLake(): Map<number, number> {
+    const kind = this.d.kind, H = this.d.H, n = kind.length;
+    const owned = new Uint8Array(n), seen = new Uint8Array(n);
+    const x0 = PAD / CELL, x1 = x0 + TILE / CELL;
+    for (let i = 0; i < n; i++) {
+      if (kind[i] !== 2 || seen[i]) continue;
+      const cells: number[] = [i];
+      seen[i] = 1;
+      let deep = i;
+      for (let q = 0; q < cells.length; q++) {
+        const c = cells[q], cx = c % TN, cz = Math.floor(c / TN);
+        if (H[c] < H[deep]) deep = c;
+        for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const x = cx + dx, z = cz + dz;
+          if (x < 0 || z < 0 || x >= TN || z >= TN) continue;
+          const j = z * TN + x;
+          if (kind[j] === 2 && !seen[j]) { seen[j] = 1; cells.push(j); }
+        }
+      }
+      const dx = deep % TN, dz = Math.floor(deep / TN);
+      if (dx >= x0 && dx < x1 && dz >= x0 && dz < x1) for (const c of cells) owned[c] = 1;
+    }
+    this.owned = owned;
+    const near = new Map<number, number>(), dist = new Map<number, number>();
+    const R = LAKE_REACH + 1;
+    for (let i = 0; i < n; i++) {
+      if (!owned[i]) continue;
+      const ix = i % TN, iz = Math.floor(i / TN);
+      for (let dz = -R; dz <= R; dz++) for (let dx = -R; dx <= R; dx++) {
+        const x = ix + dx, z = iz + dz;
+        if (x < 0 || z < 0 || x >= TN || z >= TN) continue;
+        const k = z * TN + x, d = dx * dx + dz * dz;
+        if (d < (dist.get(k) ?? Infinity)) { dist.set(k, d); near.set(k, i); }
+      }
+    }
+    return near;
   }
 }
 
@@ -592,28 +958,384 @@ export class WorldGen {
   /** The nearest river reach to a point, if one is close enough to matter. */
   river(x: number, z: number): RiverHit | null {
     const best = { hit: null as RiverHit | null, edge: Infinity };
-    for (const [t] of this.cover(x, z)) t.river(x, z, best);
+    const cover = this.cover(x, z);
+    for (const [t] of cover) { this.inherit(t); t.river(x, z, best); }
+    for (const [t] of cover) {
+      this.settleLakes(t);
+      const L = t.lakeLinks;
+      for (let o = 0; o < L.length; o += 8) {
+        const ax = L[o], az = L[o + 1], dx = L[o + 2] - ax, dz = L[o + 3] - az;
+        if (Math.abs(x - ax) > 200 || Math.abs(z - az) > 200) continue;
+        const len2 = dx * dx + dz * dz;
+        const tt = len2 > 0 ? clamp01(((x - ax) * dx + (z - az) * dz) / len2) : 0;
+        const d = Math.hypot(x - (ax + dx * tt), z - (az + dz * tt));
+        const edge = d - L[o + 6];
+        if (edge < best.edge) {
+          best.edge = edge;
+          best.hit = { d, s: L[o + 4] + (L[o + 5] - L[o + 4]) * tt, r: L[o + 6], depth: L[o + 7], fall: len2 > 0 ? Math.abs(L[o + 4] - L[o + 5]) / Math.sqrt(len2) : 0 };
+        }
+      }
+    }
+    // Where a stream crosses into this point's tile, the link joining it to
+    // this tile's own version of it.
+    const tx = Math.floor(x / TILE), tz = Math.floor(z / TILE), fx = x - tx * TILE, fz = z - tz * TILE;
+    const nx = fx < LINK_REACH ? -1 : TILE - fx < LINK_REACH ? 1 : 0, nz = fz < LINK_REACH ? -1 : TILE - fz < LINK_REACH ? 1 : 0;
+    if (nx || nz) {
+      for (const [ox, oz] of [[nx, 0], [0, nz], [nx, nz]]) {
+        if (!ox && !oz) continue;
+        const L = this.links(tx, tz, ox, oz);
+        for (let o = 0; o < L.length; o += 8) {
+          const ax = L[o], az = L[o + 1], dx = L[o + 2] - ax, dz = L[o + 3] - az;
+          if (Math.abs(x - ax) > 80 || Math.abs(z - az) > 80) continue;
+          const len2 = dx * dx + dz * dz;
+          const t = len2 > 0 ? clamp01(((x - ax) * dx + (z - az) * dz) / len2) : 0;
+          const d = Math.hypot(x - (ax + dx * t), z - (az + dz * t));
+          const edge = d - L[o + 6];
+          if (edge < best.edge) {
+            best.edge = edge;
+            best.hit = { d, s: L[o + 4] + (L[o + 5] - L[o + 4]) * t, r: L[o + 6], depth: L[o + 7], fall: len2 > 0 ? Math.abs(L[o + 4] - L[o + 5]) / Math.sqrt(len2) : 0 };
+          }
+        }
+      }
+    }
     return best.hit && best.edge < 12 ? best.hit : null;
   }
 
   /**
-   * The ground's map height at a point, and how deep a lake stands over it
-   * there (0 if none). Every tile holds the same lakes, so the point's own
-   * tile says.
+   * The map height at a point and how deep lake water stands there. Each map
+   * tile says how deep its own lakes are; like the ground, that's blended
+   * across the joins between tiles, so where two tiles disagree about a lake
+   * it shallows out across the join rather than ending in a wall. A lake's
+   * water reaches a little past the cells counted as lake wherever the land
+   * lies below its surface, so the shore follows the land, not the map grid.
    */
   private lakeSample(x: number, z: number): { mapH: number; depth: number } {
     let mapH = 0;
-    const cover = this.cover(x, z);
-    for (const [t, w] of cover) mapH += t.height(x, z) * w;
-    const { m, level } = this.tile(Math.floor(x / TILE), Math.floor(z / TILE)).lake(x, z);
-    if (m < 0.5) return { mapH, depth: 0 };
-    return { mapH, depth: Math.max(0, level - mapH) };
+    for (const [t, w] of this.cover(x, z)) mapH += t.height(x, z) * w;
+    const [s, bd] = this.lakeNear(x, z);
+    if (Number.isNaN(s)) return { mapH, depth: 0 };
+    // Past the lake's own cells it laps only over ground a little below its
+    // surface, never out over a lower hollow or channel beside it.
+    // Where the ground there dips lower, it rises into a low bank that holds
+    // the lake in, rather than the water ending in a wall.
+    if (bd > 0 && s - mapH > 0.6 + 0.4 * bd) return { mapH: s + 0.25 - 0.1 * bd, depth: 0 };
+    return { mapH, depth: Math.max(0, Math.min(s - mapH, (LAKE_REACH - bd) * 4)) };
+  }
+
+  /** The nearest lake's surface around a point and how far outside its cells (map cells) the point is: [NaN, Infinity] if none. */
+  private lakeNear(x: number, z: number): [number, number] {
+    // Lakes belong to one tile each; ask this tile and any neighbour whose map
+    // reaches here (a lake can spread up to the map's overlap past its tile).
+    const tx = Math.floor(x / TILE), tz = Math.floor(z / TILE);
+    const fx = x - tx * TILE, fz = z - tz * TILE;
+    let s = NaN, bd = Infinity;
+    for (let oz = -1; oz <= 1; oz++) {
+      if ((oz < 0 && fz > PAD) || (oz > 0 && TILE - fz > PAD)) continue;
+      for (let ox = -1; ox <= 1; ox++) {
+        if ((ox < 0 && fx > PAD) || (ox > 0 && TILE - fx > PAD)) continue;
+        const lt = this.tile(tx + ox, tz + oz);
+        this.settleLakes(lt);
+        const [ls, d] = lt.lake(x, z);
+        if (!Number.isNaN(ls) && d < bd) { bd = d; s = ls; }
+      }
+    }
+    return [s, bd];
+  }
+
+  /**
+   * A lake can't stand higher than the ground holding it in. Each tile
+   * worked out its lakes on its own map, but near its edges the real ground
+   * is blended with the neighbours' and can lie lower; so every lake's
+   * surface is brought down to the lowest point of the real ground round its
+   * shore (and a lake left too shallow goes).
+   */
+  /**
+   * A tile's lake surfaces as settled (NaN where none), if the tiles around
+   * it are already made (settling needs their ground); else undefined.
+   */
+  settledLakes(tx: number, tz: number): Float32Array | undefined {
+    // Only if already worked out (for the land around you): settling is
+    // heavy, and from afar a lake's own level looks the same.
+    return this.tiles.get(`${tx},${tz}`)?.level;
+  }
+
+  /**
+   * Streams keep their size from tile to tile. Each tile measures a stream
+   * by the land it can see draining into it, so a river coming in from the
+   * next tile reads there as only the creek its last few hundred metres
+   * would make. Where a neighbour's stream runs in, this tile's version of
+   * it (and everything below) takes on the catchment it was missing.
+   * Uses the neighbours as they were made, so it never depends on the
+   * order tiles come in.
+   */
+  private inherit(t: Tile): boolean {
+    if (t.inherited) return true;
+    // Never makes tiles itself (that would spread outward without end):
+    // waits until the neighbours have arrived.
+    for (let oz = -1; oz <= 1; oz++) for (let ox = -1; ox <= 1; ox++) if (!this.tiles.has(`${t.d.tx + ox},${t.d.tz + oz}`)) return false;
+    t.inherited = true;
+    const R = t.d.reaches, n = R.length / 8;
+    const x0 = t.d.tx * TILE, z0 = t.d.tz * TILE;
+    const inHome = (x: number, z: number) => x >= x0 && x < x0 + TILE && z >= z0 && z < z0 + TILE;
+    const startAt = new Map<string, number>();
+    const endAt = new Map<string, number[]>();
+    for (let k = 0; k < n; k++) {
+      startAt.set(`${R[k * 8]},${R[k * 8 + 1]}`, k);
+      const key = `${R[k * 8 + 2]},${R[k * 8 + 3]}`;
+      const l = endAt.get(key);
+      if (l) l.push(k); else endAt.set(key, [k]);
+    }
+    const add = new Float32Array(n);
+    for (let oz = -1; oz <= 1; oz++) for (let ox = -1; ox <= 1; ox++) {
+      if (!ox && !oz) continue;
+      const nb = this.tile(t.d.tx + ox, t.d.tz + oz), NR = nb.d.reaches;
+      for (const e of nb.exits) {
+        const o = e * 8, ex = NR[o + 2], ez = NR[o + 3];
+        if (!inHome(ex, ez)) continue;
+        const r = nb.rawWidth[e];
+        let bd = Infinity, bj = -1;
+        for (let j = 0; j < n; j++) {
+          const q = j * 8;
+          if (Math.abs(R[q] - ex) > LINK_REACH || Math.abs(R[q + 1] - ez) > LINK_REACH || !inHome(R[q], R[q + 1])) continue;
+          const ax = R[q], az = R[q + 1], dx = R[q + 2] - ax, dz = R[q + 3] - az, l2 = dx * dx + dz * dz;
+          const tt = l2 > 0 ? clamp01(((ex - ax) * dx + (ez - az) * dz) / l2) : 0;
+          const d = Math.hypot(ex - ax - dx * tt, ez - az - dz * tt);
+          if (d < bd) { bd = d; bj = j; }
+        }
+        if (bj < 0 || bd > LINK_REACH * 0.6) continue;
+        add[bj] = Math.max(add[bj], widthArea(r) - widthArea(t.rawWidth[bj]));
+        // This tile's own course above the join runs beside the neighbour's
+        // (which is joined in there): leave just the one. (Not where a smaller
+        // stream runs into a bigger one: that's a tributary, not the same water.)
+        for (let c = bj, step = 0; step < 12 && t.rawWidth[bj] < r * 1.3 + 0.5; step++) {
+          const ups = endAt.get(`${R[c * 8]},${R[c * 8 + 1]}`);
+          if (!ups || ups.length !== 1) break;
+          const u = ups[0], q = u * 8;
+          if (!inHome(R[q], R[q + 1]) || Math.hypot(R[q] - ex, R[q + 1] - ez) > LINK_REACH) break;
+          (t.hidden ??= new Uint8Array(n))[u] = 1;
+          c = u;
+        }
+      }
+    }
+    const extra = new Float32Array(n);
+    let any = false;
+    for (let j = 0; j < n; j++) {
+      if (add[j] <= 0.005) continue;
+      any = true;
+      for (let c: number | undefined = j, step = 0; c !== undefined && step < 2000; step++) {
+        extra[c] += add[j];
+        c = startAt.get(`${R[c * 8 + 2]},${R[c * 8 + 3]}`);
+      }
+    }
+    if (!any) { if (t.hidden) t.index(); return true; }
+    for (let k = 0; k < n; k++) {
+      if (!extra[k]) continue;
+      const a = widthArea(t.rawWidth[k]) + extra[k];
+      R[k * 8 + 6] = Math.max(R[k * 8 + 6], riverHalfWidth(a));
+      R[k * 8 + 7] = Math.max(R[k * 8 + 7], riverDepth(a));
+    }
+    t.index();
+    return true;
+  }
+
+  private settleLakes(t: Tile) {
+    if (t.level) return;
+    // Settling reads the ground around the tile: wait until its neighbours
+    // are here rather than make them (each would want its own settled too,
+    // and so on outward).
+    for (let oz = -1; oz <= 1; oz++) for (let ox = -1; ox <= 1; ox++) if (!this.tiles.has(`${t.d.tx + ox},${t.d.tz + oz}`)) return;
+    this.inherit(t);
+    const d = t.d, n = d.kind.length, owned = t.ownedLakes();
+    const level = new Float32Array(n).fill(NaN);
+    const seen = new Uint8Array(n);
+    for (let i = 0; i < n; i++) {
+      if (!owned[i] || seen[i]) continue;
+      const cells = [i];
+      seen[i] = 1;
+      let rim = d.S[i], bed = Infinity;
+      for (let q = 0; q < cells.length; q++) {
+        const c = cells[q], cx = c % TN, cz = Math.floor(c / TN);
+        bed = Math.min(bed, d.H[c]);
+        for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const x = cx + dx, z = cz + dz;
+          if (x < 0 || z < 0 || x >= TN || z >= TN) continue;
+          const j = z * TN + x;
+          if (owned[j]) { if (!seen[j]) { seen[j] = 1; cells.push(j); } continue; }
+          // Just outside the lake: the real ground there, a little beyond.
+          const wx = t.ox + (x + dx) * CELL, wz = t.oz + (z + dz) * CELL;
+          rim = Math.min(rim, this.mapHeight(t.ox + x * CELL, t.oz + z * CELL), this.mapHeight(wx, wz));
+        }
+      }
+      const s = Math.min(d.S[i], rim - 0.15);
+      if (s - bed < 0.8) continue;
+      for (const c of cells) level[c] = s;
+      // Streams that ran in at the old shore carry on down to the new one.
+      if (s < d.S[i] - 0.3) {
+        const wet = cells.filter((c) => d.H[c] < s - 0.2);
+        const R = d.reaches;
+        for (let k = 0; k < R.length; k += 8) {
+          const bx = R[k + 2], bz = R[k + 3];
+          const cx = Math.round((bx - t.ox) / CELL), cz = Math.round((bz - t.oz) / CELL);
+          let near = false;
+          for (let dz = -3; dz <= 3 && !near; dz++) for (let dx = -3; dx <= 3; dx++) {
+            const x = cx + dx, z = cz + dz;
+            if (x >= 0 && z >= 0 && x < TN && z < TN && owned[z * TN + x] && seen[z * TN + x] && cells.includes(z * TN + x)) { near = true; break; }
+          }
+          if (!near) continue;
+          let best = -1, bd = Infinity;
+          for (const c of wet) { const dd = Math.hypot(t.ox + (c % TN) * CELL - bx, t.oz + Math.floor(c / TN) * CELL - bz); if (dd < bd) { bd = dd; best = c; } }
+          if (best < 0 || bd < 2) continue;
+          t.lakeLinks.push(bx, bz, t.ox + (best % TN) * CELL, t.oz + Math.floor(best / TN) * CELL, R[k + 5], s, R[k + 6], R[k + 7]);
+        }
+      }
+    }
+    t.level = level;
+    this.joinMouths(t);
+  }
+
+  /**
+   * A stream whose last stretch stops short of the water it was running
+   * into (a lake that settled lower, or one another tile traced a little
+   * differently) carries on down to the nearest water within reach.
+   */
+  private joinMouths(t: Tile) {
+    const R = t.d.reaches;
+    const starts = new Set<string>();
+    for (let k = 0; k < R.length; k += 8) starts.add(`${R[k]},${R[k + 1]}`);
+    const x0 = t.d.tx * TILE, z0 = t.d.tz * TILE;
+    for (let k = 0; k < R.length; k += 8) {
+      const bx = R[k + 2], bz = R[k + 3];
+      if (starts.has(`${bx},${bz}`) || R[k] < x0 || R[k] >= x0 + TILE || R[k + 1] < z0 || R[k + 1] >= z0 + TILE) continue;
+      const se = R[k + 5];
+      const dx = bx - R[k], dz = bz - R[k + 1], l = Math.hypot(dx, dz) || 1;
+      // Already in water just past its end?
+      const px = bx + (dx / l) * 2, pz = bz + (dz / l) * 2;
+      if (this.mapHeight(px, pz) < SEA || !Number.isNaN(this.waterBeside(px, pz, R, k))) continue;
+      // The nearest water no higher than the stream, searching outward (ahead of it first).
+      let best: [number, number, number] | null = null;
+      for (let rad = 3; rad <= 32 && !best; rad += 3) {
+        for (let a = 0; a < 24; a++) {
+          const ang = Math.atan2(dz, dx) + ((a % 2 ? 1 : -1) * Math.ceil(a / 2) * Math.PI) / 12;
+          const x = bx + Math.cos(ang) * rad, z = bz + Math.sin(ang) * rad;
+          const w = this.mapHeight(x, z) < SEA ? SEA : this.waterBeside(x, z, R, k);
+          if (!Number.isNaN(w) && w <= se + 0.2) { best = [x, z, w]; break; }
+        }
+      }
+      if (best) t.lakeLinks.push(bx, bz, best[0], best[1], se, Math.min(se, best[2]), R[k + 6], R[k + 7]);
+    }
+  }
+
+  /** Water at a point other than the stream stretch k of reaches R itself (NaN if none). */
+  private waterBeside(x: number, z: number, R: Float32Array, k: number): number {
+    const lake = this.lakeSurface(x, z);
+    if (!Number.isNaN(lake)) return lake;
+    const rv = this.river(x, z);
+    if (!rv || rv.d > rv.r) return NaN;
+    // Not just this same stream: it must be a different one (or lower down).
+    const ax = R[k], az = R[k + 1], bx = R[k + 2], bz = R[k + 3];
+    const dx = bx - ax, dz = bz - az, l2 = dx * dx + dz * dz;
+    const tt = l2 > 0 ? clamp01(((x - ax) * dx + (z - az) * dz) / l2) : 0;
+    if (Math.hypot(x - ax - dx * tt, z - az - dz * tt) < R[k + 6] + 0.5 && rv.s >= R[k + 5] - 0.05) return NaN;
+    return rv.s;
+  }
+
+  private linkCache = new Map<string, Float32Array>();
+  /**
+   * Stretches joining the streams that leave tile (tx+ox, tz+oz) into tile
+   * (tx, tz) to that tile's own version of each (the two tiles trace the
+   * same water a little differently near their join). Where it has none
+   * close by, the stream carries on along its own course a little way.
+   */
+  private links(tx: number, tz: number, ox: number, oz: number): Float32Array {
+    // Only once the next tile is here (never made on the spot for this).
+    const home = this.tile(tx, tz), nb = this.tiles.get(`${tx + ox},${tz + oz}`);
+    if (!nb) return EMPTY;
+    // Worked out again once both have taken in their neighbours' streams.
+    const ready = this.inherit(home) && this.inherit(nb);
+    const key = `${tx},${tz}|${ox},${oz}|${ready}`;
+    let L = this.linkCache.get(key);
+    if (L) return L;
+    const H = home.d.reaches, R = nb.d.reaches, out: number[] = [];
+    const x0 = tx * TILE, z0 = tz * TILE;
+    const inHome = (x: number, z: number) => x >= x0 && x < x0 + TILE && z >= z0 && z < z0 + TILE;
+    const startAt = new Map<string, number>();
+    for (let k = 0; k < R.length / 8; k++) startAt.set(`${R[k * 8]},${R[k * 8 + 1]}`, k);
+    const homeStart = new Map<string, number>();
+    for (let k = 0; k < H.length / 8; k++) homeStart.set(`${H[k * 8]},${H[k * 8 + 1]}`, k);
+    // Whether home's stretch j runs on back out to where the stream came in
+    // from (the two tiles route water hugging their edge opposite ways): it
+    // is upstream of it, not where it goes.
+    const backInto = (j: number, sx: number, sz: number) => {
+      for (let c: number | undefined = j, step = 0; c !== undefined && step < 16; step++) {
+        const q = c * 8;
+        if (!inHome(H[q + 2], H[q + 3]) && Math.hypot(H[q + 2] - sx, H[q + 3] - sz) < 20) return true;
+        c = homeStart.get(`${H[q + 2]},${H[q + 3]}`);
+      }
+      return false;
+    };
+    for (const k of nb.exits) {
+      const o = k * 8, ex = R[o + 2], ez = R[o + 3];
+      if (!inHome(ex, ez)) continue;
+      const r = R[o + 6], se = R[o + 5];
+      // A stream that only strays over the edge a little way and comes back
+      // (water hugging the seam) is drawn along its own course over here.
+      let strays = false;
+      for (let j = startAt.get(`${ex},${ez}`), step = 0; j !== undefined && step < 16; step++) {
+        const q = j * 8;
+        if (!inHome(R[q], R[q + 1])) { strays = true; break; }
+        j = startAt.get(`${R[q + 2]},${R[q + 3]}`);
+      }
+      if (strays) {
+        for (let j = startAt.get(`${ex},${ez}`); j !== undefined;) {
+          const q = j * 8;
+          if (!inHome(R[q], R[q + 1])) break;
+          for (let c = 0; c < 8; c++) out.push(R[q + c]);
+          j = startAt.get(`${R[q + 2]},${R[q + 3]}`);
+        }
+        continue;
+      }
+      // The nearest stretch of home's own stream of about this size or bigger.
+      let bd = Infinity, bs = Infinity, px = 0, pz = 0, ps = 0, pr = 0, pdep = 0, back = false;
+      for (let j = 0; j < H.length; j += 8) {
+        if (!inHome(H[j], H[j + 1]) || home.hidden?.[j / 8]) continue;
+        const ax = H[j], az = H[j + 1], dx = H[j + 2] - ax, dz = H[j + 3] - az;
+        if (Math.abs(ax - ex) > LINK_REACH + 20 || Math.abs(az - ez) > LINK_REACH + 20) continue;
+        const l2 = dx * dx + dz * dz;
+        const t = l2 > 0 ? clamp01(((ex - ax) * dx + (ez - az) * dz) / l2) : 0;
+        const cx = ax + dx * t, cz = az + dz * t, d = Math.hypot(ex - cx, ez - cz);
+        if (backInto(j / 8, R[o], R[o + 1])) {
+          // Home's version runs back out alongside, carrying this water on
+          // over there (see below): nothing to join.
+          if (d < 12) back = true;
+          continue;
+        }
+        // Rather the same stream (about as big) than a little one beside it.
+        const score = d + (H[j + 6] < r * 0.6 ? 20 : 0);
+        if (score < bs) { bs = score; bd = d; px = cx; pz = cz; ps = H[j + 4] + (H[j + 5] - H[j + 4]) * t; pr = H[j + 6]; pdep = H[j + 7]; }
+      }
+      if (back) continue;
+      if (bd < LINK_REACH) {
+        if (bd > 0.5) out.push(ex, ez, px, pz, se, Math.min(se, ps), Math.min(r, pr), Math.min(R[o + 7], pdep));
+        continue;
+      }
+      // None near: carry on along the neighbour's own course.
+      for (let j = startAt.get(`${ex},${ez}`), step = 0; j !== undefined && step < 30; step++) {
+        const q = j * 8;
+        if (!inHome(R[q], R[q + 1])) break;
+        for (let c = 0; c < 8; c++) out.push(R[q + c]);
+        j = startAt.get(`${R[q + 2]},${R[q + 3]}`);
+      }
+    }
+    L = new Float32Array(out);
+    this.linkCache.set(key, L);
+    if (this.linkCache.size > 200) this.linkCache.delete(this.linkCache.keys().next().value!);
+    return L;
   }
 
   /** The surface of a lake at a point, or NaN. */
   lakeSurface(x: number, z: number): number {
     // No lake near: nothing more to work out.
-    if (this.tile(Math.floor(x / TILE), Math.floor(z / TILE)).lake(x, z).m < 0.5) return NaN;
+    if (Number.isNaN(this.lakeNear(x, z)[0])) return NaN;
     const { mapH, depth } = this.lakeSample(x, z);
     return depth > 0.05 ? mapH + depth : NaN;
   }
