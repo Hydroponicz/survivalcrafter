@@ -1,4 +1,5 @@
 import { TILE, type TileData, type TileSource, type WorldGen } from './worldgen';
+import type { StandInPlan } from './farforest';
 
 /** A small pool of workers making map tiles, nearest-asked first. */
 export class WorkerTiles implements TileSource {
@@ -7,15 +8,15 @@ export class WorkerTiles implements TileSource {
   /** Where you are, so the queue serves the nearest tiles first. */
   focus = { x: 0, z: 0 };
 
-  constructor(private seed: number, private onTile: (d: TileData, lod: Float32Array) => void, tileSize: number) {
+  constructor(private seed: number, private onTile: (d: TileData, lod: Float32Array, forest?: StandInPlan[]) => void, tileSize: number) {
     this.tileSize = tileSize;
     const n = Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 4) - 1));
     for (let i = 0; i < n; i++) {
       const w = new Worker(new URL('./tileworker.ts', import.meta.url), { type: 'module' });
       const slot = { w, busy: false };
-      w.onmessage = (e: MessageEvent<{ d: TileData; lod: Float32Array }>) => {
+      w.onmessage = (e: MessageEvent<{ d: TileData; lod: Float32Array; forest: StandInPlan[] }>) => {
         slot.busy = false;
-        this.onTile(e.data.d, e.data.lod);
+        this.onTile(e.data.d, e.data.lod, e.data.forest);
         this.pump();
       };
       this.workers.push(slot);
@@ -55,7 +56,7 @@ export class WorkerTiles implements TileSource {
 export async function prepareTiles(gen: WorldGen, x: number, z: number): Promise<void> {
   if (!gen.tileSource) {
     try {
-      gen.useSource(new WorkerTiles(gen.seed, (d, lod) => gen.addTile(d, lod), TILE));
+      gen.useSource(new WorkerTiles(gen.seed, (d, lod, forest) => gen.addTile(d, lod, forest), TILE));
     } catch { return; /* no workers: tiles are made when needed */ }
   }
   const src = gen.tileSource;

@@ -1,3 +1,4 @@
+import { perf } from '../game/perf';
 import { isIdentified, ITEMS, itemDef, itemName, TOOL_NAMES, typeDesc, type Item } from '../data/items';
 import { RECIPES, STATION_NAMES, type Recipe } from '../data/recipes';
 import { SKILLS, type SkillId } from '../data/skills';
@@ -42,6 +43,7 @@ export class UI {
   private progressLabel: HTMLElement;
   private hotbarEl: HTMLElement;
   private clockEl: HTMLElement;
+  private perfEl: HTMLElement;
   private statusEl: HTMLElement;
   private logEl: HTMLElement;
   private menuEl: HTMLElement;
@@ -72,6 +74,7 @@ export class UI {
       <div class="target"><div class="target-name"></div><div class="target-hint"></div></div>
       <div class="progress"><div class="progress-label"></div><div class="progress-bar"><div class="progress-fill"></div></div></div>
       <div class="clock"></div>
+      <div class="perf-line"></div>
       <div class="status"></div>
       <div class="bars"></div>
       <div class="hotbar"></div>
@@ -84,6 +87,7 @@ export class UI {
     this.progressLabel = hud.querySelector('.progress-label')!;
     this.hotbarEl = hud.querySelector('.hotbar')!;
     this.clockEl = hud.querySelector('.clock')!;
+    this.perfEl = hud.querySelector('.perf-line')!;
     this.statusEl = hud.querySelector('.status')!;
     this.logEl = hud.querySelector('.log')!;
     const bars = hud.querySelector('.bars')!;
@@ -345,8 +349,14 @@ export class UI {
     const mins = Math.floor(f * 24 * 60);
     const hh = String(Math.floor(mins / 60)).padStart(2, '0'), mm = String(mins % 60).padStart(2, '0');
     // With dev settings on, where you are too (handy for reporting a spot).
-    const pos = g.dev.anyActive ? ` · ${Math.round(g.player.pos.x)}, ${Math.round(g.player.pos.z)}` : '';
+    const pos = g.dev.anyActive ? ` · ${Math.round(g.player.pos.x)}, ${Math.round(g.player.pos.z)} · ${perf.fps} fps` : '';
     this.clockEl.textContent = `Day ${g.world.day} · ${hh}:${mm}${f > 0.78 || f < 0.22 ? ' · night' : ''}${pos}`;
+    // With dev settings on: the slowest frame each second, and what took the time in it.
+    this.perfEl.style.display = g.dev.anyActive ? '' : 'none';
+    if (g.dev.anyActive) {
+      const top = perf.worstParts.filter(([, ms]) => ms >= 1).slice(0, 3).map(([k, ms]) => `${k} ${ms.toFixed(0)}`).join(', ');
+      this.perfEl.textContent = `slowest ${perf.worst.toFixed(0)} ms${top ? ` (${top})` : ''}`;
+    }
 
     const status: string[] = [];
     if (g.dev.anyActive) status.push('<span class="dev-badge">DEV</span>');

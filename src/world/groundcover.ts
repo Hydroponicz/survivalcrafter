@@ -332,12 +332,14 @@ export class GroundCover {
     if (tx !== this.centre[0] || tz !== this.centre[1]) { this.centre = [tx, tz]; this.dirty = true; }
     if (!this.dirty) {
       if (this.view && this.view.version !== this.seen) this.rebuild(tx, tz);
+      this.flush(budgetMs * 0.5);
       return;
     }
     // Generate missing tiles nearest first, within a time budget; rebuild once all are in.
     const start = performance.now();
     let missing = false;
-    for (const far of [false, true]) {
+    // Far kinds first: the near patches need their logs and boulders (to grow around) made already.
+    for (const far of [true, false]) {
       const r = Math.ceil(Math.max(...this.kinds.filter((k) => k.far === far).map((k) => k.range)) / TILE);
       const cache = this.cache[far ? 1 : 0];
       const want: [number, number, number][] = [];
@@ -356,8 +358,23 @@ export class GroundCover {
         if (Math.abs(x - tx) > r + 2 || Math.abs(z - tz) > r + 2) { cache.delete(k); if (far) this.obstacles.delete(k); }
       }
     }
-    this.rebuild(tx, tz);
+    // Redrawn once the patches around are all in (until then the old ones stay).
+    if (!missing) this.rebuild(tx, tz);
     this.dirty = missing;
+    this.flush(budgetMs * 0.5);
+  }
+
+  /** Kinds of plant still to be redrawn for the latest position and view. */
+  private pending: number[] = [];
+  private target = [0, 0];
+
+  /** Redraw the kinds still waiting, as many as fit in `budgetMs` (at least one). */
+  private flush(budgetMs: number) {
+    const start = performance.now();
+    while (this.pending.length) {
+      this.redraw(this.pending.shift()!, this.target[0], this.target[1]);
+      if (performance.now() - start > budgetMs) break;
+    }
   }
 
   /** Change how much is drawn, and redraw. */
@@ -367,10 +384,16 @@ export class GroundCover {
     this.rebuild(this.centre[0], this.centre[1]);
   }
 
+  /** Redraw everything for this tile and the current view (a kind or two a frame; see flush). */
   private rebuild(tx: number, tz: number) {
+    this.seen = this.view?.version ?? -1;
+    this.target = [tx, tz];
+    this.pending = this.kinds.map((_, i) => i);
+  }
+
+  private redraw(i: number, tx: number, tz: number) {
     const view = this.view;
-    this.seen = view?.version ?? -1;
-    for (let i = 0; i < this.kinds.length; i++) {
+    {
       const k = this.kinds[i];
       const cache = this.cache[k.far ? 1 : 0];
       const r = Math.ceil(k.range / TILE);
@@ -390,6 +413,9 @@ export class GroundCover {
       }
       mesh.count = n;
       mesh.visible = n > 0;
+      // Only what's used goes to the graphics card.
+      mesh.instanceMatrix.clearUpdateRanges(); mesh.instanceMatrix.addUpdateRange(0, Math.max(1, n) * 16);
+      mesh.instanceColor!.clearUpdateRanges(); mesh.instanceColor!.addUpdateRange(0, Math.max(1, n) * 3);
       mesh.instanceMatrix.needsUpdate = true;
       mesh.instanceColor!.needsUpdate = true;
     }

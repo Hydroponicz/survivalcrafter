@@ -155,8 +155,8 @@ export class Terrain {
       const x = x0 + lx, z = z0 + lz;
       const hx = (lx > 0 && lx < CI - 1 ? h[k + 1] - h[k - 1] : 0) / 2, hz = (lz > 0 && lz < CI - 1 ? h[k + CI] - h[k - CI] : 0) / 2;
       const slope = Math.hypot(hx, hz);
-      const s = g.soil(x, z, h[k], slope);
       water[k] = g.water(x, z, h[k]);
+      const s = g.soil(x, z, h[k], slope, water[k]);
       soil[k] = s.soil;
       top[k] = TOP_MAT[s.top];
       under[k] = s.top === 'sand' || s.top === 'clay' || s.top === 'gravel' ? top[k] : Mat.Dirt;
@@ -642,7 +642,8 @@ export class Terrain {
 
   // ---------- streaming
   /** Which chunks should be meshed around a point, nearest first. */
-  private plan(px: number, py: number, pz: number, newCols = Infinity) {
+  /** The chunks to mesh around a point, nearest first; new columns are worked out only until `until` (a time), the rest next frame. */
+  private plan(px: number, py: number, pz: number, until = Infinity) {
     const out: { id: number; dist: number }[] = [];
     let skipped = false, skipDist = Infinity;
     const r = Math.ceil(MESH_RADIUS / CH);
@@ -663,8 +664,7 @@ export class Terrain {
         if (dist > MESH_RADIUS + CH) continue;
         // Working out a new column costs a few ms: only a handful per frame, nearest first.
         if (!this.cols.has(colKey(cx, cz)) && dist > CH * 2) {
-          if (newCols <= 0) { skipped = true; skipDist = Math.min(skipDist, dist); continue; }
-          newCols--;
+          if (performance.now() > until) { skipped = true; skipDist = Math.min(skipDist, dist); continue; }
         }
         const ci = this.colInfo(cx, cz);
         // The surface band, plus chunks around you (caves and tunnels), plus anything you changed.
@@ -687,7 +687,7 @@ export class Terrain {
     const start = performance.now();
     const w = this.wantedAt;
     if (this.replan || !(Math.hypot(px - w.x, pz - w.z) < 8 && Math.abs(py - w.y) < 8)) {
-      const { out, skipped, skipDist } = this.plan(px, py, pz, 4);
+      const { out, skipped, skipDist } = this.plan(px, py, pz, start + budgetMs * 0.5);
       this.wanted = out;
       this.skipDist = skipDist;
       // Columns still to work out: carry on next frame.
@@ -701,6 +701,18 @@ export class Terrain {
       if (this.empty.has(id) && !this.dirty.has(id)) continue;
       // Always finish anything right next to you so edits show at once.
       if (performance.now() - start > budgetMs && dist > CH * 1.5) { ready = Math.min(ready, dist); break; }
+      // The ground of the columns around it first, a column at a time (each
+      // costs a few ms); the chunk once they're all known.
+      if (dist > CH * 1.5) {
+        const cx = keyCx(id), cz = keyCz(id);
+        let missing = false;
+        for (let oz = -1; oz <= 1 && !missing; oz++) for (let ox = -1; ox <= 1; ox++) {
+          if (this.cols.has(colKey(cx + ox, cz + oz))) continue;
+          if (performance.now() - start > budgetMs) { missing = true; break; }
+          this.colInfo(cx + ox, cz + oz);
+        }
+        if (missing) { ready = Math.min(ready, dist); break; }
+      }
       this.dirty.delete(id);
       this.buildChunk(id);
     }
@@ -743,15 +755,16 @@ export class Terrain {
   }
 
   /**
-   * Work out up to `budget` of the not-yet-known columns in an area; returns
-   * how many are still missing (spreads the cost of new ground over frames).
+   * Work out the not-yet-known columns in an area for up to `budgetMs`;
+   * returns how many are still missing (spreads the cost of new ground over frames).
    */
-  prepare(x0: number, z0: number, size: number, budget: number): number {
+  prepare(x0: number, z0: number, size: number, budgetMs: number): number {
     let missing = 0;
+    const until = performance.now() + budgetMs;
     for (let cz = cOf(z0); cz <= cOf(z0 + size - 1); cz++) {
       for (let cx = cOf(x0); cx <= cOf(x0 + size - 1); cx++) {
         if (this.cols.has(colKey(cx, cz))) continue;
-        if (budget-- > 0) this.colInfo(cx, cz); else missing++;
+        if (performance.now() < until) this.colInfo(cx, cz); else missing++;
       }
     }
     return missing;

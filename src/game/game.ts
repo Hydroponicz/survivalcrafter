@@ -18,6 +18,7 @@ const NEAR_TREES = 230;
 import { seaFloor } from '../world/water';
 import { prepareTiles, WorkerTiles } from '../world/tilesource';
 import { ViewCull } from '../world/cull';
+import { perf } from './perf';
 import { TILE, tileOf, WorldGen } from '../world/worldgen';
 import {
   ANIMALS, pointInPiece, toLocal, toWorld, World, type AnimalObj, type ForageObj, type PileObj, type StructureObj, type TreeObj, type WorldObj,
@@ -195,12 +196,12 @@ export class Game {
     this.distant = new DistantLand(gen.seed);
     this.distant.lakeLevels = (tx, tz) => gen.settledLakes(tx, tz);
     this.scene.add(this.distant.group);
-    gen.onTile = (d, lod) => { this.distant.addTile(d, lod); seaFloor.changed(); };
+    gen.onTile = (d, lod, forest) => { this.distant.addTile(d, lod, forest); seaFloor.changed(); };
     gen.forEachTile((d) => this.distant.addTile(d));
     if (gen.tileSource instanceof WorkerTiles) this.tileWorkers = gen.tileSource;
     else {
       try {
-        this.tileWorkers = new WorkerTiles(gen.seed, (d, lod) => gen.addTile(d, lod), TILE);
+        this.tileWorkers = new WorkerTiles(gen.seed, (d, lod, forest) => gen.addTile(d, lod, forest), TILE);
         gen.useSource(this.tileWorkers);
       } catch { /* no workers: tiles are made on the main thread when needed */ }
     }
@@ -246,6 +247,8 @@ export class Game {
   start() {
     // Mesh the land around you before the first frame; the rest streams in.
     const p = this.player.pos;
+    // The distant land too (as it arrives later, it's made a tile a frame).
+    this.distant.drain(Infinity);
     this.world.stream(p.x, p.z, 999);
     this.world.keepAnimals(p.x, p.z);
     this.world.terrain.buildNear(p.x, p.y, p.z, 40);
@@ -1362,13 +1365,15 @@ export class Game {
       // Keep to the cap on average whatever the screen's refresh rate.
       this.lastFrame = since < interval * 3 ? timestamp - (since % interval) : timestamp;
     }
+    perf.begin();
     this.timer.update(timestamp);
     const dt = Math.min(0.05, this.timer.getDelta());
     this.renderDt = dt;
     this.elapsed += dt;
-    if (!this.paused) this.update(dt);
+    if (!this.paused) perf.time('update', () => this.update(dt));
     this.render();
     this.input.endFrame();
+    perf.end();
   }
 
   private update(dt: number) {
@@ -1547,16 +1552,18 @@ export class Game {
       if (!d.done && d.left <= 0) d.land(d.at.x, d.at.z);
       if (d.done) this.pendingDrops.splice(this.pendingDrops.indexOf(d), 1);
     }
-    this.world.tick(dt * this.dev.timeScale);
-    this.growth.update(this.world, p.pos.x, p.pos.z, dt * this.dev.timeScale);
+    perf.time('world', () => {
+      this.world.tick(dt * this.dev.timeScale);
+      this.growth.update(this.world, p.pos.x, p.pos.z, dt * this.dev.timeScale);
+    });
     this.updateMarkers();
-    this.updateAnimals(dt);
-    this.world.terrain.update(p.pos.x, p.pos.y, p.pos.z, 6);
+    perf.time('animals', () => this.updateAnimals(dt));
+    perf.time('terrain', () => this.world.terrain.update(p.pos.x, p.pos.y, p.pos.z, 6));
     this.world.focus = { x: p.pos.x, z: p.pos.z };
-    this.world.stream(p.pos.x, p.pos.z, 1);
+    perf.time('objects', () => this.world.stream(p.pos.x, p.pos.z, 1));
 
     this.saveTimer += dt;
-    if (this.saveTimer > 60) { this.saveTimer = 0; this.save(); }
+    if (this.saveTimer > 60) { this.saveTimer = 0; perf.time('autosave', () => this.save()); }
 
     if (!uiOpen && !inp.locked && !this.ui.menuOpen && this.ui.wantsRelock) {
       this.ui.wantsRelock = false;
@@ -1587,22 +1594,25 @@ export class Game {
   private render() {
     const p = this.player;
     this.view.treeFx.update(this.renderDt);
-    this.sky.update(this.world.dayFraction, p.pos, this.elapsed, this.renderer, this.camera, this.renderDt);
+    perf.time('sky', () => this.sky.update(this.world.dayFraction, p.pos, this.elapsed, this.renderer, this.camera, this.renderDt));
     this.ambTimer -= this.renderDt;
     if (this.ambTimer <= 0) { this.ambTimer = 0.5; this.surroundings(); }
     // What's in view: the near trees, plants and grass hand only that to be drawn.
-    this.viewCull.update(this.camera, this.sky.sunDir);
-    this.view.cull(this.viewCull);
-    this.grassCull.update(this.camera);
-    this.groundCover.update(this.camera.position, this.elapsed, this.world.terrain.wind, this.amb.sway);
+    perf.time('culling', () => {
+      this.viewCull.update(this.camera, this.sky.sunDir);
+      this.view.cull(this.viewCull);
+      this.grassCull.update(this.camera);
+    });
+    perf.time('grass', () => this.groundCover.update(this.camera.position, this.elapsed, this.world.terrain.wind, this.amb.sway));
     this.world.terrain.waterTime.value = this.elapsed;
-    seaFloor.update(this.camera.position.x, this.camera.position.z, this.renderDt, (x, z) => this.seaBed(x, z), WATER_LEVEL);
+    perf.time('sea floor', () => seaFloor.update(this.camera.position.x, this.camera.position.z, this.renderDt, (x, z) => this.seaBed(x, z), WATER_LEVEL));
     this.tileTimer -= this.renderDt;
-    if (this.tileTimer <= 0) { this.tileTimer = 0.5; this.keepTiles(); }
+    if (this.tileTimer <= 0) { this.tileTimer = 0.5; perf.time('distant land', () => this.keepTiles()); }
     const mc = this.world.terrain.meshCentre;
     this.distant.setHole(mc.x, mc.z, Number.isFinite(mc.x) ? Math.max(0, this.world.terrain.readyRadius - 6) : 0);
     this.distant.setTreesNear(p.pos.x, p.pos.z, NEAR_TREES);
-    this.distant.cull(this.camera);
+    perf.time('distant land', () => this.distant.drain(2));
+    perf.time('culling', () => this.distant.cull(this.camera));
     this.fireflies.update(this.renderDt, this.elapsed, this.camera.position, this.world.terrain, this.amb.fireflies);
     const a = this.amb;
     this.sound.ambience({ wind: a.wind, river: a.water, birds: a.birds, night: a.crickets, frogs: a.frogs }, this.renderDt);
@@ -1611,7 +1621,7 @@ export class Game {
     this.view.updateFires(p.pos.x, p.pos.z, this.elapsed);
     this.frameNo++;
     this.renderer.shadowMap.needsUpdate = this.frameNo % this.graphics.level.shadowEvery === 0;
-    this.renderer.render(this.scene, this.camera);
+    perf.time('draw', () => this.renderer.render(this.scene, this.camera));
     // First-person hands and tool, on top of the world.
     if (!this.working) {
       const it = this.activeItem();
