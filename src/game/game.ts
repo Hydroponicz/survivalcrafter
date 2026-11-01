@@ -17,6 +17,7 @@ import { deleteSave, downloadSave, hasSaveAt, migrateSave, readSave, readSaveFil
 const NEAR_TREES = 230;
 import { seaFloor } from '../world/water';
 import { prepareTiles, WorkerTiles } from '../world/tilesource';
+import { ViewCull } from '../world/cull';
 import { TILE, tileOf, WorldGen } from '../world/worldgen';
 import {
   ANIMALS, pointInPiece, toLocal, toWorld, World, type AnimalObj, type ForageObj, type PileObj, type StructureObj, type TreeObj, type WorldObj,
@@ -142,6 +143,9 @@ export class Game {
   };
   private timer = new THREE.Timer();
   private renderDt = 1 / 60;
+  /** What's in view, for the near trees and plants, and (looser, so redone less often) the grass. */
+  private viewCull = new ViewCull(8, 3);
+  private grassCull = new ViewCull(15, 4);
   /** Felled trees whose logs haven't landed yet. */
   private pendingDrops: PendingDrop[] = [];
   private screeTimer = 0;
@@ -200,6 +204,7 @@ export class Game {
       } catch { /* no workers: tiles are made on the main thread when needed */ }
     }
     this.groundCover = new GroundCover(world);
+    this.groundCover.view = this.grassCull;
     this.applyGraphics();
     this.scene.add(this.groundCover.group, this.fireflies.points);
     this.view.onStructure = (o) => this.groundCover.invalidate(o.x, o.z, 3);
@@ -1584,6 +1589,10 @@ export class Game {
     this.sky.update(this.world.dayFraction, p.pos, this.elapsed, this.renderer, this.camera, this.renderDt);
     this.ambTimer -= this.renderDt;
     if (this.ambTimer <= 0) { this.ambTimer = 0.5; this.surroundings(); }
+    // What's in view: the near trees, plants and grass hand only that to be drawn.
+    this.viewCull.update(this.camera, this.sky.sunDir);
+    this.view.cull(this.viewCull);
+    this.grassCull.update(this.camera);
     this.groundCover.update(this.camera.position, this.elapsed, this.world.terrain.wind, this.amb.sway);
     this.world.terrain.waterTime.value = this.elapsed;
     seaFloor.update(this.camera.position.x, this.camera.position.z, this.renderDt, (x, z) => this.seaBed(x, z), WATER_LEVEL);
@@ -1592,6 +1601,7 @@ export class Game {
     const mc = this.world.terrain.meshCentre;
     this.distant.setHole(mc.x, mc.z, Number.isFinite(mc.x) ? Math.max(0, this.world.terrain.readyRadius - 6) : 0);
     this.distant.setTreesNear(p.pos.x, p.pos.z, NEAR_TREES);
+    this.distant.cull(this.camera);
     this.fireflies.update(this.renderDt, this.elapsed, this.camera.position, this.world.terrain, this.amb.fireflies);
     const a = this.amb;
     this.sound.ambience({ wind: a.wind, river: a.water, birds: a.birds, night: a.crickets, frogs: a.frogs }, this.renderDt);

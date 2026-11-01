@@ -101,7 +101,7 @@ const cyOf = (y: number) => Math.max(0, Math.min(NCY - 1, Math.floor((y - Y_MIN)
 export class Terrain {
   seed: number;
   gen!: WorldGen;
-  group = new THREE.Group();
+  group = Object.assign(new THREE.Group(), { name: 'terrain' });
   private chunks = new Map<number, Chunk>();
   private cols = new Map<number, ColInfo>();
   /** Point heights where you've changed the ground, per column (overrides the generator). */

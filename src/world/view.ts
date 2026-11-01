@@ -6,6 +6,7 @@ import { FORAGE, FORAGE_SPECIES } from '../data/forage';
 import { forageGeometry, forageScale } from './forageProps';
 import { TreeFx, treeScale } from './treefx';
 import { hash2 } from './noise';
+import type { ViewCull } from './cull';
 import {
   CROP_STAGES, cropPos, type AnimalObj, type BushObj, type ForageObj, type PileObj, type Species, type StructureObj,
   type TreeObj, type World, type WorldListener, type WorldObj,
@@ -18,24 +19,102 @@ const mat = (color: number, extra: THREE.MeshStandardMaterialParameters = {}) =>
 const TREE_DETAIL = 75;
 
 /**
- * Instances kept packed at the front (removing one moves the last into its
- * place), so only what's shown is drawn. Keyed by object id.
+ * An instanced mesh that draws only the instances in (or casting a shadow
+ * into) view. Every instance is kept here; each time the view moves on, the
+ * ones that can be seen are packed into the mesh, so the rest cost nothing.
  */
-class PackedPool {
+class CulledInstances {
   mesh: THREE.InstancedMesh;
-  private at = new Map<number, number>();
-  private ids: number[] = [];
-  private tmp = new THREE.Matrix4();
-  private col = new THREE.Color();
+  /** Each slot's matrix and colour, and whether it's shown. */
+  protected src: Float32Array;
+  protected srcCol: Float32Array;
+  protected live: Uint8Array;
+  /** Slots in use (high-water mark). */
+  protected top = 0;
+  private dirty = true;
+  private seen = -1;
+  private gc: THREE.Vector3;
+  private gr: number;
+  private gh: number;
 
-  constructor(geo: THREE.BufferGeometry, material: THREE.Material, readonly capacity: number) {
+  constructor(geo: THREE.BufferGeometry, material: THREE.Material, readonly capacity: number, shadow: boolean) {
     this.mesh = new THREE.InstancedMesh(geo, material, capacity);
-    this.mesh.castShadow = true;
+    this.mesh.castShadow = shadow;
     this.mesh.receiveShadow = true;
+    // Culled here, instance by instance.
     this.mesh.frustumCulled = false;
     this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    this.mesh.setColorAt(0, this.col.set(0xffffff));
+    this.mesh.setColorAt(0, new THREE.Color(0xffffff));
+    this.mesh.instanceColor!.setUsage(THREE.DynamicDrawUsage);
     this.mesh.count = 0;
+    this.src = new Float32Array(capacity * 16);
+    this.srcCol = new Float32Array(capacity * 3).fill(1);
+    this.live = new Uint8Array(capacity);
+    geo.computeBoundingBox();
+    geo.computeBoundingSphere();
+    this.gc = geo.boundingSphere!.center.clone();
+    this.gr = geo.boundingSphere!.radius;
+    this.gh = geo.boundingBox!.max.y;
+  }
+
+  protected put(i: number, m: THREE.Matrix4, color?: THREE.Color) {
+    m.toArray(this.src, i * 16);
+    if (color) color.toArray(this.srcCol, i * 3);
+    this.live[i] = 1;
+    this.dirty = true;
+  }
+
+  protected drop(i: number) {
+    this.live[i] = 0;
+    this.dirty = true;
+  }
+
+  protected move(from: number, to: number) {
+    this.src.copyWithin(to * 16, from * 16, from * 16 + 16);
+    this.srcCol.copyWithin(to * 3, from * 3, from * 3 + 3);
+    this.live[to] = this.live[from];
+    this.live[from] = 0;
+    this.dirty = true;
+  }
+
+  /** Pack what can be seen into the mesh (only when something or the view changed). */
+  cull(view: ViewCull) {
+    if (!this.dirty && this.seen === view.version) return;
+    this.dirty = false;
+    this.seen = view.version;
+    const S = this.src, C = this.srcCol, M = this.mesh.instanceMatrix.array as Float32Array, MC = this.mesh.instanceColor!.array as Float32Array;
+    const gx = this.gc.x, gy = this.gc.y, gz = this.gc.z, shadow = this.mesh.castShadow;
+    let n = 0;
+    for (let i = 0; i < this.top; i++) {
+      if (!this.live[i]) continue;
+      const o = i * 16;
+      // Where the model's bounding sphere ends up, and how big.
+      const sx = Math.hypot(S[o], S[o + 1], S[o + 2]), sy = Math.hypot(S[o + 4], S[o + 5], S[o + 6]), sz = Math.hypot(S[o + 8], S[o + 9], S[o + 10]);
+      const r = this.gr * Math.max(sx, sy, sz);
+      if (r === 0) continue;
+      const cx = S[o] * gx + S[o + 4] * gy + S[o + 8] * gz + S[o + 12];
+      const cy = S[o + 1] * gx + S[o + 5] * gy + S[o + 9] * gz + S[o + 13];
+      const cz = S[o + 2] * gx + S[o + 6] * gy + S[o + 10] * gz + S[o + 14];
+      if (!(shadow ? view.caster(cx, cy, cz, r, this.gh * sy) : view.sphere(cx, cy, cz, r))) continue;
+      M.set(S.subarray(o, o + 16), n * 16);
+      MC.set(C.subarray(i * 3, i * 3 + 3), n * 3);
+      n++;
+    }
+    this.mesh.count = n;
+    this.mesh.visible = n > 0;
+    const im = this.mesh.instanceMatrix, ic = this.mesh.instanceColor!;
+    im.clearUpdateRanges(); im.addUpdateRange(0, Math.max(1, n) * 16); im.needsUpdate = true;
+    ic.clearUpdateRanges(); ic.addUpdateRange(0, Math.max(1, n) * 3); ic.needsUpdate = true;
+  }
+}
+
+/** Instances by object id, kept packed (removing one moves the last into its place). */
+class PackedPool extends CulledInstances {
+  private at = new Map<number, number>();
+  private ids: number[] = [];
+
+  constructor(geo: THREE.BufferGeometry, material: THREE.Material, capacity: number) {
+    super(geo, material, capacity, true);
   }
 
   set(id: number, m: THREE.Matrix4, color: THREE.Color) {
@@ -45,12 +124,9 @@ class PackedPool {
       i = this.ids.length;
       this.ids.push(id);
       this.at.set(id, i);
-      this.mesh.count = this.ids.length;
+      this.top = this.ids.length;
     }
-    this.mesh.setMatrixAt(i, m);
-    this.mesh.setColorAt(i, color);
-    this.mesh.instanceMatrix.needsUpdate = true;
-    this.mesh.instanceColor!.needsUpdate = true;
+    this.put(i, m, color);
   }
 
   remove(id: number) {
@@ -58,72 +134,49 @@ class PackedPool {
     if (i === undefined) return;
     const last = this.ids.length - 1, lastId = this.ids[last];
     if (i !== last) {
-      this.mesh.getMatrixAt(last, this.tmp);
-      this.mesh.setMatrixAt(i, this.tmp);
-      this.mesh.getColorAt(last, this.col);
-      this.mesh.setColorAt(i, this.col);
+      this.move(last, i);
       this.ids[i] = lastId;
       this.at.set(lastId, i);
-    }
+    } else this.drop(i);
     this.ids.pop();
     this.at.delete(id);
-    this.mesh.count = this.ids.length;
-    this.mesh.instanceMatrix.needsUpdate = true;
-    this.mesh.instanceColor!.needsUpdate = true;
+    this.top = this.ids.length;
   }
 }
 
-/** Fixed-capacity instanced mesh with slot allocation; hidden slots are zero-scaled. */
-class InstancePool {
-  mesh: THREE.InstancedMesh;
+/** Instances in slots handed out and given back. */
+class InstancePool extends CulledInstances {
   private free: number[] = [];
-  private used = 0;
-  private static zero = new THREE.Matrix4().makeScale(0, 0, 0);
 
-  constructor(geo: THREE.BufferGeometry, material: THREE.Material, readonly capacity: number, shadow = true) {
-    this.mesh = new THREE.InstancedMesh(geo, material, capacity);
-    this.mesh.castShadow = shadow;
-    this.mesh.receiveShadow = true;
-    this.mesh.frustumCulled = false;
-    this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    for (let i = 0; i < capacity; i++) this.mesh.setMatrixAt(i, InstancePool.zero);
-    // Only draw up to the high-water mark of allocated slots.
-    this.mesh.count = 0;
+  constructor(geo: THREE.BufferGeometry, material: THREE.Material, capacity: number, shadow = true) {
+    super(geo, material, capacity, shadow);
   }
 
   alloc(): number {
     if (this.free.length) return this.free.pop()!;
-    if (this.used >= this.capacity) return -1;
-    this.mesh.count = this.used + 1;
-    return this.used++;
+    if (this.top >= this.capacity) return -1;
+    return this.top++;
   }
 
   release(slot: number) {
     if (slot < 0) return;
-    this.mesh.setMatrixAt(slot, InstancePool.zero);
-    this.mesh.instanceMatrix.needsUpdate = true;
+    this.drop(slot);
     this.free.push(slot);
   }
 
   set(slot: number, m: THREE.Matrix4, color?: THREE.Color) {
-    if (slot < 0) return;
-    this.mesh.setMatrixAt(slot, m);
-    if (color) {
-      this.mesh.setColorAt(slot, color);
-      if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
-    }
-    this.mesh.instanceMatrix.needsUpdate = true;
+    if (slot >= 0) this.put(slot, m, color);
   }
 
   hide(slot: number) {
-    this.set(slot, InstancePool.zero);
+    if (slot >= 0) this.drop(slot);
   }
 }
 
 export class WorldView implements WorldListener {
   /** Called when a building piece appears or goes (the ground cover around it changes). */
   onStructure?: (o: StructureObj) => void;
-  group = new THREE.Group();
+  group = Object.assign(new THREE.Group(), { name: 'objects' });
   /** Trees being chopped and felled, chips, leaves and stumps. */
   treeFx: TreeFx;
   private trunks = {} as Record<Species, InstancePool>;
@@ -312,6 +365,16 @@ export class WorldView implements WorldListener {
    * distance they look the same, at a fraction of the drawing). Checked as you
    * move, with a margin so trees on the boundary don't flicker between the two.
    */
+  /** Hand each instanced kind of thing only what can be seen (call each frame, before drawing). */
+  cull(view: ViewCull) {
+    for (const sp of Object.keys(this.trunks) as Species[]) {
+      this.trunks[sp].cull(view); this.leaves[sp].cull(view); this.leavesLo[sp].cull(view);
+    }
+    this.bushPool.cull(view);
+    this.berryPool.cull(view);
+    for (const p of this.foragePools.values()) p.cull(view);
+  }
+
   updateTreeDetail(px: number, pz: number) {
     if (Math.hypot(px - this.lodAt.x, pz - this.lodAt.z) < 6) return;
     this.lodAt = { x: px, z: pz };

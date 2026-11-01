@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { ViewCull } from './cull';
 import { hash2, mulberry32 } from './noise';
 import { isRock, Mat } from './terrain';
 import type { Zone } from './climate';
@@ -280,7 +281,7 @@ const COVER: Record<Zone, { grass: number; tall: number; flowers: number; fern: 
 };
 
 export class GroundCover {
-  readonly group = new THREE.Group();
+  readonly group = Object.assign(new THREE.Group(), { name: 'groundcover' });
   private kinds: Kind[];
   private byName: Record<string, number> = {};
   private cache = [new Map<number, TileData[]>(), new Map<number, TileData[]>()];
@@ -318,14 +319,21 @@ export class GroundCover {
     this.dirty = true;
   }
 
-  /** Per frame: wind, and rebuilding the instances when you cross into a new tile. */
+  /** What can be seen: only patches in view are drawn (none behind you). */
+  view?: ViewCull;
+  private seen = -1;
+
+  /** Per frame: wind, and rebuilding the instances when you cross into a new tile or look elsewhere. */
   update(cam: THREE.Vector3, time: number, wind: [number, number], strength: number, budgetMs = 4) {
     shared.time.value = time;
     shared.wind.value.set(wind[0], wind[1]);
     shared.windStrength.value = strength;
     const tx = Math.floor(cam.x / TILE), tz = Math.floor(cam.z / TILE);
     if (tx !== this.centre[0] || tz !== this.centre[1]) { this.centre = [tx, tz]; this.dirty = true; }
-    if (!this.dirty) return;
+    if (!this.dirty) {
+      if (this.view && this.view.version !== this.seen) this.rebuild(tx, tz);
+      return;
+    }
     // Generate missing tiles nearest first, within a time budget; rebuild once all are in.
     const start = performance.now();
     let missing = false;
@@ -360,6 +368,8 @@ export class GroundCover {
   }
 
   private rebuild(tx: number, tz: number) {
+    const view = this.view;
+    this.seen = view?.version ?? -1;
     for (let i = 0; i < this.kinds.length; i++) {
       const k = this.kinds[i];
       const cache = this.cache[k.far ? 1 : 0];
@@ -370,6 +380,8 @@ export class GroundCover {
       for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) {
         const t = cache.get(tkey(tx + dx, tz + dz))?.[i];
         if (!t || !t.n) continue;
+        // Only patches in view (the ground's height from the first plant in it).
+        if (view && !view.sphere((tx + dx + 0.5) * TILE, t.m[13], (tz + dz + 0.5) * TILE, TILE * 0.71 + 10)) continue;
         const take = Math.min(k.far ? t.n : Math.ceil(t.n * this.density), k.cap - n);
         if (take <= 0) continue;
         ma.set(t.m.subarray(0, take * 16), n * 16);
@@ -377,6 +389,7 @@ export class GroundCover {
         n += take;
       }
       mesh.count = n;
+      mesh.visible = n > 0;
       mesh.instanceMatrix.needsUpdate = true;
       mesh.instanceColor!.needsUpdate = true;
     }

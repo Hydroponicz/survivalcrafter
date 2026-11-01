@@ -74,7 +74,7 @@ interface Faller {
 }
 
 export class TreeFx {
-  readonly group = new THREE.Group();
+  readonly group = Object.assign(new THREE.Group(), { name: 'treefx' });
   private actors = new Map<number, Actor>();
   private fallers: Faller[] = [];
   private particles: Particle[] = [];

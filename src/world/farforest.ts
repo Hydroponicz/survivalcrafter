@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { ViewCull } from './cull';
 import { tempAt, zoneOf } from './climate';
 import { hash2 } from './noise';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
@@ -33,10 +34,112 @@ function standIn(kind: Species): THREE.BufferGeometry {
   return merged;
 }
 
-export interface StandIns { mesh: THREE.InstancedMesh; counts: [number, number, number] }
+/**
+ * The barest outline of a kind of tree, for forests a couple of kilometres
+ * off: its crown as a few flat faces (a spike for a conifer, a diamond for a
+ * leafy tree), no trunk. At that distance it reads the same, at a fraction
+ * of the drawing.
+ */
+function outline(kind: Species): THREE.BufferGeometry {
+  const leaves = treeGeometries(kind, 0).leaves;
+  leaves.computeBoundingBox();
+  const b = leaves.boundingBox!, r = Math.max(b.max.x - b.min.x, b.max.z - b.min.z) / 2;
+  const conifer = kind === 'pine' || kind === 'spruce';
+  // Down to the ground a little way, so there's no gap under it.
+  const lo = conifer ? b.min.y * 0.7 : b.min.y * 0.85, hi = b.max.y;
+  const g = conifer
+    ? new THREE.ConeGeometry(r, hi - lo, 4, 1, true).translate(0, (hi + lo) / 2, 0)
+    : new THREE.OctahedronGeometry(1).scale(r, (hi - lo) / 2, r).translate(0, (hi + lo) / 2, 0);
+  const out = painted(g, TREES[kind].leaf);
+  out.computeVertexNormals();
+  return out;
+}
+
+/** Beyond this (metres) a stand-in is drawn as its barest outline. */
+const OUTLINE_AT = 700;
+
+/**
+ * One kind of tree's stand-ins on one tile. All of them are kept here; only
+ * those in view (and not where the real trees stand) are handed to be drawn,
+ * the nearer as stand-ins and the further as outlines.
+ */
+export class StandIns {
+  /** The stand-ins near enough to show their shape, and the outlines further off. */
+  readonly mesh: THREE.InstancedMesh;
+  readonly outlines: THREE.InstancedMesh;
+  /** How many to consider, coarsest first, for a near, middling or far tile. */
+  readonly counts: [number, number, number];
+  /** Which of `counts` applies (set by the distant land as you move). */
+  level = 0;
+  private seen = -1;
+  private seenLevel = -1;
+  private seenNear = new THREE.Vector3(NaN, 0, 0);
+  /** Each tree's centre and radius (x, y, z, r), for the view test. */
+  private spheres: Float32Array;
+
+  constructor(near: THREE.BufferGeometry, far: THREE.BufferGeometry, material: THREE.Material,
+    private mats: Float32Array, private cols: Float32Array, counts: [number, number, number]) {
+    const total = mats.length / 16;
+    this.counts = counts;
+    const make = (g: THREE.BufferGeometry) => {
+      const m = new THREE.InstancedMesh(g, material, total);
+      m.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(total * 3), 3);
+      m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      m.instanceColor.setUsage(THREE.DynamicDrawUsage);
+      // Culled tree by tree here.
+      m.frustumCulled = false;
+      m.count = 0;
+      return m;
+    };
+    this.mesh = make(near);
+    this.outlines = make(far);
+    near.computeBoundingSphere();
+    const c = near.boundingSphere!.center, r = near.boundingSphere!.radius;
+    this.spheres = new Float32Array(total * 4);
+    for (let i = 0; i < total; i++) {
+      const o = i * 16, M = mats;
+      const s = Math.max(Math.hypot(M[o], M[o + 1], M[o + 2]), Math.hypot(M[o + 4], M[o + 5], M[o + 6]));
+      this.spheres[i * 4] = M[o] * c.x + M[o + 4] * c.y + M[o + 8] * c.z + M[o + 12];
+      this.spheres[i * 4 + 1] = M[o + 1] * c.x + M[o + 5] * c.y + M[o + 9] * c.z + M[o + 13];
+      this.spheres[i * 4 + 2] = M[o + 2] * c.x + M[o + 6] * c.y + M[o + 10] * c.z + M[o + 14];
+      this.spheres[i * 4 + 3] = r * s;
+    }
+  }
+
+  /** Hand to be drawn just the trees in view, outside the circle (x, z, radius) the real trees fill. */
+  cull(view: ViewCull, near: THREE.Vector3) {
+    if (this.seen === view.version && this.seenLevel === this.level && this.seenNear.equals(near)) return;
+    this.seen = view.version; this.seenLevel = this.level; this.seenNear.copy(near);
+    const S = this.spheres, M = this.mats, C = this.cols;
+    const a = this.mesh, b = this.outlines;
+    const am = a.instanceMatrix.array as Float32Array, ac = a.instanceColor!.array as Float32Array;
+    const bm = b.instanceMatrix.array as Float32Array, bc = b.instanceColor!.array as Float32Array;
+    const end = this.counts[this.level];
+    let na = 0, nb = 0;
+    for (let i = 0; i < end; i++) {
+      const x = S[i * 4], y = S[i * 4 + 1], z = S[i * 4 + 2], r = S[i * 4 + 3];
+      const dx = M[i * 16 + 12] - near.x, dz = M[i * 16 + 14] - near.y, d = Math.hypot(dx, dz);
+      if (d < near.z || !view.sphere(x, y, z, r)) continue;
+      if (d < OUTLINE_AT) {
+        am.set(M.subarray(i * 16, i * 16 + 16), na * 16); ac.set(C.subarray(i * 3, i * 3 + 3), na * 3); na++;
+      } else {
+        bm.set(M.subarray(i * 16, i * 16 + 16), nb * 16); bc.set(C.subarray(i * 3, i * 3 + 3), nb * 3); nb++;
+      }
+    }
+    for (const [m, n] of [[a, na], [b, nb]] as [THREE.InstancedMesh, number][]) {
+      m.count = n;
+      m.visible = n > 0;
+      m.instanceMatrix.clearUpdateRanges(); m.instanceMatrix.addUpdateRange(0, Math.max(1, n) * 16); m.instanceMatrix.needsUpdate = true;
+      m.instanceColor!.clearUpdateRanges(); m.instanceColor!.addUpdateRange(0, Math.max(1, n) * 3); m.instanceColor!.needsUpdate = true;
+    }
+  }
+
+  dispose() { this.mesh.dispose(); this.outlines.dispose(); }
+}
 
 export class FarForest {
   readonly geometry = Object.fromEntries(SPECIES.map((k) => [k, standIn(k)])) as Record<Species, THREE.BufferGeometry>;
+  readonly outline = Object.fromEntries(SPECIES.map((k) => [k, outline(k)])) as Record<Species, THREE.BufferGeometry>;
   // Lit like the real trees.
   readonly material = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.9, metalness: 0 });
   /** x, z, radius: the stand-ins give way to the real trees within this circle around you. */
@@ -112,12 +215,8 @@ export class FarForest {
     for (const k of SPECIES) {
       const c = counts[k], total = c[0] + c[1] + c[2];
       if (!total) continue;
-      const mesh = new THREE.InstancedMesh(this.geometry[k], this.material, total);
-      (mesh.instanceMatrix.array as Float32Array).set(mats[k]);
-      mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(cols[k]), 3);
-      mesh.computeBoundingSphere();
-      // Coarsest first: how many to draw for a near, middling or far tile.
-      out.push({ mesh, counts: [total, c[2] + c[1], c[2]] });
+      // Coarsest first: how many to consider for a near, middling or far tile.
+      out.push(new StandIns(this.geometry[k], this.outline[k], this.material, new Float32Array(mats[k]), new Float32Array(cols[k]), [total, c[2] + c[1], c[2]]));
     }
     return out;
   }

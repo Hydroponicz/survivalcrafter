@@ -116,7 +116,8 @@ export class Sky {
   private probeCam = new THREE.PerspectiveCamera(90, 4, 0.1, 2000);
   private probePixels = new Uint16Array(16 * 4 * 4);
   private horizon = new THREE.Color(0x9fbad6);
-  private sunDir = new THREE.Vector3();
+  /** Towards the sun. */
+  readonly sunDir = new THREE.Vector3();
   /** Eyes adapt: the sky is scaled up as the sun sinks (partly, so sunsets stay dim and warm). */
   private skyGain = { value: SKY_EXPOSURE };
   private nightHaze = new THREE.Color(0.006, 0.009, 0.018);

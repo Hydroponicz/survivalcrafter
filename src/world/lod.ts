@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { FarForest, type StandIns } from './farforest';
+import { ViewCull } from './cull';
 import { GROUND_GLSL, groundUniforms } from './groundtex';
 import { makeWaterMaterial } from './water';
 import { BLEND, CELL, LOD_N, PAD, TILE, TN, tileLodColors, type TileData } from './worldgen';
@@ -32,7 +33,7 @@ interface LodTile {
 }
 
 export class DistantLand {
-  readonly group = new THREE.Group();
+  readonly group = Object.assign(new THREE.Group(), { name: 'distant' });
   private hole = { value: new THREE.Vector3(0, 0, 0) }; // x, z, radius
   private material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95 });
   private waterMaterial = makeWaterMaterial({ depth: 'attribute', fresh: true, extra: (sh) => this.cut(sh), key: 'lod' });
@@ -79,12 +80,20 @@ export class DistantLand {
   }
 
   /** Pick each tile's detail for its distance from a point. */
-  private refine(x: number, z: number) {
-    for (const t of this.tiles.values()) {
+  /** Where detail was last picked for. */
+  private refinedAt: [number, number] = [NaN, NaN];
+
+  private refine(x: number, z: number, only?: LodTile) {
+    this.refinedAt = [x, z];
+    for (const t of only ? [only] : this.tiles.values()) {
       const d = Math.max(Math.abs((t.d.tx + 0.5) * TILE - x), Math.abs((t.d.tz + 0.5) * TILE - z)) / TILE;
       const level = d < 1.6 ? 0 : d < 2.6 ? 1 : 2;
-      if (t.land.geometry.index !== this.indexes[level]) t.land.geometry.setIndex(this.indexes[level]);
-      for (const tr of t.trees) tr.mesh.count = tr.counts[Math.min(2, level + this.forestThin)];
+      // The land's detail by how near its nearest part is: the full 8 m grid
+      // only close by (most of that is under the detailed terrain anyway).
+      const near = Math.max(0, Math.max(Math.abs((t.d.tx + 0.5) * TILE - x), Math.abs((t.d.tz + 0.5) * TILE - z)) - TILE / 2);
+      const grid = near < 300 ? 0 : near < 1300 ? 1 : 2;
+      if (t.land.geometry.index !== this.indexes[grid]) t.land.geometry.setIndex(this.indexes[grid]);
+      for (const tr of t.trees) tr.level = Math.min(2, level + this.forestThin);
     }
   }
 
@@ -295,7 +304,7 @@ export class DistantLand {
     const land = new THREE.Mesh(geo, this.material);
     group.add(land);
     const trees = this.forest?.build(d) ?? [];
-    for (const tr of trees) group.add(tr.mesh);
+    for (const tr of trees) group.add(tr.mesh, tr.outlines);
     const t: LodTile = { d, cols, group, land, trees };
     this.tiles.set(key, t);
     this.shape(t, false);
@@ -307,6 +316,8 @@ export class DistantLand {
       }
     }
     this.buildWater(t);
+    // Its detail for where you are now (not the finest until the next pass).
+    if (Number.isFinite(this.refinedAt[0])) this.refine(this.refinedAt[0], this.refinedAt[1], t);
     this.group.add(group);
   }
 
@@ -319,10 +330,8 @@ export class DistantLand {
     for (const [key, t] of this.tiles) {
       const g = t.group, tx = t.d.tx, tz = t.d.tz;
       if (Math.max(Math.abs((tx + 0.5) * TILE - x), Math.abs((tz + 0.5) * TILE - z)) <= (this.radius + 1.5) * TILE) continue;
-      for (const m of g.children) {
-        if (m instanceof THREE.InstancedMesh) m.dispose(); // its crown geometry is shared
-        else (m as THREE.Mesh).geometry.dispose();
-      }
+      for (const tr of t.trees) tr.dispose(); // their tree shapes are shared
+      for (const m of g.children) if (!(m instanceof THREE.InstancedMesh)) (m as THREE.Mesh).geometry.dispose();
       this.group.remove(g);
       this.tiles.delete(key);
     }
@@ -338,6 +347,21 @@ export class DistantLand {
   /** Where the real trees stand (x, z, radius): the distant forests leave that to them. */
   setTreesNear(x: number, z: number, r: number) {
     this.forest?.near.value.set(x, z, r);
+  }
+
+  /** What the camera can see of the distant forests (coarse: they're far off). */
+  readonly view = new ViewCull(8, 20);
+  private nearCut = new THREE.Vector3();
+
+  /** Per frame: hand just the distant trees in view to be drawn. */
+  cull(cam: THREE.PerspectiveCamera) {
+    const nv = this.forest?.near.value;
+    if (!nv) return;
+    this.view.update(cam);
+    // The real trees' circle, a little inside so the two overlap, in steps
+    // (it moves with you; small moves don't need the forests redone).
+    this.nearCut.set(Math.round(nv.x / 20) * 20, Math.round(nv.y / 20) * 20, Math.max(0, nv.z - 25));
+    for (const t of this.tiles.values()) for (const tr of t.trees) tr.cull(this.view, this.nearCut);
   }
 
   /**
