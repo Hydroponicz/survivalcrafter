@@ -16,8 +16,8 @@ import { deleteSave, downloadSave, hasSaveAt, migrateSave, readSave, readSaveFil
 /** Within this distance the real trees stand (wild things load about 220 m around you); distant forests take over beyond. */
 const NEAR_TREES = 230;
 import { seaFloor } from '../world/water';
-import { WorkerTiles } from '../world/tilesource';
-import { TILE, tileOf } from '../world/worldgen';
+import { prepareTiles, WorkerTiles } from '../world/tilesource';
+import { TILE, tileOf, WorldGen } from '../world/worldgen';
 import {
   ANIMALS, pointInPiece, toLocal, toWorld, World, type AnimalObj, type ForageObj, type PileObj, type StructureObj, type TreeObj, type WorldObj,
 } from '../world/world';
@@ -192,10 +192,13 @@ export class Game {
     this.scene.add(this.distant.group);
     gen.onTile = (d, lod) => { this.distant.addTile(d, lod); seaFloor.changed(); };
     gen.forEachTile((d) => this.distant.addTile(d));
-    try {
-      this.tileWorkers = new WorkerTiles(gen.seed, (d, lod) => gen.addTile(d, lod), TILE);
-      gen.useSource(this.tileWorkers);
-    } catch { /* no workers: tiles are made on the main thread when needed */ }
+    if (gen.tileSource instanceof WorkerTiles) this.tileWorkers = gen.tileSource;
+    else {
+      try {
+        this.tileWorkers = new WorkerTiles(gen.seed, (d, lod) => gen.addTile(d, lod), TILE);
+        gen.useSource(this.tileWorkers);
+      } catch { /* no workers: tiles are made on the main thread when needed */ }
+    }
     this.groundCover = new GroundCover(world);
     this.applyGraphics();
     this.scene.add(this.groundCover.group, this.fireflies.points);
@@ -1317,7 +1320,11 @@ export class Game {
   private seaBed(x: number, z: number): number {
     let h = this.distant.groundAt(x, z);
     if (!(h < 4)) return h;
-    const rv = this.world.terrain.gen.river(x, z);
+    // Only where the map is already made: the sea floor reaches far out, and
+    // making tiles out there on the spot would stall the game.
+    const gen = this.world.terrain.gen;
+    if (!gen.covered(x, z)) return h;
+    const rv = gen.river(x, z);
     if (rv && rv.d < rv.r) h = Math.min(h, WATER_LEVEL - rv.depth * (1 - (rv.d / rv.r) ** 2));
     return h;
   }
@@ -1747,11 +1754,14 @@ export class Game {
     try { return await readSave(SAVE_KEY); } catch (e) { console.warn('Load failed', e); return undefined; }
   }
 
-  static loadSave(canvas: HTMLCanvasElement, data: any): Game | null {
+  static async loadSave(canvas: HTMLCanvasElement, data: any): Promise<Game | null> {
     try {
       if (!data) return null;
       setNextUid(data.nextUid);
-      const world = World.load(data.world);
+      // The land around where you were, made in the background first.
+      const gen = new WorldGen(data.world.terrain.seed);
+      await prepareTiles(gen, data.player.pos[0], data.player.pos[2]);
+      const world = World.load(data.world, gen);
       const g = new Game(canvas, world);
       const p = g.player;
       p.pos.set(data.player.pos[0], data.player.pos[1], data.player.pos[2]);

@@ -3,6 +3,7 @@ import { pieceBoxes, STRUCTURES, type V3 } from '../data/structures';
 import { mulberry32 } from './noise';
 import { Mat, Terrain } from './terrain';
 import { TreeCover, VEGETATION, type Species } from './trees';
+import type { WorldGen } from './worldgen';
 
 export type { Species } from './trees';
 export type AnimalSpecies = 'deer' | 'boar';
@@ -342,9 +343,32 @@ export class World {
 
   // ---------- generation
   /** Make the world map and pick where you start (wild things load as you approach). */
-  generate() {
-    this.terrain.generate();
+  generate(gen?: WorldGen) {
+    this.terrain.generate(gen);
     this.findSpawn();
+  }
+
+  /**
+   * Roughly where findSpawn will settle (the first gentle lowland out from
+   * the middle), found on the raw land alone, so the map around it can be
+   * made in the background first.
+   */
+  static roughSpawn(gen: WorldGen): { x: number; z: number } {
+    const b = gen.base;
+    for (let r = 0; r < 20000; r += 40) {
+      const n = Math.max(1, Math.round((r * Math.PI * 2) / 80));
+      for (let a = 0; a < n; a++) {
+        const x = Math.cos((a / n) * Math.PI * 2 + r) * r, z = Math.sin((a / n) * Math.PI * 2 + r) * r;
+        if (World.roughOk(b, x, z)) return { x, z };
+      }
+    }
+    return { x: 0, z: 0 };
+  }
+
+  private static roughOk(b: WorldGen['base'], x: number, z: number): boolean {
+    if (b.land(x, z) < 0.95) return false;
+    const h = b.height(x, z);
+    return !(h < 4 || h > 45 || Math.abs(b.height(x + 20, z) - h) > 6 || Math.abs(b.height(x, z + 20) - h) > 6);
   }
 
   /**
@@ -373,9 +397,7 @@ export class World {
       const n = Math.max(1, Math.round((r * Math.PI * 2) / 80));
       for (let a = 0; a < n; a++) {
         const x = Math.cos((a / n) * Math.PI * 2 + r) * r, z = Math.sin((a / n) * Math.PI * 2 + r) * r;
-        if (b.land(x, z) < 0.95) continue;
-        const h = b.height(x, z);
-        if (h < 4 || h > 45 || Math.abs(b.height(x + 20, z) - h) > 6 || Math.abs(b.height(x, z + 20) - h) > 6) continue;
+        if (!World.roughOk(b, x, z)) continue;
         for (const [ox, oz] of [[0, 0], [12, 0], [0, 12], [-12, 0], [0, -12], [24, 24]]) {
           if (ok(x + ox, z + oz, 60)) { this.spawn = { x: x + ox, z: z + oz }; return; }
         }
@@ -488,9 +510,10 @@ export class World {
     };
   }
 
-  static load(data: ReturnType<World['serialize']>): World {
+  /** A saved world (`gen`: its map maker, if already under way). */
+  static load(data: ReturnType<World['serialize']>, gen?: WorldGen): World {
     const w = new World(data.terrain.seed);
-    w.terrain.generate();
+    w.terrain.generate(gen);
     w.terrain.load(data.terrain);
     for (const o of data.objects) {
       // Old saves planned anvils as buildings; they're placed equipment now.

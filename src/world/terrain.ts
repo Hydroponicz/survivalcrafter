@@ -128,8 +128,8 @@ export class Terrain {
   }
 
   /** Build the world map (a few seconds). */
-  generate() {
-    this.gen = new WorldGen(this.seed);
+  generate(gen = new WorldGen(this.seed)) {
+    this.gen = gen;
     this.strata = new Strata(this.seed);
     this.cave = new Simplex(this.seed + 333);
     this.ore = new Simplex(this.seed ^ 0x5eed);

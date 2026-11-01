@@ -599,6 +599,8 @@ export function buildTile(seed: number, tx: number, tz: number, base = new BaseL
 /** How far (map cells) a lake's water may reach past the cells counted as lake, where the land lies low enough. */
 const LAKE_REACH = 3;
 
+const EMPTY = new Float32Array(0);
+
 /** How far (metres) a stream crossing between tiles may be joined to the other tile's version of it. */
 const LINK_REACH = 60;
 
@@ -787,6 +789,8 @@ export interface TileSource {
 }
 
 export class WorldGen {
+  /** Tiles made on the spot (holding everything up) rather than in the background, and the time it took. */
+  static blocking = { tiles: 0, ms: 0 };
   readonly seed: number;
   readonly base: BaseLand;
   private tiles = new Map<string, Tile>();
@@ -821,6 +825,37 @@ export class WorldGen {
     this.tiles.set(key, new Tile(d));
     this.wind = d.wind;
     this.onTile?.(d, lod);
+    for (const w of this.waiters.slice()) w();
+  }
+
+  private waiters: (() => void)[] = [];
+  /** Whether tiles are made somewhere else (a worker). */
+  get tileSource() { return this.source; }
+
+  /**
+   * The tiles that sampling the land within `reach` metres of a point needs:
+   * those covering it, and the neighbours of each (streams carry on from them).
+   */
+  tilesAround(x: number, z: number, reach: number): [number, number][] {
+    const out: [number, number][] = [];
+    const lo = (v: number) => Math.floor((v - reach - BLEND) / TILE) - 1, hi = (v: number) => Math.floor((v + reach + BLEND) / TILE) + 1;
+    for (let tz = lo(z); tz <= hi(z); tz++) for (let tx = lo(x); tx <= hi(x); tx++) out.push([tx, tz]);
+    return out;
+  }
+
+  /** Ask for these tiles and wait until they're all here. */
+  whenTiles(list: [number, number][]): Promise<void> {
+    for (const [x, z] of list) this.want(x, z);
+    const here = () => list.every(([x, z]) => this.tiles.has(`${x},${z}`));
+    if (here()) return Promise.resolve();
+    return new Promise((resolve) => {
+      const w = () => {
+        if (!here()) return;
+        this.waiters.splice(this.waiters.indexOf(w), 1);
+        resolve();
+      };
+      this.waiters.push(w);
+    });
   }
 
   /** Every tile made so far. */
@@ -844,7 +879,9 @@ export class WorldGen {
     const key = `${tx},${tz}`;
     let t = this.tiles.get(key);
     if (!t) {
+      const t0 = performance.now();
       this.addTile(buildTile(this.seed, tx, tz, this.base));
+      WorldGen.blocking.tiles++; WorldGen.blocking.ms += performance.now() - t0;
       t = this.tiles.get(key)!;
     }
     t.lastUsed = this.clock;
@@ -877,6 +914,15 @@ export class WorldGen {
     const out: [Tile, number][] = [];
     for (const [x0, wx] of ax) for (const [z0, wz] of az) out.push([this.tile(x0, z0), wx * wz]);
     return out;
+  }
+
+  /** Whether the tiles a point needs (those covering it, and their neighbours) are all made. */
+  covered(x: number, z: number): boolean {
+    const tx = Math.floor(x / TILE), tz = Math.floor(z / TILE), fx = x - tx * TILE, fz = z - tz * TILE;
+    const x0 = tx - (fx < BLEND ? 2 : 1), x1 = tx + (TILE - fx < BLEND ? 2 : 1);
+    const z0 = tz - (fz < BLEND ? 2 : 1), z1 = tz + (TILE - fz < BLEND ? 2 : 1);
+    for (let j = z0; j <= z1; j++) for (let i = x0; i <= x1; i++) if (!this.tiles.has(`${i},${j}`)) return false;
+    return true;
   }
 
   private blend(x: number, z: number, f: (t: Tile) => number): number {
@@ -1016,8 +1062,11 @@ export class WorldGen {
    * Uses the neighbours as they were made, so it never depends on the
    * order tiles come in.
    */
-  private inherit(t: Tile) {
-    if (t.inherited) return;
+  private inherit(t: Tile): boolean {
+    if (t.inherited) return true;
+    // Never makes tiles itself (that would spread outward without end):
+    // waits until the neighbours have arrived.
+    for (let oz = -1; oz <= 1; oz++) for (let ox = -1; ox <= 1; ox++) if (!this.tiles.has(`${t.d.tx + ox},${t.d.tz + oz}`)) return false;
     t.inherited = true;
     const R = t.d.reaches, n = R.length / 8;
     const x0 = t.d.tx * TILE, z0 = t.d.tz * TILE;
@@ -1072,7 +1121,7 @@ export class WorldGen {
         c = startAt.get(`${R[c * 8 + 2]},${R[c * 8 + 3]}`);
       }
     }
-    if (!any) { if (t.hidden) t.index(); return; }
+    if (!any) { if (t.hidden) t.index(); return true; }
     for (let k = 0; k < n; k++) {
       if (!extra[k]) continue;
       const a = widthArea(t.rawWidth[k]) + extra[k];
@@ -1080,10 +1129,15 @@ export class WorldGen {
       R[k * 8 + 7] = Math.max(R[k * 8 + 7], riverDepth(a));
     }
     t.index();
+    return true;
   }
 
   private settleLakes(t: Tile) {
     if (t.level) return;
+    // Settling reads the ground around the tile: wait until its neighbours
+    // are here rather than make them (each would want its own settled too,
+    // and so on outward).
+    for (let oz = -1; oz <= 1; oz++) for (let ox = -1; ox <= 1; ox++) if (!this.tiles.has(`${t.d.tx + ox},${t.d.tz + oz}`)) return;
     this.inherit(t);
     const d = t.d, n = d.kind.length, owned = t.ownedLakes();
     const level = new Float32Array(n).fill(NaN);
@@ -1187,11 +1241,14 @@ export class WorldGen {
    * close by, the stream carries on along its own course a little way.
    */
   private links(tx: number, tz: number, ox: number, oz: number): Float32Array {
-    const key = `${tx},${tz}|${ox},${oz}`;
+    // Only once the next tile is here (never made on the spot for this).
+    const home = this.tile(tx, tz), nb = this.tiles.get(`${tx + ox},${tz + oz}`);
+    if (!nb) return EMPTY;
+    // Worked out again once both have taken in their neighbours' streams.
+    const ready = this.inherit(home) && this.inherit(nb);
+    const key = `${tx},${tz}|${ox},${oz}|${ready}`;
     let L = this.linkCache.get(key);
     if (L) return L;
-    const home = this.tile(tx, tz), nb = this.tile(tx + ox, tz + oz);
-    this.inherit(home); this.inherit(nb);
     const H = home.d.reaches, R = nb.d.reaches, out: number[] = [];
     const x0 = tx * TILE, z0 = tz * TILE;
     const inHome = (x: number, z: number) => x >= x0 && x < x0 + TILE && z >= z0 && z < z0 + TILE;

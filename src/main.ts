@@ -8,6 +8,8 @@ import { Game, OLD_SAVES } from './game/game';
 import { pickFile, UI } from './ui/ui';
 import { keepStorage } from './game/storage';
 import { World } from './world/world';
+import { WorldGen } from './world/worldgen';
+import { prepareTiles } from './world/tilesource';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 const menu = document.getElementById('menu')!;
@@ -35,13 +37,13 @@ function seedFrom(text: string): number {
   return h >>> 0;
 }
 
-function launch(make: () => Game | null) {
+function launch(make: () => Game | null | Promise<Game | null>) {
   status.textContent = 'Shaping the land…';
   // Ask the browser not to clear the save when the disk runs low.
   void keepStorage();
   // Let the status paint before the heavy generation work.
-  setTimeout(() => {
-    const game = make();
+  setTimeout(async () => {
+    const game = await make();
     if (!game) { status.textContent = 'Could not load that save.'; return; }
     game.ui = new UI(game);
     menu.remove();
@@ -51,7 +53,7 @@ function launch(make: () => Game | null) {
     });
     game.input.lock();
     // Handy for debugging from the browser console.
-    Object.assign(window, { game, __recipes: RECIPES, __data: { STRUCTURES }, __World: World, __ACTIONS: ACTION_MAP, __createMinigame: createMinigame, __typeName: typeName, __itemName: itemName });
+    Object.assign(window, { game, __recipes: RECIPES, __data: { STRUCTURES }, __World: World, __WorldGen: WorldGen, __ACTIONS: ACTION_MAP, __createMinigame: createMinigame, __typeName: typeName, __itemName: itemName });
   }, 30);
 }
 
@@ -63,9 +65,14 @@ cont.addEventListener('click', async () => {
 newBtn.addEventListener('click', async () => {
   if (await Game.hasSave() && !confirm('Start a new world? Your current save will be overwritten.')) return;
   const seed = seedFrom(seedInput.value);
-  launch(() => {
+  launch(async () => {
+    // The land around where you'll start, made in the background (several
+    // tiles side by side) before the rest, so the page never stalls.
+    const gen = new WorldGen(seed);
+    const s = World.roughSpawn(gen);
+    await prepareTiles(gen, s.x, s.z);
     const world = new World(seed);
-    world.generate();
+    world.generate(gen);
     const g = new Game(canvas, world);
     g.newCharacter();
     g.msg(`World seed: ${seed}`, 'info');
