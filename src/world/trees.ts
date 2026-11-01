@@ -3,6 +3,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import type { Zone } from './climate';
 import { Simplex } from './noise';
 import { BaseLand } from './worldgen';
+import { BIRCH } from './models/birch';
 
 // The kinds of tree, what they look like and where they grow. Everything
 // that draws, fells or places trees reads it from here, so a new kind is
@@ -24,7 +25,8 @@ export interface TreeKind {
 
 export const TREES: Record<Species, TreeKind> = {
   oak: { bark: 0x5a4030, leaf: 0x3f7a2c, grown: 2.7, trunk: { r0: 0.3, r1: 0.2, h: 3.4 }, hardness: 1.25, difficulty: 14 },
-  birch: { bark: 0xd8d4c8, leaf: 0x7aa33e, grown: 2.4, trunk: { r0: 0.17, r1: 0.11, h: 4.6 }, hardness: 1.0, difficulty: 10 },
+  // Its trunk and branches come from a model (see models/birch.ts).
+  birch: { bark: 0xd8d4c8, leaf: 0x7aa33e, grown: 2.4, trunk: BIRCH.trunk, hardness: 1.0, difficulty: 10 },
   pine: { bark: 0x4a3426, leaf: 0x2b5a33, grown: 3.4, trunk: { r0: 0.24, r1: 0.14, h: 4.5 }, hardness: 0.9, difficulty: 8 },
   // Tall, narrow and dark: the deep conifer woods and the slopes up to the tree line.
   spruce: { bark: 0x3d2c22, leaf: 0x1d4632, grown: 3.6, trunk: { r0: 0.26, r1: 0.12, h: 6.0 }, hardness: 0.85, difficulty: 8 },
@@ -43,6 +45,7 @@ export const TREES: Record<Species, TreeKind> = {
 export function treeGeometries(species: Species, detail: 0 | 1 = 1): { trunk: THREE.BufferGeometry; leaves: THREE.BufferGeometry } {
   const sides = detail ? 7 : 4, coneSides = detail ? 7 : 5, ico = detail;
   const t = TREES[species].trunk;
+  if (species === 'birch') return birchGeometries(detail);
   const trunk = new THREE.CylinderGeometry(t.r1, t.r0, t.h, sides, 1, !detail).translate(0, t.h / 2, 0);
   const blob = (r: number, x: number, y: number, z: number, sx = 1, sy = 1) =>
     new THREE.IcosahedronGeometry(r, ico).scale(sx, sy, sx).translate(x, y, z);
@@ -56,9 +59,6 @@ export function treeGeometries(species: Species, detail: 0 | 1 = 1): { trunk: TH
       parts = detail
         ? [0, 1, 2, 3, 4].map((i) => cone(1.35 - i * 0.24, 1.9, 1.7 + i * 1.12))
         : [0, 1, 2].map((i) => cone(1.3 - i * 0.38, 2.6, 2.0 + i * 1.75));
-      break;
-    case 'birch':
-      parts = detail ? [blob(1.15, 0, 4.4, 0, 1, 1.45), blob(0.8, 0.5, 3.6, 0.3)] : [blob(1.2, 0, 4.3, 0, 1.05, 1.5)];
       break;
     case 'beech':
       parts = detail
@@ -80,6 +80,34 @@ export function treeGeometries(species: Species, detail: 0 | 1 = 1): { trunk: TH
         : [blob(2.1, 0.1, 3.85, -0.1, 1.05, 0.85)];
   }
   return { trunk, leaves: parts.length > 1 ? mergeGeometries(parts.map((g) => (g.index ? g.toNonIndexed() : g)))! : parts[0] };
+}
+
+/**
+ * The birch, from its model: the real trunk and branches near you (a plain
+ * tapering trunk from afar), with low-poly leaf clumps where the model's
+ * leaves were (the biggest few from afar). The model is flat front to back,
+ * so each clump is made nearly as deep as it is wide.
+ */
+function birchGeometries(detail: 0 | 1): { trunk: THREE.BufferGeometry; leaves: THREE.BufferGeometry } {
+  let trunk: THREE.BufferGeometry;
+  if (detail) {
+    trunk = new THREE.BufferGeometry();
+    trunk.setAttribute('position', new THREE.Float32BufferAttribute(BIRCH.positions, 3));
+    trunk.setIndex(BIRCH.indices);
+    trunk.computeVertexNormals();
+  } else {
+    // Without its branches, the plain trunk runs on up into the crown.
+    const t = BIRCH.trunk, top = Math.max(t.h, ...BIRCH.clumps.map((c) => c[1]));
+    trunk = new THREE.CylinderGeometry(t.r1 * 0.6, t.r0, top, 4, 1, true).translate(0, top / 2, 0);
+  }
+  const clumps = detail ? BIRCH.clumps : BIRCH.clumps.slice(0, 5);
+  // A little fuller than the model's own leaves, so the clumps run together into a crown.
+  const F = detail ? 1.35 : 1.6;
+  const parts = clumps.map(([x, y, z, rx, ry, rz]) => {
+    const g = new THREE.IcosahedronGeometry(1, detail).scale(rx * F, ry * F, Math.max(rz, rx * 0.85) * F).translate(x, y, z);
+    return g.index ? g.toNonIndexed() : g;
+  });
+  return { trunk, leaves: mergeGeometries(parts)! };
 }
 
 /** What grows in each climate zone: tree density per 4 m², species mix, stature, berry bushes. */

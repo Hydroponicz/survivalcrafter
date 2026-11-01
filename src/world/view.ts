@@ -180,6 +180,8 @@ export class WorldView implements WorldListener {
   /** Trees being chopped and felled, chips, leaves and stumps. */
   treeFx: TreeFx;
   private trunks = {} as Record<Species, InstancePool>;
+  /** Plainer trunks for trees further off (the same slots as `trunks`). */
+  private trunksLo = {} as Record<Species, InstancePool>;
   private leaves = {} as Record<Species, PackedPool>;
   /** Simpler crowns for the trees further off. */
   private leavesLo = {} as Record<Species, PackedPool>;
@@ -211,10 +213,11 @@ export class WorldView implements WorldListener {
     for (const s of SPECIES) {
       const g = treeGeometries(s);
       this.trunks[s] = new InstancePool(g.trunk, mat(trunkMat[s]), 9000);
+      this.trunksLo[s] = new InstancePool(treeGeometries(s, 0).trunk, mat(trunkMat[s]), 9000);
       this.leaves[s] = new PackedPool(g.leaves, mat(0xffffff, { flatShading: true }), 9000);
       this.leavesLo[s] = new PackedPool(treeGeometries(s, 0).leaves, mat(0xffffff, { flatShading: true }), 9000);
       this.leafBase[s] = leafMat[s];
-      this.group.add(this.trunks[s].mesh, this.leaves[s].mesh, this.leavesLo[s].mesh);
+      this.group.add(this.trunks[s].mesh, this.trunksLo[s].mesh, this.leaves[s].mesh, this.leavesLo[s].mesh);
     }
     this.bushPool = new InstancePool(
       new THREE.IcosahedronGeometry(0.6, 1).scale(1, 0.75, 1).translate(0, 0.4, 0),
@@ -265,6 +268,7 @@ export class WorldView implements WorldListener {
     if (o.kind === 'structure') this.onStructure?.(o);
     if (o.kind === 'tree') {
       const slot = this.trunks[o.species].alloc();
+      this.trunksLo[o.species].alloc(); // kept in step: the same slot in both
       this.slots.set(o.id, slot);
       this.trees.set(o.id, o);
       if (Math.hypot(o.x - this.lodAt.x, o.z - this.lodAt.z) > TREE_DETAIL) this.far.add(o.id);
@@ -289,6 +293,7 @@ export class WorldView implements WorldListener {
     if (o.kind === 'tree') {
       const s = this.slots.get(o.id)!;
       this.trunks[o.species].release(s);
+      this.trunksLo[o.species].release(s);
       this.leaves[o.species].remove(o.id);
       this.leavesLo[o.species].remove(o.id);
       this.slots.delete(o.id);
@@ -344,6 +349,7 @@ export class WorldView implements WorldListener {
     // A tree that's been chopped into is drawn on its own, notch and all.
     if ((o.chop ?? 0) > 0 || this.treeFx.has(o.id)) {
       this.trunks[o.species].hide(slot);
+      this.trunksLo[o.species].hide(slot);
       this.leaves[o.species].remove(o.id);
       this.leavesLo[o.species].remove(o.id);
       this.treeFx.place(this.treeFx.ensure(o));
@@ -354,8 +360,9 @@ export class WorldView implements WorldListener {
     const { s, hs, yaw: r } = treeScale(o);
     this.q.setFromAxisAngle(this.up, r);
     this.m4.compose(new THREE.Vector3(o.x, y, o.z), this.q, new THREE.Vector3(s, s * hs, s));
-    this.trunks[o.species].set(slot, this.m4);
     const lo = this.far.has(o.id);
+    (lo ? this.trunksLo : this.trunks)[o.species].set(slot, this.m4);
+    (lo ? this.trunks : this.trunksLo)[o.species].hide(slot);
     (lo ? this.leavesLo : this.leaves)[o.species].set(o.id, this.m4, this.leafColor(o));
     (lo ? this.leaves : this.leavesLo)[o.species].remove(o.id);
   }
@@ -368,7 +375,7 @@ export class WorldView implements WorldListener {
   /** Hand each instanced kind of thing only what can be seen (call each frame, before drawing). */
   cull(view: ViewCull) {
     for (const sp of Object.keys(this.trunks) as Species[]) {
-      this.trunks[sp].cull(view); this.leaves[sp].cull(view); this.leavesLo[sp].cull(view);
+      this.trunks[sp].cull(view); this.trunksLo[sp].cull(view); this.leaves[sp].cull(view); this.leavesLo[sp].cull(view);
     }
     this.bushPool.cull(view);
     this.berryPool.cull(view);
