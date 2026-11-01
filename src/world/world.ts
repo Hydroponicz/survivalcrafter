@@ -214,12 +214,17 @@ export class World {
         if (d <= LOAD_R && !this.loadedRegions.has(regionKey(rx, rz))) want.push([rx, rz, d]);
       }
     }
+    // One part grown, finish it first.
+    const g = this.growing;
+    if (g && this.regionDist(regionX(g.r), regionZ(g.r), px, pz) <= LOAD_R) want.unshift([regionX(g.r), regionZ(g.r), -1]);
     want.sort((a, b) => a[2] - b[2]);
+    // A few milliseconds a frame while you play (all at once when starting).
+    const budget = maxNew < 10 ? 3 : Infinity, start = performance.now();
     for (const [rx, rz] of want) {
       if (made >= maxNew) break;
       // Work out the ground a few columns a frame first; generate once it's all known.
-      if (maxNew < 10 && this.terrain.prepare(rx * REGION, rz * REGION, REGION, 3) > 0) break;
-      this.loadRegion(rx, rz);
+      if (maxNew < 10 && this.terrain.prepare(rx * REGION, rz * REGION, REGION, 2) > 0) break;
+      if (!this.loadRegion(rx, rz, start + budget)) break; // carries on next frame
       made++;
     }
     for (const r of [...this.loadedRegions]) {
@@ -232,7 +237,7 @@ export class World {
   regionsReady(px: number, pz: number, r = LOAD_R): boolean {
     for (let rz = Math.floor((pz - r) / REGION); rz <= Math.floor((pz + r) / REGION); rz++) {
       for (let rx = Math.floor((px - r) / REGION); rx <= Math.floor((px + r) / REGION); rx++) {
-        if (this.regionDist(rx, rz, px, pz) <= r && !this.loadedRegions.has(regionKey(rx, rz))) return false;
+        if (this.regionDist(rx, rz, px, pz) <= r && (!this.loadedRegions.has(regionKey(rx, rz)) || this.growing?.r === regionKey(rx, rz))) return false;
       }
     }
     return true;
@@ -243,13 +248,23 @@ export class World {
     return Math.hypot(cx - px, cz - pz);
   }
 
-  /** Grow a region's trees, bushes and the rest (the same every time), minus what you've taken. */
-  private loadRegion(rx: number, rz: number) {
+  /** A region part grown: where it got to, so it can carry on. */
+  private growing?: { r: number; gz: number; gx: number; k: number; rng: () => number };
+
+  /**
+   * Grow a region's trees, bushes and the rest (the same every time), minus
+   * what you've taken, a few rows at a time until `until` (a time); true once
+   * it's all grown.
+   */
+  private loadRegion(rx: number, rz: number, until = Infinity): boolean {
     const r = regionKey(rx, rz);
-    this.loadedRegions.add(r);
+    if (this.growing?.r !== r) {
+      this.growing = { r, gz: 0, gx: 0, k: 0, rng: mulberry32(this.terrain.seed * 31 + r * 7919) };
+      this.loadedRegions.add(r);
+    }
+    const job = this.growing;
     const st = this.regions.get(r);
-    let k = 0;
-    const nextId = () => GEN_BASE + r * 4096 + k++;
+    const nextId = () => GEN_BASE + r * 4096 + job.k++;
     const place = <T extends WorldObj>(o: Omit<T, 'id'>) => {
       const id = nextId();
       if (st?.removed.has(id)) return;
@@ -257,11 +272,15 @@ export class World {
       this.add<T>((kept ?? { ...o, id }) as T);
     };
     const t = this.terrain;
-    const rng = mulberry32(this.terrain.seed * 31 + r * 7919);
+    const rng = job.rng;
     const cover = this.treeCover ??= new TreeCover(t.seed);
     const x0 = rx * REGION, z0 = rz * REGION;
-    for (let gz = 0; gz < REGION; gz += 2) {
-      for (let gx = 0; gx < REGION; gx += 2) {
+    for (; job.gz < REGION; job.gz += 2, job.gx = 0) {
+      const gz = job.gz;
+      for (; job.gx < REGION; job.gx += 2) {
+        // Pausing between points (the random sequence carries on just the same).
+        if ((job.gx & 7) === 0 && performance.now() > until) return false;
+        const gx = job.gx;
         const px = x0 + gx + rng() * 2, pz = z0 + gz + rng() * 2;
         const roll = rng(), roll2 = rng(), roll3 = rng();
         const h = t.heightAt(px, pz);
@@ -280,15 +299,18 @@ export class World {
         }
       }
     }
+    this.growing = undefined;
     // Everything else the game grows here (forage), numbered after the trees.
-    k = 1100;
+    job.k = 1100;
     for (const hook of this.regionHooks) {
       hook(this, x0, z0, rng, () => {
         const id = nextId();
         return st?.removed.has(id) ? -1 : id;
       });
     }
+    return true;
   }
+
 
   private treeCover?: TreeCover;
 
@@ -307,6 +329,7 @@ export class World {
   /** Let go of a far region: its wild things are regenerated (with your changes) when you come back. */
   private unloadRegion(r: number) {
     this.loadedRegions.delete(r);
+    if (this.growing?.r === r) this.growing = undefined;
     const rx = regionX(r), rz = regionZ(r);
     for (const o of this.near((rx + 0.5) * REGION, (rz + 0.5) * REGION, REGION * 0.75)) {
       if (Math.floor(o.x / REGION) !== rx || Math.floor(o.z / REGION) !== rz) continue;

@@ -165,59 +165,70 @@ export class FarForest {
    * enough for a far-off tile, `counts[1]` for a middling one, all of them
    * near. The coarser ones are bigger, so thinned-out woods still look full.
    */
-  build(d: TileData): StandIns[] {
-    const off = PAD / CELL, N = TILE / CELL;
-    const levels: number[][] = [[], [], []];
-    for (let lz = 0; lz < N; lz += STEP) {
-      for (let lx = 0; lx < N; lx += STEP) {
-        const level = lx % (STEP * 4) === 0 && lz % (STEP * 4) === 0 ? 2 : lx % (STEP * 2) === 0 && lz % (STEP * 2) === 0 ? 1 : 0;
-        levels[level].push(lx, lz);
-      }
-    }
-    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
-    const mats = {} as Record<Species, number[]>, cols = {} as Record<Species, number[]>;
-    const counts = {} as Record<Species, [number, number, number]>;
-    for (const k of SPECIES) { mats[k] = []; cols[k] = []; counts[k] = [0, 0, 0]; }
-    for (const level of [2, 1, 0]) {
-      const L = levels[level];
-      for (let k = 0; k < L.length; k += 2) {
-        const lx = L[k], lz = L[k + 1];
-        const r1 = hash2(d.tx * N + lx, d.tz * N + lz, this.seed + 91), r2 = hash2(d.tx * N + lx, d.tz * N + lz, this.seed + 92);
-        const jx = (r1 - 0.5) * CELL * STEP * 0.9, jz = (r2 - 0.5) * CELL * STEP * 0.9;
-        const x = d.tx * TILE + lx * CELL + jx, z = d.tz * TILE + lz * CELL + jz;
-        const ix = Math.round((x - d.tx * TILE) / CELL) + off, iz = Math.round((z - d.tz * TILE) / CELL) + off;
-        const i = iz * TN + ix;
-        const h = d.H[i];
-        if (h < SEA + 1.5 || d.kind[i]) continue;
-        // Banks are mostly open: keep back from rivers and lakes, except in the wild stretches.
-        if (this.cover.bankClearance(x, z) > 2 && (d.kind[i + 1] || d.kind[i - 1] || d.kind[i + TN] || d.kind[i - TN])) continue;
-        const slope = Math.hypot(d.H[i + 1] - d.H[i - 1], d.H[i + TN] - d.H[i - TN]) / (2 * CELL);
-        if (slope > 1.0) continue;
-        const temp = tempAt(d.climBase[i], h);
-        const zoneName = zoneOf(temp, d.moist[i], h, SEA, false, slope), zone = VEGETATION[zoneName];
-        // The same woods, stands and clearings as the real trees grow in.
-        if (hash2(d.tx * N + lx, d.tz * N + lz, this.seed + 93) > this.cover.density(zoneName, x, z) * 7.5) continue;
-        const species = this.cover.pick(zoneName, hash2(d.tx * N + lx, d.tz * N + lz, this.seed + 94));
-        const r3 = hash2(d.tx * N + lx, d.tz * N + lz, this.seed + 95);
-        // Sized like grown real trees (thinned-out ones a little bigger, to fill the gaps).
-        const size = TREES[species].grown * (0.8 + 0.45 * r1) * zone.stature * (level === 2 ? 1.3 : level === 1 ? 1.12 : 1);
-        s.set(size, size * (1.15 + 0.35 * r2), size);
-        p.set(x, h - 1.2, z);
-        q.setFromAxisAngle(up, r2 * Math.PI * 2);
-        m.compose(p, q, s);
-        mats[species].push(...m.elements);
-        const v = 0.85 + 0.25 * r3;
-        cols[species].push(v, v, v);
-        counts[species][level]++;
-      }
-    }
-    const out: StandIns[] = [];
-    for (const k of SPECIES) {
-      const c = counts[k], total = c[0] + c[1] + c[2];
-      if (!total) continue;
-      // Coarsest first: how many to consider for a near, middling or far tile.
-      out.push(new StandIns(this.geometry[k], this.outline[k], this.material, new Float32Array(mats[k]), new Float32Array(cols[k]), [total, c[2] + c[1], c[2]]));
-    }
-    return out;
+  /** A tile's stand-ins, from a plan made elsewhere (a worker) or worked out here. */
+  build(d: TileData, plan = planStandIns(this.seed, this.cover, d)): StandIns[] {
+    // Coarsest first: how many to consider for a near, middling or far tile.
+    return plan.map((p) => new StandIns(this.geometry[p.species], this.outline[p.species], this.material, p.mats, p.cols, p.counts));
   }
+}
+
+/** A tile's stand-ins of one kind of tree. */
+export interface StandInPlan { species: Species; mats: Float32Array; cols: Float32Array; counts: [number, number, number] }
+
+/**
+ * Where a tile's stand-ins stand, kind by kind (pure arithmetic over the
+ * tile's map, so a worker can do it): matrices and tints, coarsest first.
+ */
+export function planStandIns(seed: number, cover: TreeCover, d: TileData): StandInPlan[] {
+  const off = PAD / CELL, N = TILE / CELL;
+  const levels: number[][] = [[], [], []];
+  for (let lz = 0; lz < N; lz += STEP) {
+    for (let lx = 0; lx < N; lx += STEP) {
+      const level = lx % (STEP * 4) === 0 && lz % (STEP * 4) === 0 ? 2 : lx % (STEP * 2) === 0 && lz % (STEP * 2) === 0 ? 1 : 0;
+      levels[level].push(lx, lz);
+    }
+  }
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
+  const mats = {} as Record<Species, number[]>, cols = {} as Record<Species, number[]>;
+  const counts = {} as Record<Species, [number, number, number]>;
+  for (const k of SPECIES) { mats[k] = []; cols[k] = []; counts[k] = [0, 0, 0]; }
+  for (const level of [2, 1, 0]) {
+    const L = levels[level];
+    for (let k = 0; k < L.length; k += 2) {
+      const lx = L[k], lz = L[k + 1];
+      const r1 = hash2(d.tx * N + lx, d.tz * N + lz, seed + 91), r2 = hash2(d.tx * N + lx, d.tz * N + lz, seed + 92);
+      const jx = (r1 - 0.5) * CELL * STEP * 0.9, jz = (r2 - 0.5) * CELL * STEP * 0.9;
+      const x = d.tx * TILE + lx * CELL + jx, z = d.tz * TILE + lz * CELL + jz;
+      const ix = Math.round((x - d.tx * TILE) / CELL) + off, iz = Math.round((z - d.tz * TILE) / CELL) + off;
+      const i = iz * TN + ix;
+      const h = d.H[i];
+      if (h < SEA + 1.5 || d.kind[i]) continue;
+      // Banks are mostly open: keep back from rivers and lakes, except in the wild stretches.
+      if (cover.bankClearance(x, z) > 2 && (d.kind[i + 1] || d.kind[i - 1] || d.kind[i + TN] || d.kind[i - TN])) continue;
+      const slope = Math.hypot(d.H[i + 1] - d.H[i - 1], d.H[i + TN] - d.H[i - TN]) / (2 * CELL);
+      if (slope > 1.0) continue;
+      const temp = tempAt(d.climBase[i], h);
+      const zoneName = zoneOf(temp, d.moist[i], h, SEA, false, slope), zone = VEGETATION[zoneName];
+      // The same woods, stands and clearings as the real trees grow in.
+      if (hash2(d.tx * N + lx, d.tz * N + lz, seed + 93) > cover.density(zoneName, x, z) * 7.5) continue;
+      const species = cover.pick(zoneName, hash2(d.tx * N + lx, d.tz * N + lz, seed + 94));
+      const r3 = hash2(d.tx * N + lx, d.tz * N + lz, seed + 95);
+      // Sized like grown real trees (thinned-out ones a little bigger, to fill the gaps).
+      const size = TREES[species].grown * (0.8 + 0.45 * r1) * zone.stature * (level === 2 ? 1.3 : level === 1 ? 1.12 : 1);
+      s.set(size, size * (1.15 + 0.35 * r2), size);
+      p.set(x, h - 1.2, z);
+      q.setFromAxisAngle(up, r2 * Math.PI * 2);
+      m.compose(p, q, s);
+      mats[species].push(...m.elements);
+      const v = 0.85 + 0.25 * r3;
+      cols[species].push(v, v, v);
+      counts[species][level]++;
+    }
+  }
+  const out: StandInPlan[] = [];
+  for (const k of SPECIES) {
+    const c = counts[k], total = c[0] + c[1] + c[2];
+    if (total) out.push({ species: k, mats: new Float32Array(mats[k]), cols: new Float32Array(cols[k]), counts: [total, c[2] + c[1], c[2]] });
+  }
+  return out;
 }

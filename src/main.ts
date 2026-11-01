@@ -10,6 +10,7 @@ import { keepStorage } from './game/storage';
 import { World } from './world/world';
 import { WorldGen } from './world/worldgen';
 import { prepareTiles } from './world/tilesource';
+import { perf } from './game/perf';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 const menu = document.getElementById('menu')!;
@@ -53,7 +54,7 @@ function launch(make: () => Game | null | Promise<Game | null>) {
     });
     game.input.lock();
     // Handy for debugging from the browser console.
-    Object.assign(window, { game, __recipes: RECIPES, __data: { STRUCTURES }, __World: World, __WorldGen: WorldGen, __ACTIONS: ACTION_MAP, __createMinigame: createMinigame, __typeName: typeName, __itemName: itemName });
+    Object.assign(window, { game, __recipes: RECIPES, __data: { STRUCTURES }, __World: World, __WorldGen: WorldGen, __perf: perf, __ACTIONS: ACTION_MAP, __createMinigame: createMinigame, __typeName: typeName, __itemName: itemName });
   }, 30);
 }
 

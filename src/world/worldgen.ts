@@ -2,6 +2,7 @@ import { erode, slump } from './erosion';
 import { latticeKey, NET_CELL, NET_REGION, regionNet } from './network';
 import { climate, SNOW_TEMP, tempAt, zoneOf, type Zone } from './climate';
 import { hash2, Simplex } from './noise';
+import type { StandInPlan } from './farforest';
 
 // The world, generated in two layers, without end.
 //
@@ -40,6 +41,8 @@ export interface TileData {
   reaches: Float32Array;
   /** Lakes on the water network's grid over the map (LW × LW): surface and bed (NaN where none). */
   lakeL: Float32Array; lakeB: Float32Array;
+  /** Where its distant forests stand, if a worker worked it out. */
+  forest?: StandInPlan[];
   wind: [number, number];
 }
 
@@ -436,8 +439,8 @@ export class WorldGen {
   private detail2: Simplex;
   private soilN: Simplex;
   private patch: Simplex;
-  /** Called when a tile arrives (e.g. to build its distant terrain); `lod` if a worker made its colours. */
-  onTile?: (t: TileData, lod?: Float32Array) => void;
+  /** Called when a tile arrives (e.g. to build its distant terrain); `lod` and `forest` if a worker made its colours and distant trees. */
+  onTile?: (t: TileData, lod?: Float32Array, forest?: StandInPlan[]) => void;
 
   constructor(seed: number) {
     this.seed = seed;
@@ -452,13 +455,14 @@ export class WorldGen {
   useSource(source: TileSource) { this.source = source; }
 
   /** A tile arrived from the source. */
-  addTile(d: TileData, lod?: Float32Array) {
+  addTile(d: TileData, lod?: Float32Array, forest?: StandInPlan[]) {
+    if (forest) d.forest = forest;
     const key = `${d.tx},${d.tz}`;
     this.pending.delete(key);
     if (this.tiles.has(key)) return;
     this.tiles.set(key, new Tile(d));
     this.wind = d.wind;
-    this.onTile?.(d, lod);
+    this.onTile?.(d, lod, forest);
     for (const w of this.waiters.slice()) w();
   }
 
@@ -608,6 +612,8 @@ export class WorldGen {
 
   /** The surface of a lake at a point, or NaN. */
   lakeSurface(x: number, z: number): number {
+    // No lake near: nothing more to work out.
+    if (this.tile(Math.floor(x / TILE), Math.floor(z / TILE)).lake(x, z).m < 0.5) return NaN;
     const { mapH, depth } = this.lakeSample(x, z);
     return depth > 0.05 ? mapH + depth : NaN;
   }
@@ -683,8 +689,7 @@ export class WorldGen {
 
 
   /** Within a few metres of a river or lake. */
-  nearWater(x: number, z: number): boolean {
-    const rv = this.river(x, z);
+  nearWater(x: number, z: number, rv = this.river(x, z)): boolean {
     if (rv && rv.d < rv.r + 3) return true;
     for (const [ox, oz] of [[0, 0], [4, 0], [-4, 0], [0, 4], [0, -4]]) if (!Number.isNaN(this.lakeSurface(x + ox, z + oz))) return true;
     return false;
@@ -710,7 +715,8 @@ export class WorldGen {
    * What the ground is made of at a column: the top layer, what lies under
    * it, and how deep soil goes before bedrock (0: bare rock).
    */
-  soil(x: number, z: number, h: number, slope: number): { top: SoilTop; soil: number; waterBed: boolean } {
+  /** What the ground is made of at a point. `w` and `rv` save working out its water and river again, if the caller has them. */
+  soil(x: number, z: number, h: number, slope: number, w = this.water(x, z, h), rvb = this.river(x, z)): { top: SoilTop; soil: number; waterBed: boolean } {
     const dep = this.field('dep', x, z);
     const wet = Math.log1p(this.field('flow', x, z));
     const temp = this.temperature(x, h, z);
@@ -719,16 +725,13 @@ export class WorldGen {
     soil *= clamp01((temp - SNOW_TEMP) / 0.25);
     if (slope > 1.1) soil = 0;
     else if (slope > 0.75) soil *= (1.1 - slope) / 0.35;
-    const w = this.water(x, z, h);
     if (!Number.isNaN(w)) {
       const lake = !Number.isNaN(this.lakeSurface(x, z));
-      const rv = this.river(x, z);
-      return { top: lake ? 'clay' : rv && (rv.r > 4 || slope > 0.3) ? 'gravel' : 'sand', soil: Math.max(soil, 1.2), waterBed: true };
+      return { top: lake ? 'clay' : rvb && (rvb.r > 4 || slope > 0.3) ? 'gravel' : 'sand', soil: Math.max(soil, 1.2), waterBed: true };
     }
     // Clay along the banks of rivers and lakes; a little creek runs between grassy banks.
-    const rvb = this.river(x, z);
     const bigWater = rvb ? rvb.r > 3 && rvb.d < rvb.r + 3 : false;
-    const lakeSide = !rvb && this.nearWater(x, z);
+    const lakeSide = !rvb && this.nearWater(x, z, rvb);
     if ((bigWater || lakeSide) && slope < 0.9 && this.patch.noise(x * 0.15, z * 0.15) > 0.05) return { top: 'clay', soil: Math.max(soil, 1.2), waterBed: false };
     if (soil < 0.4) return { top: 'rock', soil: 0, waterBed: false };
     if (h < SEA + 1.4) return { top: this.patch.noise(x * 0.06, z * 0.06) > 0.4 && h > -2 ? 'clay' : 'sand', soil, waterBed: false };

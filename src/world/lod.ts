@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { FarForest, type StandIns } from './farforest';
+import { FarForest, type StandInPlan, type StandIns } from './farforest';
 import { ViewCull } from './cull';
 import { GROUND_GLSL, groundUniforms } from './groundtex';
 import { makeWaterMaterial } from './water';
@@ -119,6 +119,11 @@ export class DistantLand {
   private static heightAt(gx: number, gz: number, nb: (TileData | null)[], cx: number, cz: number): number {
     const tx = Math.floor(gx / N_CELLS), tz = Math.floor(gz / N_CELLS);
     const fx = gx - tx * N_CELLS, fz = gz - tz * N_CELLS;
+    // Away from the joins, just the tile's own map.
+    if (fx >= B_CELLS && fz >= B_CELLS && N_CELLS - fx >= B_CELLS && N_CELLS - fz >= B_CELLS) {
+      const d = nb[(tz - cz + 1) * 3 + tx - cx + 1];
+      if (d) { const h = DistantLand.sample(d, gx, gz); if (h === h) return h; }
+    }
     let x1 = tx, wx = 0, z1 = tz, wz = 0;
     if (fx < B_CELLS) { x1 = tx - 1; wx = 0.5 * (1 - fx / B_CELLS); } else if (N_CELLS - fx < B_CELLS) { x1 = tx + 1; wx = 0.5 * (1 - (N_CELLS - fx) / B_CELLS); }
     if (fz < B_CELLS) { z1 = tz - 1; wz = 0.5 * (1 - fz / B_CELLS); } else if (N_CELLS - fz < B_CELLS) { z1 = tz + 1; wz = 0.5 * (1 - (N_CELLS - fz) / B_CELLS); }
@@ -159,14 +164,22 @@ export class DistantLand {
     const band = B_CELLS + 1;
     const inX = (lx: number) => sx < 0 ? lx <= band : sx > 0 ? lx >= N - 1 - band : true;
     const inZ = (lz: number) => sz < 0 ? lz <= band : sz > 0 ? lz >= N - 1 - band : true;
+    // Heights once each (with a ring around for the slopes), not five times over.
+    const W = N + 2, G = new Float32Array(W * W).fill(NaN);
+    const g = (lx: number, lz: number) => {
+      const j = (lz + 1) * W + lx + 1;
+      let v = G[j];
+      if (v !== v) v = G[j] = H(gx0 + lx, gz0 + lz);
+      return v;
+    };
     for (let lz = 0; lz < N; lz++) {
       if (bandsOnly && !inZ(lz)) continue;
       for (let lx = 0; lx < N; lx++) {
         if (bandsOnly && !inX(lx)) continue;
-        const k = lz * N + lx, gx = gx0 + lx, gz = gz0 + lz;
-        pos[k * 3 + 1] = H(gx, gz) - 1.2;
-        const hx = H(gx + 1, gz) - H(gx - 1, gz);
-        const hz = H(gx, gz + 1) - H(gx, gz - 1);
+        const k = lz * N + lx;
+        pos[k * 3 + 1] = g(lx, lz) - 1.2;
+        const hx = g(lx + 1, lz) - g(lx - 1, lz);
+        const hz = g(lx, lz + 1) - g(lx, lz - 1);
         const nx = -hx / (2 * CELL), nz = -hz / (2 * CELL), l = Math.hypot(nx, 1, nz);
         nor[k * 3] = nx / l; nor[k * 3 + 1] = 1 / l; nor[k * 3 + 2] = nz / l;
         // Points on the join itself take the average colour of the tiles sharing them.
@@ -262,7 +275,33 @@ export class DistantLand {
   }
 
   /** A tile's map is ready: build its distant land (colours may come from the worker). */
-  addTile(d: TileData, lod?: Float32Array) {
+  /** Tiles waiting to become distant land (a tile or so a frame; see drain). */
+  private queue = new Map<string, [TileData, Float32Array | undefined, StandInPlan[] | undefined]>();
+
+  /** Add a tile's distant land (soon: see drain). */
+  addTile(d: TileData, lod?: Float32Array, forest?: StandInPlan[]) {
+    const key = `${d.tx},${d.tz}`;
+    if (!this.tiles.has(key)) this.queue.set(key, [d, lod, forest]);
+  }
+
+  /** Make waiting tiles' distant land, nearest first, for up to `budgetMs` (at least one). */
+  drain(budgetMs: number) {
+    const start = performance.now();
+    while (this.queue.size) {
+      let best = '', bd = Infinity;
+      const [x, z] = this.refinedAt;
+      for (const [key, [d]] of this.queue) {
+        const dd = Number.isFinite(x) ? Math.hypot((d.tx + 0.5) * TILE - x, (d.tz + 0.5) * TILE - z) : 0;
+        if (dd < bd) { bd = dd; best = key; }
+      }
+      const [d, lod, forest] = this.queue.get(best)!;
+      this.queue.delete(best);
+      this.make(d, lod, forest);
+      if (performance.now() - start > budgetMs) break;
+    }
+  }
+
+  private make(d: TileData, lod?: Float32Array, forest?: StandInPlan[]) {
     const key = `${d.tx},${d.tz}`;
     if (this.tiles.has(key)) return;
     const N = LOD_N;
@@ -297,7 +336,7 @@ export class DistantLand {
     const group = new THREE.Group();
     const land = new THREE.Mesh(geo, this.material);
     group.add(land);
-    const trees = this.forest?.build(d) ?? [];
+    const trees = this.forest?.build(d, forest ?? d.forest) ?? [];
     for (const tr of trees) group.add(tr.mesh, tr.outlines);
     const t: LodTile = { d, cols, group, land, trees };
     this.tiles.set(key, t);
@@ -319,6 +358,9 @@ export class DistantLand {
   prune(x: number, z: number) {
     this.lastTx = NaN;
     this.refine(x, z);
+    for (const [key, [d]] of this.queue) {
+      if (Math.max(Math.abs((d.tx + 0.5) * TILE - x), Math.abs((d.tz + 0.5) * TILE - z)) > (this.radius + 1.5) * TILE) this.queue.delete(key);
+    }
     for (const [key, t] of this.tiles) {
       const g = t.group, tx = t.d.tx, tz = t.d.tz;
       if (Math.max(Math.abs((tx + 0.5) * TILE - x), Math.abs((tz + 0.5) * TILE - z)) <= (this.radius + 1.5) * TILE) continue;
@@ -329,7 +371,7 @@ export class DistantLand {
     }
   }
 
-  has(tx: number, tz: number) { return this.tiles.has(`${tx},${tz}`); }
+  has(tx: number, tz: number) { return this.tiles.has(`${tx},${tz}`) || this.queue.has(`${tx},${tz}`); }
 
   /** Cut a hole where the detailed terrain is (x, z, radius). */
   setHole(x: number, z: number, r: number) {

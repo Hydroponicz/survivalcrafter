@@ -52,6 +52,7 @@ button { font: inherit; cursor: pointer; }
 .progress-label { font-size: 14px; text-shadow: 0 1px 3px #000; margin-bottom: 4px; }
 .progress-bar { height: 10px; background: rgba(0, 0, 0, 0.55); border: 1px solid var(--panel-edge); border-radius: 5px; overflow: hidden; }
 .progress-fill { height: 100%; background: linear-gradient(90deg, #b07a30, var(--accent)); }
+.perf-line { position: absolute; top: 44px; right: 16px; font-size: 12px; text-shadow: 0 1px 3px #000; background: rgba(0,0,0,0.3); padding: 2px 8px; border-radius: 4px; opacity: 0.9; }
 .clock { position: absolute; top: 12px; right: 16px; font-size: 15px; text-shadow: 0 1px 3px #000; background: rgba(0,0,0,0.3); padding: 4px 10px; border-radius: 4px; }
 .status { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); font-size: 14px; text-shadow: 0 1px 3px #000; text-align: center; max-width: 70vw; }
 .status .warn, .warn { color: var(--warn); }
