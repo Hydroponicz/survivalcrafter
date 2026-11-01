@@ -15,17 +15,28 @@ import { makeWaterMaterial } from '../world/water';
  * shader chunks below).
  */
 export class Haze extends THREE.Fog {
+  private mistK = 0;
+  private seen = 1;
   constructor(color: THREE.ColorRepresentation) {
     super(color, 0.003, 0);
   }
   get density() { return this.near; }
   set density(v: number) { this.near = v; }
-  get mist() { return this.far; }
-  set mist(v: number) { this.far = v; }
+  get mist() { return this.mistK; }
+  set mist(v: number) { this.mistK = Math.min(1.99, Math.max(0, v)); this.pack(); }
+  /** How much of the sun you can see past the land (0..1): the haze only glows toward it if it's there to light it. */
+  get sunSeen() { return this.seen; }
+  set sunSeen(v: number) { this.seen = Math.min(1, Math.max(0, v)); this.pack(); }
+  // Every material shares only the fog's colour and two numbers, so the far
+  // one carries both: the sun's visibility in hundredths times two, plus the mist.
+  private pack() { this.far = Math.round(this.seen * 100) * 2 + this.mistK; }
 }
 
 /** Mist lies below this height (metres) and thins out above it. */
 const MIST_TOP = 9;
+
+/** How far off the stars are drawn (metres): inside the camera's far plane (7 km), past the furthest land. */
+const STAR_R = 6500;
 
 let fogPatched = false;
 /** Replace three's fog with aerial haze plus height-based valley mist. */
@@ -57,10 +68,12 @@ function patchFog() {
   #ifdef FOG_EXP2
     float fogFactor = 1.0 - exp( - fogDensity * fogDensity * vFogDepth * vFogDepth );
   #else
-    // fogNear: haze density (thickens with distance); fogFar: valley mist strength.
+    // fogNear: haze density (thickens with distance); fogFar: valley mist strength and how much of the sun is seen (see Haze).
     float haze = 1.0 - exp( - fogNear * fogNear * vFogDepth * vFogDepth );
     float low = smoothstep( ${MIST_TOP.toFixed(1)}, 1.0, vFogWorld.y );
-    float mist = fogFar * low * ( 1.0 - exp( - vFogDepth * 0.05 ) );
+    float seenQ = floor( fogFar * 0.5 );
+    float sunSeen = seenQ * 0.01;
+    float mist = ( fogFar - seenQ * 2.0 ) * low * ( 1.0 - exp( - vFogDepth * 0.05 ) );
     // Haze glows toward the sun (light scattered forward by the air), only in
     // that direction: the rest of the view keeps the plain sky colour.
     vec3 hazeColor = fogColor;
@@ -68,7 +81,13 @@ function patchFog() {
       vec3 viewDir = normalize( mat3( viewMatrix ) * ( vFogWorld - cameraPosition ) );
       float toSun = max( dot( viewDir, directionalLights[ 0 ].direction ), 0.0 );
       vec3 sunTint = directionalLights[ 0 ].color / max( max( directionalLights[ 0 ].color.r, directionalLights[ 0 ].color.g ), 1e-4 );
-      hazeColor += fogColor * sunTint * ( 0.6 * pow( toSun, 6.0 ) + 1.2 * pow( toSun, 40.0 ) );
+      // Not where the land stands between you and the sun (a ridge in front of
+      // a low sun): the air in front of it is in its shadow. Land seen higher in
+      // the view than the sun is in the way of it.
+      vec3 viewUp = mat3( viewMatrix ) * vec3( 0.0, 1.0, 0.0 );
+      float above = dot( viewDir, viewUp ) - dot( directionalLights[ 0 ].direction, viewUp );
+      float lit = 1.0 - 0.92 * smoothstep( -0.005, 0.03, above );
+      hazeColor += fogColor * sunTint * ( 0.6 * pow( toSun, 6.0 ) + 1.2 * pow( toSun, 40.0 ) ) * lit * sunSeen;
     #endif
     // Mist catches the light: a little paler than the haze behind it.
     vec3 mistColor = hazeColor * 1.25 + vec3( 0.02, 0.021, 0.024 );
@@ -105,6 +124,10 @@ export class Sky {
   private stars: THREE.Points;
   readonly water: THREE.Mesh;
   readonly haze: Haze;
+  /** Height of the land at a point (as far as it's known), to tell whether it hides the sun. */
+  groundAt?: (x: number, z: number) => number;
+  private seenTimer = 0;
+  private seenTarget = 1;
   private pmrem: THREE.PMREMGenerator | null = null;
   private envRT: THREE.WebGLRenderTarget | null = null;
   private envAngle = NaN;
@@ -167,7 +190,9 @@ export class Sky {
     const pts: number[] = [];
     for (let i = 0; i < 1500; i++) {
       const u = Math.random() * Math.PI * 2, v = Math.acos(Math.random());
-      pts.push(Math.sin(v) * Math.cos(u) * 400, Math.cos(v) * 400, Math.sin(v) * Math.sin(u) * 400);
+      // Just inside the far edge of the view, beyond the furthest land, so
+      // mountains hide them.
+      pts.push(Math.sin(v) * Math.cos(u) * STAR_R, Math.cos(v) * STAR_R, Math.sin(v) * Math.sin(u) * STAR_R);
     }
     starGeo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
     this.stars = new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0xffffff, size: 1.6, sizeAttenuation: false, fog: false, transparent: true }));
@@ -184,6 +209,26 @@ export class Sky {
     this.water.position.set(0, WATER_LEVEL - 0.05, 0);
     this.water.receiveShadow = true;
     scene.add(this.water);
+  }
+
+  /**
+   * How much of the sun clears the land, looking from `from` toward it
+   * (0 hidden, 1 clear): walks out over the land and finds the steepest
+   * rise in the way, compared with the sun's height in the sky, softened
+   * over about the sun's own size so it sinks behind a ridge gradually.
+   */
+  private sunClear(from: THREE.Vector3, dir: THREE.Vector3): number {
+    const ground = this.groundAt;
+    if (!ground) return 1;
+    const h = Math.hypot(dir.x, dir.z) || 1e-6, dx = dir.x / h, dz = dir.z / h;
+    const sunSlope = dir.y / h;
+    let worst = Infinity;
+    for (let t = 20; t <= 6000; t *= 1.12) {
+      const g = ground(from.x + dx * t, from.z + dz * t);
+      if (!Number.isFinite(g)) continue;
+      worst = Math.min(worst, sunSlope - (g - from.y) / t);
+    }
+    return worst === Infinity ? 1 : THREE.MathUtils.smoothstep(worst, -0.01, 0.02);
   }
 
   update(dayFraction: number, playerPos: THREE.Vector3, time: number, renderer?: THREE.WebGLRenderer, camera?: THREE.Camera, dt = 0) {
@@ -213,6 +258,16 @@ export class Sky {
     this.moon.target.position.copy(playerPos);
     this.moon.intensity = 0.35 * (1 - day);
     this.hemi.intensity = 0.12 + 0.3 * day;
+
+    // Whether the land (a ridge, a mountain) hides the sun from you: then the
+    // air in front of you is in its shadow and doesn't glow toward it.
+    this.seenTimer -= dt;
+    if (this.seenTimer <= 0) {
+      this.seenTimer = 0.25;
+      this.seenTarget = elev < -0.03 ? 0 : this.sunClear(camera?.position ?? playerPos, dir);
+    }
+    const seen = this.haze.sunSeen;
+    this.haze.sunSeen = dt > 0 ? seen + (this.seenTarget - seen) * Math.min(1, dt * 3) : this.seenTarget;
 
     this.stars.position.copy(camera?.position ?? playerPos);
     // Stars come out once the sun is down.

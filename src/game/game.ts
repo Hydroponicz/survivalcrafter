@@ -188,6 +188,7 @@ export class Game {
     this.scene.add(this.view.group);
     this.scene.add(this.player.model);
     this.sky = new Sky(this.scene);
+    this.sky.groundAt = (x, z) => this.distant.groundAt(x, z);
     // The rest of the world, out to the horizon: map tiles are made in the
     // background as you travel, and each becomes distant land when it arrives.
     const gen = world.terrain.gen;
