@@ -24,9 +24,9 @@ import { writeFileSync } from 'node:fs';
 const HEIGHT = 6.2;
 
 const TREES = {
-  birch: { wood: 'crease', crease: 45, trunkTris: 800, foliage: 'clumps', clumps: 9, crownFrom: 0.45 },
-  oak: { wood: 'biggest', trunkTris: 1400, foliage: 'clumps', clumps: 14, crownFrom: 0.3 },
-  maple: { wood: 'crease', crease: 26, trunkTris: 900, foliage: 'clumps', clumps: 12, crownFrom: 0.3 },
+  birch: { wood: 'crease', crease: 45, trim: { r: 0.03, flat: 0.08, from: 0.4 }, trunkTris: 800, foliage: 'clumps', clumps: 9, crownFrom: 0.45 },
+  oak: { wood: 'biggest', trim: { r: 0.03, flat: 0.08, from: 0.3 }, trunkTris: 1400, foliage: 'clumps', clumps: 14, crownFrom: 0.3 },
+  maple: { wood: 'crease', crease: 45, trim: { r: 0.03, flat: 0.08, from: 0.35 }, trunkTris: 900, foliage: 'clumps', clumps: 12, crownFrom: 0.3 },
   spruce: { wood: 'crease', crease: 45, trunkTris: 300, foliage: 'profile' },
   pine: { wood: 'crease', crease: 45, trunkTris: 120, foliage: 'profile' },
 };
@@ -37,6 +37,73 @@ const only = process.argv.slice(2);
 for (const [name, cfg] of Object.entries(TREES)) {
   if (only.length && !only.includes(name)) continue;
   await bake(name, cfg);
+}
+
+function trimBlades(P, I, wood, { r, flat, from }) {
+  const nt = I.length / 3;
+  let yLo = Infinity, yHi = -Infinity;
+  for (let v = 1; v < P.length; v += 3) { yLo = Math.min(yLo, P[v]); yHi = Math.max(yHi, P[v]); }
+  const R = r * (yHi - yLo), above = yLo + (yHi - yLo) * from;
+  const C = new Float32Array(nt * 3), N = new Float32Array(nt * 3), A = new Float32Array(nt);
+  for (let t = 0; t < nt; t++) {
+    const a = I[t * 3] * 3, b = I[t * 3 + 1] * 3, c = I[t * 3 + 2] * 3;
+    const ux = P[b] - P[a], uy = P[b + 1] - P[a + 1], uz = P[b + 2] - P[a + 2];
+    const vx = P[c] - P[a], vy = P[c + 1] - P[a + 1], vz = P[c + 2] - P[a + 2];
+    const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx, l = Math.hypot(nx, ny, nz) || 1;
+    N[t * 3] = nx / l; N[t * 3 + 1] = ny / l; N[t * 3 + 2] = nz / l; A[t] = l / 2;
+    for (let k = 0; k < 3; k++) C[t * 3 + k] = (P[a + k] + P[b + k] + P[c + k]) / 3;
+  }
+  const ek = (a, b) => (a < b ? a * 1e7 + b : b * 1e7 + a);
+  const edges = new Map();
+  for (let t = 0; t < nt; t++) if (wood[t]) for (let k = 0; k < 3; k++) {
+    const e = ek(I[t * 3 + k], I[t * 3 + (k + 1) % 3]);
+    let l = edges.get(e);
+    if (!l) edges.set(e, (l = []));
+    l.push(t);
+  }
+  const near = (t, each) => {
+    const seen = new Set([t]);
+    for (const q = [t]; q.length;) {
+      const f = q.pop();
+      each(f);
+      for (let k = 0; k < 3; k++) for (const u of edges.get(ek(I[f * 3 + k], I[f * 3 + (k + 1) % 3]))) {
+        if (seen.has(u) || Math.hypot(C[u * 3] - C[t * 3], C[u * 3 + 1] - C[t * 3 + 1], C[u * 3 + 2] - C[t * 3 + 2]) > R) continue;
+        seen.add(u); q.push(u);
+      }
+    }
+  };
+  const blade = new Uint8Array(nt);
+  for (let t = 0; t < nt; t++) {
+    if (!wood[t] || C[t * 3 + 1] < above) continue;
+    // The spread of normals: the eigenvalues of their (area-weighted) scatter.
+    const M = [0, 0, 0, 0, 0, 0]; // xx xy xz yy yz zz
+    near(t, (f) => {
+      const x = N[f * 3], y = N[f * 3 + 1], z = N[f * 3 + 2], w = A[f];
+      M[0] += w * x * x; M[1] += w * x * y; M[2] += w * x * z; M[3] += w * y * y; M[4] += w * y * z; M[5] += w * z * z;
+    });
+    const tr = M[0] + M[3] + M[5] || 1;
+    // Largest eigenvalue by power iteration; the rest is the spread off it.
+    let v = [N[t * 3], N[t * 3 + 1], N[t * 3 + 2]], l1 = 0;
+    for (let it = 0; it < 20; it++) {
+      const m = [M[0] * v[0] + M[1] * v[1] + M[2] * v[2], M[1] * v[0] + M[3] * v[1] + M[4] * v[2], M[2] * v[0] + M[4] * v[1] + M[5] * v[2]];
+      l1 = Math.hypot(...m) || 1;
+      v = m.map((x) => x / l1);
+    }
+    if ((tr - l1) / tr < flat) blade[t] = 1;
+  }
+  for (let t = 0; t < nt; t++) if (blade[t]) wood[t] = 0;
+  // Keep what still joins the foot.
+  let start = -1, low = Infinity;
+  for (let t = 0; t < nt; t++) if (wood[t] && C[t * 3 + 1] < low) { low = C[t * 3 + 1]; start = t; }
+  const keep = new Uint8Array(nt);
+  keep[start] = 1;
+  for (const q = [start]; q.length;) {
+    const f = q.pop();
+    for (let k = 0; k < 3; k++) for (const u of edges.get(ek(I[f * 3 + k], I[f * 3 + (k + 1) % 3]))) if (wood[u] && !keep[u]) { keep[u] = 1; q.push(u); }
+  }
+  let n0 = 0, n1 = 0;
+  for (let t = 0; t < nt; t++) { n0 += wood[t]; wood[t] = keep[t]; n1 += keep[t]; }
+  console.log(`  trimmed: ${blade.reduce((a, b) => a + b, 0)} flat faces, ${n0 - n1} cut off; ${n1} wood faces left`);
 }
 
 async function bake(name, cfg) {
@@ -87,6 +154,12 @@ async function bake(name, cfg) {
       }
     }
   }
+
+  // Leaf blades still joined to the wood: flat sheets, where bark wraps round.
+  // Near each face (within `trim.r` of the tree's height), how far its
+  // neighbours' normals spread out of one direction; the flat ones go, and
+  // then whatever no longer joins the trunk's foot.
+  if (cfg.trim) trimBlades(P, I, wood, cfg.trim);
 
   // Foliage: each foliage face's centre, weighted by its area (only in the
   // crown: lower down, what isn't counted as wood is just rough bark).
