@@ -1442,8 +1442,10 @@ export class Game {
     if (cap) {
       const interval = 1000 / cap, since = timestamp - this.lastFrame;
       if (since < interval - 1) return;
-      // Keep to the cap on average whatever the screen's refresh rate.
-      this.lastFrame = since < interval * 3 ? timestamp - (since % interval) : timestamp;
+      // Keep to the cap on average whatever the screen's refresh rate: step the
+      // schedule on by whole intervals (a frame a hair early still counts as one),
+      // or start afresh after a long stall.
+      this.lastFrame = since < interval * 3 ? this.lastFrame + Math.max(1, Math.floor((since + 1) / interval)) * interval : timestamp;
     }
     perf.begin();
     this.timer.update(timestamp);
