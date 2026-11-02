@@ -1,5 +1,12 @@
 import * as THREE from 'three';
 import type { ToolKind } from '../data/items';
+import { STONE_HAMMER } from './models/stone_hammer';
+import { STONE_HATCHET } from './models/stone_hatchet';
+import { STONE_KNIFE } from './models/stone_knife';
+import { STONE_PICKAXE } from './models/stone_pickaxe';
+import { STONE_SPEAR } from './models/stone_spear';
+import { WOODEN_SHOVEL } from './models/wooden_shovel';
+import { WOODEN_TONGS } from './models/wooden_tongs';
 
 // Hand-tool models shared by the third-person character and the first-person
 // view. Each is built with the grip at the origin, the handle running up +Y,
@@ -8,9 +15,33 @@ import type { ToolKind } from '../data/items';
 const mat = (color: number, extra: THREE.MeshStandardMaterialParameters = {}) =>
   new THREE.MeshStandardMaterial({ color, roughness: 0.75, ...extra });
 
+/** Tools made from models (see scripts/bake-props.mjs): already gripped at the origin, handle up +Y, working end +Z. */
+const MODELS: Record<string, { positions: number[]; indices: number[]; colors: number[] }> = {
+  stone_knife: STONE_KNIFE, stone_hatchet: STONE_HATCHET, stone_pickaxe: STONE_PICKAXE, stone_hammer: STONE_HAMMER,
+  wooden_shovel: WOODEN_SHOVEL, stone_spear: STONE_SPEAR, wooden_tongs: WOODEN_TONGS,
+};
+const modelGeos = new Map<string, THREE.BufferGeometry>();
+const modelMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8 });
+
 export function buildToolMesh(kind: ToolKind | undefined, itemType?: string): THREE.Group {
   const g = new THREE.Group();
   if (!kind) return g;
+  const model = itemType ? MODELS[itemType] : undefined;
+  if (model) {
+    let geo = modelGeos.get(itemType!);
+    if (!geo) {
+      geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(model.positions, 3));
+      geo.setAttribute('color', new THREE.Float32BufferAttribute(model.colors, 3));
+      geo.setIndex(model.indices);
+      geo.computeVertexNormals();
+      modelGeos.set(itemType!, geo);
+    }
+    const mesh = new THREE.Mesh(geo, modelMat);
+    mesh.castShadow = true;
+    g.add(mesh);
+    return g;
+  }
   const stone = itemType?.startsWith('stone') || itemType === 'wooden_shovel';
   const wood = mat(0x7a5634);
   const head = stone ? mat(0x7f7b74, { flatShading: true }) : mat(0x9aa0a6, { metalness: 0.65, roughness: 0.35 });
