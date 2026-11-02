@@ -21,10 +21,12 @@ export interface ForageSpecies {
 }
 
 export const FORAGE_SPECIES: ForageSpecies[] = [
-  { id: 'fiber_grass', name: 'Fiber grass', category: 'material', biomes: { meadow: 40, forest: 6, shore: 10 },
-    item: 'plant_fiber', count: [2, 3], notice: 0, difficulty: 2 },
-  { id: 'reeds', name: 'Reeds', category: 'material', biomes: { wetland: 45, shore: 6 },
-    item: 'plant_fiber', count: [2, 4], notice: 0, difficulty: 3 },
+  // Fiber is wanted all the time (cordage, thatch, clothing), so it's the commonest find and gives
+  // plenty a pick. (A bigger share of what grows, not more finds: no extra cost to draw.)
+  { id: 'fiber_grass', name: 'Fiber grass', category: 'material', biomes: { meadow: 75, forest: 18, shore: 18 },
+    item: 'plant_fiber', count: [3, 5], notice: 0, difficulty: 1 },
+  { id: 'reeds', name: 'Reeds', category: 'material', biomes: { wetland: 60, shore: 10 },
+    item: 'plant_fiber', count: [3, 5], notice: 0, difficulty: 2 },
   { id: 'fallen_branch', name: 'Fallen branch', category: 'material', biomes: { forest: 14, meadow: 2 },
     item: 'branch', count: [1, 2], notice: 0, difficulty: 1 },
   { id: 'driftwood', name: 'Driftwood', category: 'material', biomes: { shore: 22 },
