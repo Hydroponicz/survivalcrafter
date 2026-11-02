@@ -6,6 +6,9 @@ import { createMinigame } from './game/minigames';
 import { STRUCTURES } from './data/structures';
 import { Game, OLD_SAVES } from './game/game';
 import { pickFile, UI } from './ui/ui';
+import { GUIDE_HTML } from './ui/guide';
+import { GraphicsSettings } from './game/graphics';
+import { Sound } from './game/sound';
 import { keepStorage } from './game/storage';
 import { World } from './world/world';
 import { WorldGen } from './world/worldgen';
@@ -14,13 +17,28 @@ import { perf } from './game/perf';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 const menu = document.getElementById('menu')!;
+const fade = document.getElementById('tour-fade')!;
 const status = document.getElementById('menu-status')!;
 const cont = document.getElementById('continue') as HTMLButtonElement;
-const newBtn = document.getElementById('new') as HTMLButtonElement;
-const importBtn = document.getElementById('import') as HTMLButtonElement;
 const seedInput = document.getElementById('seed') as HTMLInputElement;
+const $ = (id: string) => document.getElementById(id) as HTMLButtonElement;
 
-void Game.hasSave().then((has) => { if (has) cont.style.display = ''; });
+// Starting a game reloads the page with what to start written down, so the
+// world touring behind the menu is gone and the game starts afresh.
+const LAUNCH = 'survivalcrafter.launch';
+type Launch = { kind: 'new'; seed: number } | { kind: 'continue' };
+function relaunch(l: Launch) {
+  try { sessionStorage.setItem(LAUNCH, JSON.stringify(l)); } catch { /* fall through: started below */ }
+  location.reload();
+}
+function takeLaunch(): Launch | null {
+  try {
+    const l = sessionStorage.getItem(LAUNCH);
+    sessionStorage.removeItem(LAUNCH);
+    return l ? JSON.parse(l) as Launch : null;
+  } catch { return null; }
+}
+
 try {
   for (const [key, why] of OLD_SAVES) {
     if (!localStorage.getItem(key)) continue;
@@ -38,16 +56,26 @@ function seedFrom(text: string): number {
   return h >>> 0;
 }
 
+/** A new world, with the land around the start made in the background first (so the page never stalls). */
+async function makeWorld(seed: number): Promise<World> {
+  const gen = new WorldGen(seed);
+  const s = World.roughSpawn(gen);
+  await prepareTiles(gen, s.x, s.z);
+  const world = new World(seed);
+  world.generate(gen);
+  return world;
+}
+
 function launch(make: () => Game | null | Promise<Game | null>) {
-  status.textContent = 'Shaping the land…';
   // Ask the browser not to clear the save when the disk runs low.
   void keepStorage();
   // Let the status paint before the heavy generation work.
   setTimeout(async () => {
     const game = await make();
-    if (!game) { status.textContent = 'Could not load that save.'; return; }
+    if (!game) { status.textContent = 'Could not load that save.'; menuShow('main'); menu.classList.remove('loading'); return; }
     game.ui = new UI(game);
     menu.remove();
+    fade.remove();
     game.start();
     canvas.addEventListener('click', () => {
       if (!game.ui.anyWindowOpen()) game.input.lock();
@@ -58,36 +86,98 @@ function launch(make: () => Game | null | Promise<Game | null>) {
   }, 30);
 }
 
-cont.addEventListener('click', async () => {
-  status.textContent = 'Reading your save…';
-  const data = await Game.readSave();
-  launch(() => Game.loadSave(canvas, data));
-});
-newBtn.addEventListener('click', async () => {
-  if (await Game.hasSave() && !confirm('Start a new world? Your current save will be overwritten.')) return;
-  const seed = seedFrom(seedInput.value);
-  launch(async () => {
-    // The land around where you'll start, made in the background (several
-    // tiles side by side) before the rest, so the page never stalls.
-    const gen = new WorldGen(seed);
-    const s = World.roughSpawn(gen);
-    await prepareTiles(gen, s.x, s.z);
-    const world = new World(seed);
-    world.generate(gen);
-    const g = new Game(canvas, world);
-    g.newCharacter();
-    g.msg(`World seed: ${seed}`, 'info');
-    return g;
-  });
+function startGame(l: Launch) {
+  menu.classList.add('loading');
+  menuShow(null);
+  if (l.kind === 'continue') {
+    status.textContent = 'Reading your save…';
+    launch(async () => Game.loadSave(canvas, await Game.readSave()));
+  } else {
+    status.textContent = 'Shaping the land…';
+    launch(async () => {
+      const g = new Game(canvas, await makeWorld(l.seed));
+      g.newCharacter();
+      g.msg(`World seed: ${l.seed}`, 'info');
+      return g;
+    });
+  }
+}
+
+// ---------- the menu
+function menuShow(panel: string | null) {
+  for (const p of menu.querySelectorAll<HTMLElement>('.menu-panel')) p.hidden = p.dataset.panel !== panel;
+  if (panel === 'new') seedInput.focus();
+}
+menu.addEventListener('click', (e) => {
+  const go = (e.target as HTMLElement).dataset.go;
+  if (go) { status.textContent = ''; menuShow(go); }
 });
 
-importBtn.addEventListener('click', () => pickFile(async (file) => {
+/** The world behind the menu, once it's made. */
+let backdrop: Game | null = null;
+const graphics = () => backdrop?.graphics ?? new GraphicsSettings();
+const sound = () => backdrop?.sound ?? new Sound();
+function showSettings() {
+  $('set-quality').textContent = `Graphics: ${graphics().level.label}`;
+  $('set-fps').textContent = `Frame cap: ${graphics().fpsLabel}`;
+  $('set-sound').textContent = `Sound: ${sound().muted ? 'Off' : 'On'}`;
+}
+
+cont.addEventListener('click', () => relaunch({ kind: 'continue' }));
+$('create').addEventListener('click', async () => {
+  if (await Game.hasSave() && !confirm('Start a new world? Your current save will be overwritten.')) return;
+  relaunch({ kind: 'new', seed: seedFrom(seedInput.value) });
+});
+seedInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') $('create').click(); });
+$('load').addEventListener('click', () => pickFile(async (file) => {
   if (await Game.hasSave() && !confirm('Replace your current world with the one in that file?')) return;
   try {
     await Game.importSave(file);
-    cont.style.display = '';
-    status.textContent = 'Save imported. Press Continue to play it.';
+    relaunch({ kind: 'continue' });
   } catch (e) {
     status.textContent = e instanceof Error ? e.message : 'Could not read that file.';
   }
 }));
+$('set-quality').addEventListener('click', () => {
+  const g = graphics();
+  g.nextQuality();
+  backdrop?.applyGraphics();
+  showSettings();
+});
+$('set-fps').addEventListener('click', () => { graphics().nextFpsCap(); showSettings(); });
+$('set-sound').addEventListener('click', () => { const s = sound(); s.muted = !s.muted; showSettings(); });
+menu.querySelector('[data-go="settings"]')!.addEventListener('click', showSettings);
+menu.querySelector('.wiki-body')!.innerHTML = GUIDE_HTML;
+$('exit').addEventListener('click', () => {
+  // Browsers only let a page close a tab it opened itself; otherwise say goodbye.
+  window.close();
+  setTimeout(() => {
+    backdrop?.renderer.setAnimationLoop(null);
+    const bye = document.createElement('div');
+    bye.className = 'goodbye';
+    bye.textContent = 'Thanks for playing. You can close this tab now.';
+    document.body.appendChild(bye);
+  }, 200);
+});
+
+const pending = takeLaunch();
+if (pending) startGame(pending);
+else {
+  void Game.hasSave().then((has) => { cont.disabled = !has; });
+  // A random world to tour behind the menu (made once the menu has shown).
+  setTimeout(async () => {
+    try {
+      const world = await makeWorld(Math.floor(Math.random() * 1e9));
+      if (!menu.isConnected || takeLaunchPending()) return;
+      backdrop = new Game(canvas, world);
+      backdrop.startTour(fade);
+      Object.assign(window, { __tour: backdrop, __perf: perf });
+    } catch (e) {
+      console.warn('Menu backdrop failed', e);
+    }
+  }, 60);
+}
+/** Whether a game is about to start (the page is reloading into it). */
+function takeLaunchPending(): boolean {
+  try { return !!sessionStorage.getItem(LAUNCH); } catch { return false; }
+}

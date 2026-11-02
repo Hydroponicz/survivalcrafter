@@ -21,7 +21,7 @@ import { ViewCull } from '../world/cull';
 import { perf } from './perf';
 import { TILE, tileOf, WorldGen } from '../world/worldgen';
 import {
-  ANIMALS, pointInPiece, toLocal, toWorld, World, type AnimalObj, type ForageObj, type PileObj, type StructureObj, type TreeObj, type WorldObj,
+  ANIMALS, DAY_LENGTH, pointInPiece, toLocal, toWorld, World, type AnimalObj, type ForageObj, type PileObj, type StructureObj, type TreeObj, type WorldObj,
 } from '../world/world';
 import {
   ACTION_MAP, ACTIONS, craftProblem, DIG_RADIUS, EARTH_PER_ITEM, LEVEL_RADIUS, type ActionDef, type Ctx, type Target,
@@ -40,6 +40,7 @@ import { CARRY_CAPACITY, Inventory } from './inventory';
 import { Player } from './player';
 import { Sky } from './sky';
 import type { UI } from '../ui/ui';
+import { Tour } from './tour';
 
 const REACH = 4.5;
 /** Skill above a task's difficulty needed to do it the quick way. */
@@ -165,6 +166,8 @@ export class Game {
   private saveTimer = 0;
   private respawnTimer = 0;
   private elapsed = 0;
+  /** The main menu's backdrop: a camera touring this world, with no one in it (never saved). */
+  tour: Tour | null = null;
 
   constructor(canvas: HTMLCanvasElement, world: World) {
     // Log depth: the view runs out to kilometres without distant hills flickering.
@@ -213,7 +216,7 @@ export class Game {
 
     const ring = (opacity: number) => new THREE.LineLoop(
       new THREE.BufferGeometry().setFromPoints(Array.from({ length: 48 }, () => new THREE.Vector3())),
-      new THREE.LineBasicMaterial({ color: 0xfff2c0, transparent: true, opacity, depthTest: false }),
+      new THREE.LineBasicMaterial({ color: 0xfff2c0, transparent: true, opacity, depthTest: false, fog: false }),
     );
     this.brush = ring(0.85);
     this.brushOuter = ring(0.35);
@@ -242,6 +245,26 @@ export class Game {
     this.autoBind(this.inv.items[0]);
     this.msg('You wake in the wilderness with nothing but a crude knife. Press H for help.', 'warn');
     this.msg('Forage grass for fiber and branches, gather stones from bare rock, then craft (C) your first tools.', 'info');
+  }
+
+  /** Show this world as the main menu's backdrop: a slow camera tour, nothing to play. */
+  startTour(fade: HTMLElement) {
+    this.abandoned = true;
+    const s = this.world.spawn;
+    this.player.pos.set(s.x, this.world.terrain.heightAt(s.x, s.z), s.z);
+    this.tour = new Tour(this.world.terrain.gen, s, fade, () => this.world.terrain.pendingChunks);
+    this.brush.visible = this.brushOuter.visible = false;
+    this.start();
+  }
+
+  private tourStep(dt: number) {
+    const t = this.tour!, p = this.player;
+    t.update(dt, this.camera);
+    p.pos.copy(t.focus);
+    this.world.time = this.world.time - this.world.dayFraction * DAY_LENGTH + t.day * DAY_LENGTH;
+    perf.time('terrain', () => this.world.terrain.update(p.pos.x, p.pos.y, p.pos.z, 6));
+    this.world.focus = { x: p.pos.x, z: p.pos.z };
+    perf.time('objects', () => this.world.stream(p.pos.x, p.pos.z, 1));
   }
 
   start() {
@@ -1370,7 +1393,8 @@ export class Game {
     const dt = Math.min(0.05, this.timer.getDelta());
     this.renderDt = dt;
     this.elapsed += dt;
-    if (!this.paused) perf.time('update', () => this.update(dt));
+    if (this.tour) this.tourStep(dt);
+    else if (!this.paused) perf.time('update', () => this.update(dt));
     this.render();
     this.input.endFrame();
     perf.end();
@@ -1623,7 +1647,7 @@ export class Game {
     this.renderer.shadowMap.needsUpdate = this.frameNo % this.graphics.level.shadowEvery === 0;
     perf.time('draw', () => this.renderer.render(this.scene, this.camera));
     // First-person hands and tool, on top of the world.
-    if (!this.working) {
+    if (!this.working && !this.tour) {
       const it = this.activeItem();
       const kind = it ? itemDef(it.type).tool : undefined;
       this.viewModel.setTool(kind, it?.type);
@@ -1744,6 +1768,8 @@ export class Game {
   async importAndReload(file: File) {
     await Game.importSave(file);
     this.abandoned = true; // don't save the old world over it on the way out
+    // Straight back into the game (see main.ts), not the menu.
+    try { sessionStorage.setItem('survivalcrafter.launch', JSON.stringify({ kind: 'continue' })); } catch { /* the menu, then */ }
     location.reload();
   }
 

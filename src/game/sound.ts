@@ -2,10 +2,19 @@
 // otherwise small synthesized effects (a chop's thunk, a glancing knock, the
 // creak of a falling tree and its crash). Ambience only plays from recordings.
 
+const SOUND_KEY = 'survivalcrafter.sound';
+
 export class Sound {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
-  muted = false;
+  private off = (() => { try { return localStorage.getItem(SOUND_KEY) === 'off'; } catch { return false; } })();
+  /** Sound off (remembered in this browser). */
+  get muted() { return this.off; }
+  set muted(v: boolean) {
+    this.off = v;
+    try { localStorage.setItem(SOUND_KEY, v ? 'off' : 'on'); } catch { /* private mode */ }
+    if (v) void this.ctx?.suspend(); else void this.ctx?.resume();
+  }
 
   private ensure(): AudioContext | null {
     if (this.muted) return null;
