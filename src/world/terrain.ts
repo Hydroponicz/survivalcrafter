@@ -47,7 +47,7 @@ const SRGB: Record<Mat, [number, number, number]> = {
   [Mat.Grass]: [0.33, 0.52, 0.2],
   [Mat.Dirt]: [0.45, 0.33, 0.22],
   [Mat.Sand]: [0.8, 0.72, 0.5],
-  [Mat.Clay]: [0.58, 0.5, 0.45],
+  [Mat.Clay]: [0.5, 0.39, 0.31],
   [Mat.Rock]: [0.52, 0.51, 0.49],
   [Mat.Iron]: [0.55, 0.36, 0.26],
   [Mat.Field]: [0.33, 0.23, 0.15],
@@ -811,7 +811,7 @@ export class Terrain {
     this.empty.delete(id);
 
     const vid = new Int32Array(S * S * S).fill(-1);
-    const pos: number[] = [], nor: number[] = [], col: number[] = [], ground: number[] = [], ground2: number[] = [], index: number[] = [];
+    const pos: number[] = [], nor: number[] = [], col: number[] = [], ground: number[] = [], ground2: number[] = [], ground3: number[] = [], index: number[] = [];
     const c = new Float32Array(8);
     let nv = 0;
     for (let lz = 0; lz < S; lz++) {
@@ -859,9 +859,11 @@ export class Terrain {
           nor.push(nx, ny, nz);
           col.push(r * j * wet, gC * j * wet, b * j * wet);
           // Which ground texture: grass, dirt, sand, gravel, rock, with snow over any of them.
-          const layer = GROUND_OF[m] ?? 1, snow = this.lastSnow;
+          // Soil at the water's edge is mud.
+          const layer = wet < 1 && (m === Mat.Grass || m === Mat.Dirt || m === Mat.Clay) ? MUD : GROUND_OF[m] ?? 1, snow = this.lastSnow;
           for (let k = 0; k < 4; k++) ground.push(layer === k ? 1 - snow : 0);
-          ground2.push(layer === 4 ? 1 - snow : 0, snow);
+          ground2.push(layer === 4 ? 1 - snow : 0, snow, layer === 6 ? 1 - snow : 0, layer === 7 ? 1 - snow : 0);
+          for (let k = 8; k < 12; k++) ground3.push(layer === k ? 1 - snow : 0);
           vid[(lz * S + ly) * S + lx] = nv++;
         }
       }
@@ -901,7 +903,8 @@ export class Terrain {
     g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
     g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
     g.setAttribute('ground', new THREE.Float32BufferAttribute(ground, 4));
-    g.setAttribute('ground2', new THREE.Float32BufferAttribute(ground2, 2));
+    g.setAttribute('ground2', new THREE.Float32BufferAttribute(ground2, 4));
+    g.setAttribute('ground3', new THREE.Float32BufferAttribute(ground3, 4));
     g.setIndex(index);
     g.computeBoundingSphere();
     if (old) {
@@ -1110,9 +1113,11 @@ function unrle(b64: string): Uint8Array {
 
 /** Ground texture layer (see groundtex.ts) for each material. */
 const GROUND_OF: Partial<Record<Mat, number>> = {
-  [Mat.Grass]: 0, [Mat.Dirt]: 1, [Mat.Field]: 1, [Mat.Clay]: 1, [Mat.Sand]: 2, [Mat.Gravel]: 3,
-  [Mat.Rock]: 4, [Mat.Sandstone]: 4, [Mat.Shale]: 4, [Mat.Iron]: 4,
+  [Mat.Grass]: 0, [Mat.Dirt]: 1, [Mat.Field]: 7, [Mat.Clay]: 6, [Mat.Sand]: 2, [Mat.Gravel]: 3,
+  [Mat.Rock]: 4, [Mat.Sandstone]: 4, [Mat.Shale]: 9, [Mat.Iron]: 8,
 };
+/** The mud layer: soil at the water's edge. */
+const MUD = 10;
 
 /**
  * The terrain: vertex colours (material, climate, snow) carrying photographed
@@ -1128,12 +1133,13 @@ function makeTerrainMaterial(): THREE.MeshStandardMaterial {
     shader.uniforms.detailMap = { value: detail };
     groundUniforms(shader);
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute vec4 ground;\nattribute vec2 ground2;\nvarying vec4 vG1;\nvarying vec2 vG2;\nvarying vec3 vWPos;\nvarying vec3 vWNrm;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvG1 = ground;\nvG2 = ground2;\nvWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvWNrm = normalize(mat3(modelMatrix) * objectNormal);');
+      .replace('#include <common>', '#include <common>\nattribute vec4 ground;\nattribute vec4 ground2;\nattribute vec4 ground3;\nvarying vec4 vG1;\nvarying vec4 vG2;\nvarying vec4 vG3;\nvarying vec3 vWPos;\nvarying vec3 vWNrm;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvG1 = ground;\nvG2 = ground2;\nvG3 = ground3;\nvWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvWNrm = normalize(mat3(modelMatrix) * objectNormal);');
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>
 varying vec4 vG1;
-varying vec2 vG2;
+varying vec4 vG2;
+varying vec4 vG3;
 varying vec3 vWPos;
 varying vec3 vWNrm;
 uniform sampler2D detailMap;
@@ -1145,7 +1151,8 @@ ${GROUND_GLSL}`)
         float mixAB = smoothstep(0.3, 0.7, texture2D(detailMap, vWPos.xz * 0.021).g);
         float gNear = 1.0 - smoothstep(25.0, 60.0, length(vWPos - cameraPosition));
         float gw[${GROUNDS.length}];
-        gw[0] = vG1.x; gw[1] = vG1.y; gw[2] = vG1.z; gw[3] = vG1.w; gw[4] = vG2.x; gw[5] = vG2.y;
+        gw[0] = vG1.x; gw[1] = vG1.y; gw[2] = vG1.z; gw[3] = vG1.w; gw[4] = vG2.x; gw[5] = vG2.y; gw[6] = vG2.z; gw[7] = vG2.w;
+        gw[8] = vG3.x; gw[9] = vG3.y; gw[10] = vG3.z;
         float gTotal = 0.0;
         for (int i = 0; i < ${GROUNDS.length}; i++) gTotal += gw[i];
         gPat = vec3(0.0); gNrm = vec3(0.0); gOrmV = vec3(0.0);

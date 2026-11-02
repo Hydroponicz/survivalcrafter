@@ -8,15 +8,17 @@ import * as THREE from 'three';
 // sandstone, still differ.
 
 /** Ground layers, in array order. */
-export const GROUNDS = ['grass', 'dirt', 'sand', 'gravel', 'rock', 'snow'] as const;
+// New layers go on the end: the distant land's shader names layers by number.
+export const GROUNDS = ['grass', 'dirt', 'sand', 'gravel', 'rock', 'snow', 'clay', 'field', 'iron', 'shale', 'mud'] as const;
 export type Ground = (typeof GROUNDS)[number];
 /** Metres one repeat of each layer's texture covers. */
-export const GROUND_SCALE: Record<Ground, number> = { grass: 2.6, dirt: 2.4, sand: 3.2, gravel: 1.8, rock: 4.0, snow: 4.0 };
+export const GROUND_SCALE: Record<Ground, number> = { grass: 2.6, dirt: 2.4, sand: 3.2, gravel: 1.8, rock: 4.0, snow: 4.0, clay: 2.6, field: 3.4, iron: 3.6, shale: 3.6, mud: 2.4 };
 
-const SIZE = 1024;
+// Colour at full size; bumps and AO/roughness, which only show close up, at half (it keeps GPU memory down).
+const SIZE = 1024, SMALL = 512;
 const LAYERS = GROUNDS.length;
 
-function makeArray(fill: [number, number, number, number], colour: boolean): THREE.DataArrayTexture {
+function makeArray(fill: [number, number, number, number], colour: boolean, SIZE: number): THREE.DataArrayTexture {
   const data = new Uint8Array(SIZE * SIZE * 4 * LAYERS);
   for (let i = 0; i < data.length; i += 4) { data[i] = fill[0]; data[i + 1] = fill[1]; data[i + 2] = fill[2]; data[i + 3] = fill[3]; }
   const t = new THREE.DataArrayTexture(data, SIZE, SIZE, LAYERS);
@@ -33,9 +35,9 @@ function makeArray(fill: [number, number, number, number], colour: boolean): THR
 }
 
 export class GroundTextures {
-  readonly color = makeArray([128, 128, 128, 255], true);
-  readonly normal = makeArray([128, 128, 255, 255], false);
-  readonly orm = makeArray([255, 230, 0, 255], false);
+  readonly color = makeArray([128, 128, 128, 255], true, SIZE);
+  readonly normal = makeArray([128, 128, 255, 255], false, SMALL);
+  readonly orm = makeArray([255, 230, 0, 255], false, SMALL);
   /** Each layer's average colour (linear), so its pattern can be laid over other colours. */
   readonly avg = Array.from({ length: LAYERS }, () => new THREE.Vector3(0.2158, 0.2158, 0.2158)); // the grey placeholder, until each loads
   readonly scale = GROUNDS.map((g) => GROUND_SCALE[g]);
@@ -50,6 +52,7 @@ export class GroundTextures {
   }
 
   private async load(url: string, tex: THREE.DataArrayTexture, layer: number, colour: boolean) {
+    const SIZE = tex.image.width;
     try {
       const blob = await (await fetch(url)).blob();
       const bmp = await createImageBitmap(blob, { resizeWidth: SIZE, resizeHeight: SIZE, colorSpaceConversion: 'none', premultiplyAlpha: 'none' });

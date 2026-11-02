@@ -10,6 +10,7 @@ import { CAMPFIRE } from './models/campfire';
 import { IRON_ANVIL } from './models/iron_anvil';
 import { WOOD_BUCKET } from './models/wood_bucket';
 import type { ViewCull } from './cull';
+import { cylinderUV, surfaceMat, worldUV, type Surface } from './surfaces';
 import {
   CROP_STAGES, cropPos, type AnimalObj, type BushObj, type ForageObj, type PileObj, type Species, type StructureObj,
   type TreeObj, type World, type WorldListener, type WorldObj,
@@ -589,7 +590,7 @@ function animateLegs(m: THREE.Group, a: AnimalObj, time: number) {
   legs.forEach((l, i) => { l.rotation.x = (i === 0 || i === 3 ? sw : -sw); });
 }
 
-const WOOD = 0x8a6440, DARK_WOOD = 0x6e4e30, STONE = 0x8a8782;
+const WOOD = 0x8a6440, DARK_WOOD = 0x6e4e30;
 
 /**
  * Meshes for a building piece in its local frame (origin at bottom centre).
@@ -625,69 +626,82 @@ export function buildPieceMesh(type: string, state: { lit?: boolean; open?: bool
     parent.add(m);
     return m;
   };
+  /** A piece in a photographed surface; `turn` runs its grain the other way. */
+  const tex = (geo: THREE.BufferGeometry, surface: Surface, x = 0, y = 0, z = 0, opts: { turn?: boolean; tint?: number; parent?: THREE.Object3D } = {}) => {
+    if (geo instanceof THREE.CylinderGeometry) cylinderUV(geo, surface);
+    else worldUV(geo, surface, opts.turn);
+    const m = new THREE.Mesh(geo, surfaceMat(surface, opts.tint));
+    m.position.set(x, y, z);
+    m.castShadow = m.receiveShadow = true;
+    (opts.parent ?? g).add(m);
+    return m;
+  };
   switch (type) {
     case 'floor':
-      for (let i = 0; i < 5; i++) add(new THREE.BoxGeometry(0.39, 0.2, 2), i % 2 ? WOOD : 0x80603e, -0.8 + i * 0.4, 0.1, 0);
+      tex(new THREE.BoxGeometry(2, 0.2, 2), 'planks', 0, 0.1, 0, { turn: true });
       break;
     case 'stone_foundation':
-      add(new THREE.BoxGeometry(2, 1, 2), STONE, 0, 0.5, 0, { flatShading: true });
-      add(new THREE.BoxGeometry(2.04, 0.08, 2.04), 0x77746f, 0, 0.97, 0);
+      tex(new THREE.BoxGeometry(2, 1, 2), 'stone', 0, 0.5, 0);
+      tex(new THREE.BoxGeometry(2.04, 0.08, 2.04), 'stone', 0, 0.97, 0, { tint: 0xd8d4cc });
       break;
     case 'wood_wall':
-      for (let i = 0; i < 5; i++) add(new THREE.BoxGeometry(0.39, 2, 0.16), i % 2 ? WOOD : 0x80603e, -0.8 + i * 0.4, 1, 0);
-      add(new THREE.BoxGeometry(2, 0.14, 0.22), DARK_WOOD, 0, 1.6, 0);
-      add(new THREE.BoxGeometry(2, 0.14, 0.22), DARK_WOOD, 0, 0.4, 0);
+      // Boards on a frame: a post at each end, a rail top and bottom.
+      tex(new THREE.BoxGeometry(1.9, 1.9, 0.12), 'planks', 0, 1, 0);
+      for (const x of [-0.95, 0.95]) tex(new THREE.BoxGeometry(0.1, 2, 0.18), 'rough_wood', x, 1, 0);
+      for (const y of [0.06, 1.94]) tex(new THREE.BoxGeometry(1.9, 0.12, 0.18), 'rough_wood', 0, y, 0, { turn: true });
       break;
     case 'log_wall':
+      // The wall's face, and the log ends jutting out past each corner.
+      tex(new THREE.BoxGeometry(2, 1.97, 0.3), 'log_wall', 0, 0.985, 0);
       for (let i = 0; i < 6; i++) {
-        const l = add(new THREE.CylinderGeometry(0.18, 0.18, 2.2, 8), i % 2 ? 0x6b4a30 : 0x765236, 0, 0.18 + i * 0.328, 0);
+        const l = tex(new THREE.CylinderGeometry(0.16, 0.16, 2.24, 10), 'rough_wood', 0, 0.18 + i * 0.328, 0);
         l.rotation.z = Math.PI / 2;
       }
       break;
     case 'stone_wall':
-      add(new THREE.BoxGeometry(2, 1.9, 0.4), STONE, 0, 0.95, 0, { flatShading: true });
-      add(new THREE.BoxGeometry(2.04, 0.12, 0.44), 0x77746f, 0, 1.94, 0);
+      tex(new THREE.BoxGeometry(2, 1.9, 0.4), 'stone', 0, 0.95, 0);
+      tex(new THREE.BoxGeometry(2.04, 0.12, 0.44), 'stone', 0, 1.94, 0, { tint: 0xd8d4cc });
       break;
     case 'beam':
-      add(new THREE.BoxGeometry(0.2, 2, 0.2), DARK_WOOD, 0, 1, 0);
+      tex(new THREE.BoxGeometry(0.2, 2, 0.2), 'rough_wood', 0, 1, 0);
       break;
     case 'roof': {
       // A 45° slab rising toward +z, with thatch on top.
       const len = Math.SQRT2 * 2;
-      const deck = add(new THREE.BoxGeometry(2, 0.08, len), WOOD, 0, 1, 0);
+      const deck = tex(new THREE.BoxGeometry(2, 0.08, len), 'dark_planks', 0, 1, 0);
       deck.rotation.x = -Math.PI / 4;
-      const thatch = add(new THREE.BoxGeometry(2.1, 0.16, len + 0.1), 0xb39a5c, 0, 1.08, -0.08, { flatShading: true });
+      const thatch = tex(new THREE.BoxGeometry(2.1, 0.16, len + 0.1), 'thatch', 0, 1.08, -0.08);
       thatch.rotation.x = -Math.PI / 4;
       break;
     }
     case 'stairs':
-      for (let k = 0; k < 8; k++) add(new THREE.BoxGeometry(1.9, 0.08, 0.27), WOOD, 0, (k + 1) * 0.25 - 0.04, -1 + (k + 0.5) * 0.25);
+      for (let k = 0; k < 8; k++) tex(new THREE.BoxGeometry(1.9, 0.08, 0.27), 'planks', 0, (k + 1) * 0.25 - 0.04, -1 + (k + 0.5) * 0.25);
       for (const x of [-0.97, 0.97]) {
-        const s = add(new THREE.BoxGeometry(0.08, 0.25, Math.SQRT2 * 2), DARK_WOOD, x, 1, 0);
+        const s = tex(new THREE.BoxGeometry(0.08, 0.25, Math.SQRT2 * 2), 'rough_wood', x, 1, 0, { turn: true });
         s.rotation.x = -Math.PI / 4;
       }
       break;
     case 'door': {
-      add(new THREE.BoxGeometry(0.5, 2, 0.2), WOOD, -0.75, 1, 0);
-      add(new THREE.BoxGeometry(0.5, 2, 0.2), WOOD, 0.75, 1, 0);
+      tex(new THREE.BoxGeometry(0.5, 2, 0.2), 'rough_wood', -0.75, 1, 0);
+      tex(new THREE.BoxGeometry(0.5, 2, 0.2), 'rough_wood', 0.75, 1, 0);
       const hinge = new THREE.Group();
       hinge.position.set(-0.5, 0, 0);
-      add(new THREE.BoxGeometry(1, 1.95, 0.08), 0x7a5634, 0.5, 0.98, 0, undefined, hinge);
-      add(new THREE.BoxGeometry(0.9, 0.1, 0.1), DARK_WOOD, 0.5, 1.5, 0.05, undefined, hinge);
-      add(new THREE.BoxGeometry(0.9, 0.1, 0.1), DARK_WOOD, 0.5, 0.5, 0.05, undefined, hinge);
+      tex(new THREE.BoxGeometry(1, 1.95, 0.08), 'dark_planks', 0.5, 0.98, 0, { turn: true, parent: hinge });
+      tex(new THREE.BoxGeometry(0.9, 0.1, 0.1), 'rough_wood', 0.5, 1.5, 0.05, { turn: true, parent: hinge });
+      tex(new THREE.BoxGeometry(0.9, 0.1, 0.1), 'rough_wood', 0.5, 0.5, 0.05, { turn: true, parent: hinge });
       if (state.open) hinge.rotation.y = -Math.PI / 2;
       g.add(hinge);
       break;
     }
     case 'fence':
     case 'gate': {
-      add(new THREE.BoxGeometry(0.12, 1.3, 0.12), DARK_WOOD, -1, 0.65, 0);
-      add(new THREE.BoxGeometry(0.12, 1.3, 0.12), DARK_WOOD, 1, 0.65, 0);
+      tex(new THREE.BoxGeometry(0.12, 1.3, 0.12), 'rough_wood', -1, 0.65, 0);
+      tex(new THREE.BoxGeometry(0.12, 1.3, 0.12), 'rough_wood', 1, 0.65, 0);
       const rails = new THREE.Group();
       rails.position.x = -1;
-      for (const y of [0.45, 0.9]) add(new THREE.BoxGeometry(1.9, 0.12, 0.05), WOOD, 1, y, 0, undefined, rails);
+      for (const y of [0.45, 0.9]) tex(new THREE.BoxGeometry(1.9, 0.12, 0.05), 'rough_wood', 1, y, 0, { turn: true, parent: rails });
       if (type === 'gate') {
-        const brace = add(new THREE.BoxGeometry(2.05, 0.08, 0.04), DARK_WOOD, 1, 0.67, 0.03, undefined, rails);
+        const brace = tex(new THREE.BoxGeometry(2.05, 0.08, 0.04), 'rough_wood', 1, 0.67, 0.03, { turn: true, parent: rails });
         brace.rotation.z = 0.25;
         if (state.open) rails.rotation.y = -Math.PI / 2;
       }
@@ -698,8 +712,8 @@ export function buildPieceMesh(type: string, state: { lit?: boolean; open?: bool
     case 'forge': {
       const forge = type === 'forge';
       if (forge) {
-        add(new THREE.BoxGeometry(1.5, 0.9, 1.3), 0x7a6f66, 0, 0.45, 0, { flatShading: true });
-        add(new THREE.BoxGeometry(0.5, 1.2, 0.5), 0x6e655d, 0.45, 1.4, 0.3);
+        tex(new THREE.BoxGeometry(1.5, 0.9, 1.3), 'stone', 0, 0.45, 0, { tint: 0xc8bcb0 });
+        tex(new THREE.BoxGeometry(0.5, 1.2, 0.5), 'stone', 0.45, 1.4, 0.3, { tint: 0xb0a698 });
         add(new THREE.BoxGeometry(0.8, 0.12, 0.7), 0x1a1a1a, 0, 0.91, 0);
       } else {
         g.add(propMesh('campfire'));
@@ -713,12 +727,12 @@ export function buildPieceMesh(type: string, state: { lit?: boolean; open?: bool
       break;
     }
     case 'anvil':
-      add(new THREE.BoxGeometry(0.6, 0.55, 0.5), STONE, 0, 0.27, 0, { flatShading: true });
-      add(new THREE.BoxGeometry(1.0, 0.25, 0.45), 0x77746f, 0, 0.67, 0, { flatShading: true });
+      tex(new THREE.BoxGeometry(0.6, 0.55, 0.5), 'stone', 0, 0.27, 0);
+      tex(new THREE.BoxGeometry(1.0, 0.25, 0.45), 'stone', 0, 0.67, 0, { tint: 0xd8d4cc });
       break;
     case 'iron_anvil': {
       // The anvil on a stump, its face at a good height to work at.
-      add(new THREE.CylinderGeometry(0.28, 0.34, 0.4, 8), DARK_WOOD, 0, 0.2, 0);
+      tex(new THREE.CylinderGeometry(0.28, 0.34, 0.4, 10), 'rough_wood', 0, 0.2, 0);
       const anvil = propMesh('iron_anvil');
       anvil.position.y = 0.4;
       g.add(anvil);
@@ -753,20 +767,20 @@ export function buildPieceMesh(type: string, state: { lit?: boolean; open?: bool
       break;
     }
     case 'quern':
-      add(new THREE.CylinderGeometry(0.55, 0.6, 0.3, 12), STONE, 0, 0.15, 0);
-      add(new THREE.CylinderGeometry(0.5, 0.5, 0.25, 12), 0x9a9792, 0, 0.42, 0);
-      add(new THREE.CylinderGeometry(0.04, 0.04, 0.5, 5), WOOD, 0.35, 0.7, 0);
+      tex(new THREE.CylinderGeometry(0.55, 0.6, 0.3, 16), 'stone', 0, 0.15, 0);
+      tex(new THREE.CylinderGeometry(0.5, 0.5, 0.25, 16), 'stone', 0, 0.42, 0, { tint: 0xe0dcd6 });
+      tex(new THREE.CylinderGeometry(0.04, 0.04, 0.5, 6), 'rough_wood', 0.35, 0.7, 0);
       break;
     case 'workbench':
-      add(new THREE.BoxGeometry(1.6, 0.1, 0.8), WOOD, 0, 0.85, 0);
-      for (const [x, z] of [[-0.7, -0.3], [0.7, -0.3], [-0.7, 0.3], [0.7, 0.3]]) add(new THREE.BoxGeometry(0.1, 0.85, 0.1), DARK_WOOD, x, 0.42, z);
+      tex(new THREE.BoxGeometry(1.6, 0.1, 0.8), 'planks', 0, 0.85, 0);
+      for (const [x, z] of [[-0.7, -0.3], [0.7, -0.3], [-0.7, 0.3], [0.7, 0.3]]) tex(new THREE.BoxGeometry(0.1, 0.85, 0.1), 'rough_wood', x, 0.42, z);
       break;
     case 'chest':
-      add(new THREE.BoxGeometry(1.0, 0.6, 0.6), WOOD, 0, 0.3, 0);
-      add(new THREE.BoxGeometry(1.04, 0.08, 0.64), 0x5a3c22, 0, 0.62, 0);
+      tex(new THREE.BoxGeometry(1.0, 0.6, 0.6), 'planks', 0, 0.3, 0);
+      tex(new THREE.BoxGeometry(1.04, 0.08, 0.64), 'dark_planks', 0, 0.62, 0);
       break;
     case 'bed':
-      add(new THREE.BoxGeometry(1.0, 0.35, 1.9), WOOD, 0, 0.18, 0);
+      tex(new THREE.BoxGeometry(1.0, 0.35, 1.9), 'planks', 0, 0.18, 0, { turn: true });
       add(new THREE.BoxGeometry(0.9, 0.12, 1.8), 0x9b7552, 0, 0.42, 0);
       break;
   }
