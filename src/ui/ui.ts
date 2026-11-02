@@ -50,6 +50,12 @@ export class UI {
   private menuEl: HTMLElement;
   private pauseEl: HTMLElement;
   private deathEl: HTMLElement;
+  /**
+   * Until the first click captures the mouse (a browser only lets a page do
+   * that when you click on it), a "click to start" screen, not the pause menu.
+   */
+  private startEl: HTMLElement;
+  private started = false;
   private damageEl: HTMLElement;
   private container: StructureObj | PileObj | null = null;
   private craftCategory = 'Primitive';
@@ -177,6 +183,10 @@ export class UI {
       g.input.lock();
     });
     this.root.appendChild(this.pauseEl);
+    this.startEl = el('div', 'start-prompt', `
+      <div class="start-box"><h2>Click to start</h2><p>The game takes the mouse to look around. Press Esc any time to pause.</p></div>`);
+    this.startEl.addEventListener('click', () => g.input.lock());
+    this.root.appendChild(this.startEl);
     this.deathEl = el('div', 'death', '<h1>You have died</h1><p>You wake at your home. Your belongings lie where you fell.</p>');
     this.root.appendChild(this.deathEl);
     this.damageEl = el('div', 'damage');
@@ -407,7 +417,9 @@ export class UI {
     this.relockGrace = Math.max(0, this.relockGrace - 1 / 60);
     // If the mouse was released (Esc), the real cursor takes over.
     this.cursor.setVisible(this.cursorActive());
-    const showPause = !g.input.locked && !this.anyWindowOpen() && !this.wantsRelock && this.relockGrace <= 0;
+    if (g.input.locked) this.started = true;
+    this.startEl.style.display = this.started ? 'none' : 'flex';
+    const showPause = this.started && !g.input.locked && !this.anyWindowOpen() && !this.wantsRelock && this.relockGrace <= 0;
     this.pauseEl.style.display = showPause ? 'flex' : 'none';
     if (showPause) (this.pauseEl.querySelector('[data-act="skip-tutorial"]') as HTMLElement).style.display = g.onboarding?.active ? '' : 'none';
 

@@ -246,6 +246,10 @@ table.keys td:first-child { color: var(--accent); white-space: nowrap; font-fami
 
 /* ---------- overlays */
 .pause { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,0.45); pointer-events: auto !important; cursor: pointer; }
+.start-prompt { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,0.25); pointer-events: auto !important; cursor: pointer; }
+.start-box { text-align: center; background: var(--panel); border: 1px solid var(--panel-edge); padding: 22px 36px; border-radius: 10px; }
+.start-box h2 { margin: 0 0 4px; color: var(--accent); animation: mg-hint-pulse 1.2s ease-in-out infinite alternate; }
+.start-box p { margin: 0; color: var(--muted); font-size: 14px; }
 .pause-box { text-align: center; background: var(--panel); border: 1px solid var(--panel-edge); padding: 24px 36px; border-radius: 10px; }
 .pause-box h2 { margin: 0 0 4px; color: var(--accent); }
 .pause-box p { color: var(--muted); }
