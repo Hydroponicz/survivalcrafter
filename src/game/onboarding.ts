@@ -33,6 +33,8 @@ const HOUSE_R = 6;
 
 const has = (g: Game, type: string, n: number): [number, number] => [Math.min(n, g.inv.count(type)), n];
 const hasTool = (g: Game, kind: ToolKind) => g.inv.items.some((i) => itemDef(i.type).tool === kind);
+/** Plain walls (the windowed wall and the door have steps of their own). */
+const WALLS = ['log_wall', 'wood_wall', 'stone_wall'];
 const builtNear = (g: Game, q: Onboarding, types: string[], r = HOUSE_R) => {
   const a = q.anchor;
   if (!a) return 0;
@@ -123,24 +125,32 @@ const STEPS: Step[] = [
     targets: (g) => trees(g),
     far: 'No grown trees close by: head for the woods.' },
   { id: 'planks', title: 'Split planks',
-    text: `In crafting (${KEY('C')}), under <b>Woodworking</b>, <b>Split log into planks</b> with your hatchet: 2 planks a log. A floor needs 4.`,
+    text: `In crafting (${KEY('C')}), under <b>Woodworking</b>, <b>Split log into planks</b> with your hatchet: 2 planks a log. The first floor needs 4.`,
     progress: (g) => has(g, 'plank', 4) },
-  { id: 'floor', title: 'Lay a floor',
-    text: `Press ${KEY('B')} to build and pick <b>Wooden floor</b>. Find level ground, ${KEY('Left click')} to place the plan, then hold your hammer, aim at the plan and ${KEY('Left click')} to build it, one plank at a time. This is where your house goes.`,
-    progress: (_g, q) => !!q.anchor,
+  { id: 'floor', title: 'Lay the floor',
+    text: `Press ${KEY('B')} to build and pick <b>Wooden floor</b>. Find level ground, ${KEY('Left click')} to place the plan, then hold your hammer, aim at the plan and ${KEY('Left click')} to build it, one plank at a time. Your house is four floors in a square (4 × 4 m): aim at the edge of a built floor and the next plan snaps beside it. Each floor takes 4 planks.`,
+    progress: (g, q) => [Math.min(4, builtNear(g, q, ['floor'], 4)), 4],
     targets: (g) => plans(g, ['floor']) },
-  { id: 'walls', title: 'Raise three walls',
-    text: `Pick a wall in the build menu (${KEY('B')}) and aim at the floor's edge: the plan snaps into place. <b>Log walls</b> need only 4 logs each and your hatchet; plank walls need planks and shafts. Leave one side open for the door.`,
-    progress: (g, q) => [Math.min(3, builtNear(g, q, ['log_wall', 'wood_wall', 'stone_wall'])), 3],
-    targets: (g) => plans(g, ['log_wall', 'wood_wall', 'stone_wall']) },
+  { id: 'walls', title: 'Raise the walls',
+    text: `Pick a wall in the build menu (${KEY('B')}) and aim at the floor's edge: the plan snaps into place. Each side of the house takes two 2 m walls, eight in all: build six walls now and leave two gaps, one for a window and one for the door. <b>Log walls</b> need only 4 logs each and your hatchet; plank walls need planks and shafts.`,
+    progress: (g, q) => [Math.min(6, builtNear(g, q, WALLS)), 6],
+    targets: (g) => plans(g, WALLS) },
+  { id: 'window', title: 'Put in a window',
+    text: `In one gap, plan a <b>Windowed wall</b> (${KEY('B')} → Walls): planks around a framed opening. It takes 4 planks and 3 shafts (carve branches with your knife: <b>Woodworking → Shaft</b>).`,
+    progress: (g, q) => builtNear(g, q, ['window_wall']) > 0,
+    targets: (g) => plans(g, ['window_wall']) },
   { id: 'door', title: 'Hang a door',
-    text: `Plan a <b>Wooden door</b> on the open side. It takes planks, shafts (carve a branch with your knife: <b>Woodworking → Shaft</b>) and a cordage.`,
+    text: `Plan a <b>Wooden door</b> in the last gap. It takes planks, shafts and a cordage.`,
     progress: (g, q) => builtNear(g, q, ['door']) > 0,
     targets: (g) => plans(g, ['door']) },
   { id: 'roof', title: 'Put a roof on',
-    text: `Plan a <b>Thatch roof</b> (${KEY('B')} → Roofs): aim at the top of a wall and its low edge snaps on. Thatch takes planks and 8 plant fiber.`,
-    progress: (g, q) => builtNear(g, q, ['roof']) > 0,
+    text: `Plan a <b>Thatch roof</b> (${KEY('B')} → Roofs & stairs): aim at the top of a wall and its low edge snaps on. Two pieces on each long side slope up to meet in the middle: four in all. Each takes 3 planks and 8 plant fiber.`,
+    progress: (g, q) => [Math.min(4, builtNear(g, q, ['roof'])), 4],
     targets: (g) => plans(g, ['roof']) },
+  { id: 'gables', title: 'Close the roof ends',
+    text: `The two ends of the roof are open triangles. Plan a <b>Gable</b> (${KEY('B')} → Roofs & stairs) on top of an end wall, under the roof's edge: two at each end, turned to face each other (${KEY('Q')} / ${KEY('E')} or the mouse wheel turns a plan). Each takes 2 planks.`,
+    progress: (g, q) => [Math.min(4, builtNear(g, q, ['gable'])), 4],
+    targets: (g) => plans(g, ['gable']) },
   { id: 'hides', title: 'Hunt for hides',
     text: `A bed needs two hides. Craft a <b>Stone spear</b>, find deer (or a boar, if you're brave: they fight back), and ${KEY('Left click')} to strike. Then hold your knife and <b>Butcher</b> the carcass.`,
     progress: (g) => has(g, 'hide', 2),

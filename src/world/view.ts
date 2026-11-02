@@ -662,6 +662,24 @@ export function buildPieceMesh(type: string, state: { lit?: boolean; open?: bool
       tex(new THREE.BoxGeometry(2, 1.9, 0.4), 'stone_wall', 0, 0.95, 0);
       tex(new THREE.BoxGeometry(2.04, 0.12, 0.44), 'stone', 0, 1.94, 0, { tint: 0xd8d4cc });
       break;
+    case 'window_wall': {
+      // Planks around the opening, a frame round it and a cross of bars.
+      for (const [w, h, x, y] of [[2, 0.9, 0, 0.45], [2, 0.4, 0, 1.8], [0.55, 0.7, -0.725, 1.25], [0.55, 0.7, 0.725, 1.25]]) tex(new THREE.BoxGeometry(w, h, 0.16), 'planks', x, y, 0);
+      for (const [w, h, x, y, turn] of [[1.02, 0.08, 0, 0.94, true], [1.02, 0.08, 0, 1.56, true], [0.08, 0.7, -0.47, 1.25, false], [0.08, 0.7, 0.47, 1.25, false]] as [number, number, number, number, boolean][]) {
+        tex(new THREE.BoxGeometry(w, h, 0.2), 'rough_wood', x, y, 0, { turn });
+      }
+      tex(new THREE.BoxGeometry(0.05, 0.62, 0.06), 'rough_wood', 0, 1.25, 0);
+      tex(new THREE.BoxGeometry(0.9, 0.05, 0.06), 'rough_wood', 0, 1.25, 0, { turn: true });
+      break;
+    }
+    case 'gable': {
+      // A plank triangle, its slope under the roof's.
+      const tri = new THREE.Shape([new THREE.Vector2(-1, 0), new THREE.Vector2(1, 0), new THREE.Vector2(1, 2)]);
+      const geo = new THREE.ExtrudeGeometry(tri, { depth: 0.12, bevelEnabled: false }).translate(0, 0, -0.06);
+      tex(geo, 'planks', 0, 0, 0);
+      tex(new THREE.BoxGeometry(2, 0.1, 0.16), 'rough_wood', 0, 0.05, 0, { turn: true });
+      break;
+    }
     case 'beam':
       tex(new THREE.BoxGeometry(0.2, 2, 0.2), 'rough_wood', 0, 1, 0);
       break;

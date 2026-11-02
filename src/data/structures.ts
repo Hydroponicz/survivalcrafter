@@ -47,6 +47,10 @@ const SLOPE_SNAPS: V3[] = [[-1, 0, -1], [1, 0, -1], [-1, 2, 1], [1, 2, 1]];
 
 const stairBoxes: Box[] = Array.from({ length: 8 }, (_, k) => box(0, (k + 1) * 0.125, -1 + (k + 0.5) * 0.25, 1, (k + 1) * 0.125, 0.125));
 const roofBoxes: Box[] = Array.from({ length: 4 }, (_, k) => box(0, (k + 1) * 0.5 - 0.15, -0.75 + k * 0.5, 1, 0.15, 0.25));
+/** A wall with a window: the wall around a 0.9 × 0.7 m opening. */
+const windowBoxes: Box[] = [box(0, 0.45, 0, 1, 0.45, 0.1), box(0, 1.8, 0, 1, 0.2, 0.1), box(-0.725, 1.25, 0, 0.275, 0.35, 0.1), box(0.725, 1.25, 0, 0.275, 0.35, 0.1)];
+/** A gable: a right triangle 2 m across and 2 m high, rising toward +x, in steps. */
+const gableBoxes: Box[] = Array.from({ length: 4 }, (_, k) => box(-0.75 + k * 0.5, (k + 1) * 0.25, 0, 0.25, (k + 1) * 0.25, 0.06));
 
 const defs: StructureDef[] = [
   // --- foundations
@@ -73,6 +77,10 @@ const defs: StructureDef[] = [
     boxes: [box(0, 1, 0, 1, 1, 0.2)], snaps: WALL_SNAPS,
     materials: [{ item: 'rock_shard', count: 10 }, { item: 'mortar', count: 3 }], tool: 'hammer', skill: 'masonry', difficulty: 15, stepTime: 3,
     desc: 'The strongest wall you can build.' },
+  { id: 'window_wall', name: 'Windowed wall', icon: '🪟', category: 'Walls', snap: true,
+    boxes: windowBoxes, snaps: WALL_SNAPS,
+    materials: [{ item: 'plank', count: 4 }, { item: 'shaft', count: 3 }], tool: 'hammer', skill: 'carpentry', difficulty: 10, stepTime: 2.5,
+    desc: 'A 2×2 m plank wall with a framed window to let the light in.' },
   { id: 'beam', name: 'Wooden beam', icon: '🥢', category: 'Walls', snap: true,
     boxes: [box(0, 1, 0, 0.1, 1, 0.1)], snaps: [[0, 0, 0], [0, 2, 0]],
     materials: [{ item: 'plank', count: 2 }], tool: 'hammer', skill: 'carpentry', difficulty: 5, stepTime: 2,
@@ -83,6 +91,10 @@ const defs: StructureDef[] = [
     boxes: roofBoxes, snaps: SLOPE_SNAPS,
     materials: [{ item: 'plank', count: 3 }, { item: 'plant_fiber', count: 8 }], tool: 'hammer', skill: 'carpentry', difficulty: 8, stepTime: 2,
     desc: 'A sloped 2×2 m roof. Its low edge snaps onto wall tops.' },
+  { id: 'gable', name: 'Gable (roof end)', icon: '📐', category: 'Roofs & stairs', snap: true,
+    boxes: gableBoxes, snaps: [[-1, 0, 0], [1, 0, 0], [1, 2, 0]],
+    materials: [{ item: 'plank', count: 2 }], tool: 'hammer', skill: 'carpentry', difficulty: 6, stepTime: 2,
+    desc: 'A triangle of planks that closes the open end under a sloped roof. Sits on a wall top; turn it to face the other way.' },
   { id: 'stairs', name: 'Wooden stairs', icon: '🪜', category: 'Roofs & stairs', snap: true,
     boxes: stairBoxes, snaps: SLOPE_SNAPS,
     materials: [{ item: 'plank', count: 5 }, { item: 'shaft', count: 2 }], tool: 'hammer', skill: 'carpentry', difficulty: 10, stepTime: 2.5,
