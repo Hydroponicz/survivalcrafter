@@ -641,7 +641,7 @@ export function buildPieceMesh(type: string, state: { lit?: boolean; open?: bool
       tex(new THREE.BoxGeometry(2, 0.2, 2), 'planks', 0, 0.1, 0, { turn: true });
       break;
     case 'stone_foundation':
-      tex(new THREE.BoxGeometry(2, 1, 2), 'stone', 0, 0.5, 0);
+      tex(new THREE.BoxGeometry(2, 1, 2), 'foundation', 0, 0.5, 0);
       tex(new THREE.BoxGeometry(2.04, 0.08, 2.04), 'stone', 0, 0.97, 0, { tint: 0xd8d4cc });
       break;
     case 'wood_wall':
@@ -659,7 +659,7 @@ export function buildPieceMesh(type: string, state: { lit?: boolean; open?: bool
       }
       break;
     case 'stone_wall':
-      tex(new THREE.BoxGeometry(2, 1.9, 0.4), 'stone', 0, 0.95, 0);
+      tex(new THREE.BoxGeometry(2, 1.9, 0.4), 'stone_wall', 0, 0.95, 0);
       tex(new THREE.BoxGeometry(2.04, 0.12, 0.44), 'stone', 0, 1.94, 0, { tint: 0xd8d4cc });
       break;
     case 'beam':
@@ -712,8 +712,8 @@ export function buildPieceMesh(type: string, state: { lit?: boolean; open?: bool
     case 'forge': {
       const forge = type === 'forge';
       if (forge) {
-        tex(new THREE.BoxGeometry(1.5, 0.9, 1.3), 'stone', 0, 0.45, 0, { tint: 0xc8bcb0 });
-        tex(new THREE.BoxGeometry(0.5, 1.2, 0.5), 'stone', 0.45, 1.4, 0.3, { tint: 0xb0a698 });
+        tex(new THREE.BoxGeometry(1.5, 0.9, 1.3), 'stone_wall', 0, 0.45, 0, { tint: 0xd0c8c0 });
+        tex(new THREE.BoxGeometry(0.5, 1.2, 0.5), 'stone_wall', 0.45, 1.4, 0.3, { tint: 0xb0a698 });
         add(new THREE.BoxGeometry(0.8, 0.12, 0.7), 0x1a1a1a, 0, 0.91, 0);
       } else {
         g.add(propMesh('campfire'));

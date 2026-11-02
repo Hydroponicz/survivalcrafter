@@ -13,6 +13,8 @@ const SURFACES = {
   rough_wood: { url: 'textures/building/rough_wood', size: 1.2, base: 0x6e665c },
   thatch: { url: 'textures/building/thatch_roof', size: 2, base: 0xa08c5a },
   stone: { url: 'textures/terrain/rock', size: 2.4, base: 0x8a8782 },
+  stone_wall: { url: 'textures/building/rough_stone_wall', size: 2.2, base: 0x8a8070 },
+  foundation: { url: 'textures/building/stone_foundation', size: 2.4, base: 0xa08a70 },
 } as const;
 export type Surface = keyof typeof SURFACES;
 
