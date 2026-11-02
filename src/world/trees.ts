@@ -4,6 +4,10 @@ import type { Zone } from './climate';
 import { mulberry32, Simplex } from './noise';
 import { BaseLand } from './worldgen';
 import { BIRCH } from './models/birch';
+import { MAPLE } from './models/maple';
+import { OAK } from './models/oak';
+import { PINE } from './models/pine';
+import { SPRUCE } from './models/spruce';
 
 // The kinds of tree, what they look like and where they grow. Everything
 // that draws, fells or places trees reads it from here, so a new kind is
@@ -24,16 +28,16 @@ export interface TreeKind {
 }
 
 export const TREES: Record<Species, TreeKind> = {
-  oak: { bark: 0x5a4030, leaf: 0x3f7a2c, grown: 2.7, trunk: { r0: 0.3, r1: 0.2, h: 3.4 }, hardness: 1.25, difficulty: 14 },
+  oak: { bark: 0x5a4030, leaf: 0x3f7a2c, grown: 2.7, trunk: OAK.trunk, hardness: 1.25, difficulty: 14 },
   // Its trunk and branches come from a model (see models/birch.ts).
   birch: { bark: 0xd8d4c8, leaf: 0x7aa33e, grown: 2.4, trunk: BIRCH.trunk, hardness: 1.0, difficulty: 10 },
-  pine: { bark: 0x4a3426, leaf: 0x2b5a33, grown: 3.4, trunk: { r0: 0.24, r1: 0.14, h: 4.5 }, hardness: 0.9, difficulty: 8 },
+  pine: { bark: 0x4a3426, leaf: 0x2b5a33, grown: 3.4, trunk: PINE.trunk, hardness: 0.9, difficulty: 8 },
   // Tall, narrow and dark: the deep conifer woods and the slopes up to the tree line.
-  spruce: { bark: 0x3d2c22, leaf: 0x1d4632, grown: 3.6, trunk: { r0: 0.26, r1: 0.12, h: 6.0 }, hardness: 0.85, difficulty: 8 },
+  spruce: { bark: 0x3d2c22, leaf: 0x1d4632, grown: 3.6, trunk: SPRUCE.trunk, hardness: 0.85, difficulty: 8 },
   // Smooth grey trunks under a dense, high canopy.
   beech: { bark: 0x8b8a82, leaf: 0x4d8a2c, grown: 2.9, trunk: { r0: 0.32, r1: 0.22, h: 4.2 }, hardness: 1.3, difficulty: 15 },
   // A broad round crown, yellower green.
-  maple: { bark: 0x6b5848, leaf: 0x7d9a2a, grown: 2.5, trunk: { r0: 0.27, r1: 0.18, h: 3.2 }, hardness: 1.2, difficulty: 13 },
+  maple: { bark: 0x6b5848, leaf: 0x7d9a2a, grown: 2.5, trunk: MAPLE.trunk, hardness: 1.2, difficulty: 13 },
   // Short and thick, with a drooping curtain of leaves, beside water.
   willow: { bark: 0x5b4a36, leaf: 0x8aa64a, grown: 2.3, trunk: { r0: 0.38, r1: 0.25, h: 2.8 }, hardness: 0.8, difficulty: 6 },
 };
@@ -45,7 +49,9 @@ export const TREES: Record<Species, TreeKind> = {
 export function treeGeometries(species: Species, detail: 0 | 1 = 1, standIn = false): { trunk: THREE.BufferGeometry; leaves: THREE.BufferGeometry } {
   const sides = detail ? 7 : 4, coneSides = detail ? 7 : 5, ico = detail;
   const t = TREES[species].trunk;
-  if (species === 'birch') return birchGeometries(detail, standIn);
+  const model = MODELS[species];
+  // Trees made from models (far-off conifers keep their plain cones).
+  if (model && !(standIn && model.profile.length)) return modelGeometries(species, model, detail, standIn);
   const trunk = new THREE.CylinderGeometry(t.r1, t.r0, t.h, sides, 1, !detail).translate(0, t.h / 2, 0);
   const blob = (r: number, x: number, y: number, z: number, sx = 1, sy = 1) =>
     new THREE.IcosahedronGeometry(r, ico).scale(sx, sy, sx).translate(x, y, z);
@@ -83,32 +89,50 @@ export function treeGeometries(species: Species, detail: 0 | 1 = 1, standIn = fa
 }
 
 /** Kinds whose trunk and branches come from a model (rather than a plain tapering trunk). */
-export const MODEL_TRUNK: Partial<Record<Species, true>> = { birch: true };
+export const MODEL_TRUNK: Partial<Record<Species, true>> = { birch: true, oak: true, maple: true, pine: true, spruce: true };
+
+/** A tree made from a model (see scripts/bake-trees.mjs). */
+interface TreeModel {
+  positions: number[]; indices: number[];
+  /** Leaf clumps (broadleaf): centre x, y, z, radii x, y, z. */
+  clumps: number[][];
+  /** Crown outline (conifer): height, how far the branches reach. */
+  profile: number[][];
+  trunk: { r0: number; r1: number; h: number };
+}
+const MODELS: Partial<Record<Species, TreeModel>> = { birch: BIRCH, oak: OAK, maple: MAPLE, pine: PINE, spruce: SPRUCE };
+
+/** How each kind's foliage grows: leaves per clump (relative), or a conifer's branches (droop: how far they bow down; tufts: needles only toward the tips). */
+const FOLIAGE: Partial<Record<Species, { leafy?: number; droop?: number; tufts?: boolean }>> = {
+  birch: { leafy: 1 }, oak: { leafy: 0.62 }, maple: { leafy: 0.45 },
+  spruce: { droop: 0.32, tufts: false }, pine: { droop: -0.12, tufts: true },
+};
 
 /**
- * The birch, from its model: the real trunk and branches near you (a plain
- * tapering trunk from afar), with low-poly leaf clumps where the model's
- * leaves were (the biggest few from afar). The model is flat front to back,
- * so each clump is made nearly as deep as it is wide.
+ * A tree from its model: the real trunk and branches near you (a plain
+ * tapering trunk from afar). A broadleaf tree grows leafy sprays where the
+ * model's leaves were (the biggest few clumps from afar; some models are flat
+ * front to back, so each clump is made nearly as deep as it is wide); a
+ * conifer grows whorls of needled branches, reaching as far as the model's.
  */
-function birchGeometries(detail: 0 | 1, standIn = false): { trunk: THREE.BufferGeometry; leaves: THREE.BufferGeometry } {
+function modelGeometries(species: Species, M: TreeModel, detail: 0 | 1, standIn: boolean): { trunk: THREE.BufferGeometry; leaves: THREE.BufferGeometry } {
   let trunk: THREE.BufferGeometry;
   if (detail) {
     trunk = new THREE.BufferGeometry();
-    trunk.setAttribute('position', new THREE.Float32BufferAttribute(BIRCH.positions, 3));
-    trunk.setIndex(BIRCH.indices);
+    trunk.setAttribute('position', new THREE.Float32BufferAttribute(M.positions, 3));
+    trunk.setIndex(M.indices);
     trunk.computeVertexNormals();
   } else if (standIn) {
     // Far off: a plain trunk running on up into the crown.
-    const t = BIRCH.trunk, top = Math.max(t.h, ...BIRCH.clumps.map((c) => c[1]));
+    const t = M.trunk, top = Math.max(t.h, ...M.clumps.map((c) => c[1]));
     trunk = new THREE.CylinderGeometry(t.r1 * 0.6, t.r0, top, 4, 1, true).translate(0, top / 2, 0);
   } else {
     // Further off: a plain trunk tapering up through the crown, and a thin
     // limb out to each clump, leaving the trunk at its own height and rising
     // toward the clump as branches do.
-    const t = BIRCH.trunk, top = Math.max(...BIRCH.clumps.map((c) => c[1]));
+    const t = M.trunk, top = Math.max(...M.clumps.map((c) => c[1]), ...M.profile.map((p) => p[0]));
     const parts: THREE.BufferGeometry[] = [new THREE.CylinderGeometry(t.r1 * 0.3, t.r0, top, 5, 1, true).translate(0, top / 2, 0).toNonIndexed()];
-    for (const [x, y, z] of BIRCH.clumps) {
+    for (const [x, y, z] of M.clumps) {
       const out = Math.hypot(x, z);
       const from = new THREE.Vector3(0, Math.max(t.h * 0.85, Math.min(y - 0.3, y - out * 0.85)), 0);
       const to = new THREE.Vector3(x, y, z), len = to.distanceTo(from);
@@ -118,13 +142,17 @@ function birchGeometries(detail: 0 | 1, standIn = false): { trunk: THREE.BufferG
     }
     trunk = mergeGeometries(parts)!;
   }
-  const clumps = detail || !standIn ? BIRCH.clumps : BIRCH.clumps.slice(0, 5);
+  const seed = 2711 + SPECIES.indexOf(species) * 101, fol = FOLIAGE[species] ?? {};
+  if (M.profile.length) return { trunk, leaves: needleWhorls(M, seed, detail ? 1 : 0.22, fol.droop ?? 0.2, !!fol.tufts) };
+  const clumps = detail || !standIn ? M.clumps : M.clumps.slice(0, 5);
+  // Each crown has about as many leaves however many clumps it's in.
+  const leafy = Math.min(1, (fol.leafy ?? 1) * 9 / Math.max(9, M.clumps.length));
   // A little fuller than the model's own leaves, so the clumps run together into a crown.
   const F = detail ? 1.35 : 1.6;
   const radii = (rx: number, ry: number, rz: number) => [rx * F, ry * F, Math.max(rz, rx * 0.85) * F];
   if (!detail && !standIn) {
     // Further off: the same kind of crown, in fewer twigs of bigger leaves.
-    return { trunk, leaves: leafClusters(clumps.map(([x, y, z, rx, ry, rz]) => [x, y, z, ...radii(rx, ry, rz)]), 2711, 0.3) };
+    return { trunk, leaves: leafClusters(clumps.map(([x, y, z, rx, ry, rz]) => [x, y, z, ...radii(rx, ry, rz)]), seed, 0.3 * leafy) };
   }
   if (!detail) {
     // Far off (the distant forests), plain clumps: the leaves are too small to make out.
@@ -134,7 +162,7 @@ function birchGeometries(detail: 0 | 1, standIn = false): { trunk: THREE.BufferG
     });
     return { trunk, leaves: withColour(mergeGeometries(parts)!, 1) };
   }
-  return { trunk, leaves: leafClusters(clumps.map(([x, y, z, rx, ry, rz]) => [x, y, z, ...radii(rx, ry, rz)]), 2711) };
+  return { trunk, leaves: leafClusters(clumps.map(([x, y, z, rx, ry, rz]) => [x, y, z, ...radii(rx, ry, rz)]), seed, leafy) };
 }
 
 /**
@@ -314,3 +342,88 @@ export class TreeCover {
 }
 
 const smooth01 = (t: number) => { t = Math.max(0, Math.min(1, t)); return t * t * (3 - 2 * t); };
+
+/**
+ * A conifer's crown: whorls of branches out from the trunk at each height of
+ * the model's crown outline, reaching as far as its foliage did there, each
+ * carrying narrow needled fronds along it (or, for a pine, in tufts toward
+ * the tip), with a tuft at the top. Spruce branches bow down; pine branches
+ * run level and turn up at the ends. The fronds are lit as the cone of the
+ * crown, so it keeps a sunny and a shaded side; each branch is a slightly
+ * different shade, with paler new growth at the tips. `fewer` (0..1) thins
+ * it out for trees further off, in fewer, bigger fronds.
+ */
+function needleWhorls(M: TreeModel, seed: number, fewer: number, droop: number, tufts: boolean): THREE.BufferGeometry {
+  const rnd = mulberry32(seed);
+  const pos: number[] = [], nor: number[] = [], col: number[] = [];
+  const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
+  const up = V(0, 1, 0);
+  const push = (pts: THREE.Vector3[], n: THREE.Vector3, c: number[]) => {
+    for (const p of pts) { pos.push(p.x, p.y, p.z); nor.push(n.x, n.y, n.z); col.push(c[0], c[1], c[2]); }
+  };
+  const top = Math.max(...M.profile.map((p) => p[0])) + 0.25;
+  // The branches first (so the fronds can be spread to a budget).
+  const branches: { start: THREE.Vector3; end: THREE.Vector3; dir: THREE.Vector3; len: number; shade: number }[] = [];
+  for (const [y, r] of M.profile) {
+    const n = Math.max(3, Math.round((4 + r * 2.5) * (fewer < 1 ? 0.6 : 1)));
+    const a0 = rnd() * Math.PI * 2;
+    const trunkR = M.trunk.r0 * Math.max(0.2, 1 - y / top);
+    for (let b = 0; b < n; b++) {
+      const ang = a0 + (b / n) * Math.PI * 2 + (rnd() - 0.5) * 0.5;
+      const dir = V(Math.cos(ang), 0, Math.sin(ang));
+      const len = r * (0.8 + 0.3 * rnd());
+      const start = V(0, y + (rnd() - 0.5) * 0.12, 0).addScaledVector(dir, trunkR);
+      const end = start.clone().addScaledVector(dir, len).addScaledVector(up, -droop * len);
+      branches.push({ start, end, dir, len, shade: 0.82 + 0.22 * rnd() });
+    }
+  }
+  // Fronds spaced to keep within a budget of triangles.
+  const budget = 2600 * fewer;
+  const totalLen = branches.reduce((s, b) => s + b.len * (tufts ? 0.5 : 0.8), 0);
+  const spacing = Math.max(0.09, (totalLen * 4) / budget);
+  const frond = (base: THREE.Vector3, a: THREE.Vector3, L: number, W: number, n: THREE.Vector3, c: number[]) => {
+    const face = V().crossVectors(a, V().crossVectors(up, a).normalize()).normalize();
+    if (face.y < 0) face.negate();
+    const b = V().crossVectors(face, a).normalize();
+    const tip = base.clone().addScaledVector(a, L), mid = base.clone().addScaledVector(a, L * 0.4).addScaledVector(face, -W * 0.2);
+    push([base, mid.clone().addScaledVector(b, W / 2), tip, base, tip, mid.clone().addScaledVector(b, -W / 2)], n, c);
+  };
+  const scale = fewer < 1 ? 1.5 : 1;
+  for (const br of branches) {
+    const along = br.end.clone().sub(br.start).normalize();
+    // Lit as the crown's cone: out from the trunk, and up.
+    const n = br.dir.clone().addScaledVector(up, 0.55).normalize();
+    // The bare branch.
+    const side = V().crossVectors(along, up).normalize().multiplyScalar(0.012);
+    push([br.start.clone().sub(side), br.start.clone().add(side), br.end.clone()], up, [0.32, 0.3, 0.26]);
+    const from = tufts ? 0.5 : 0.2;
+    const count = Math.max(1, Math.round((br.len * (1 - from)) / spacing));
+    for (let k = 0; k <= count; k++) {
+      const t = from + (1 - from) * (k / count);
+      const p = br.start.clone().lerp(br.end, t);
+      // Paler new growth toward the tip.
+      const v = 1.25 * br.shade * (0.9 + 0.12 * rnd()) * (1 + 0.15 * t);
+      const c = [v * 0.97, v, v * 0.95];
+      // Big, overlapping fronds: from a little way off a branch reads as a layer of needles.
+      const L = (0.46 - 0.18 * t) * scale, W = L * 0.42;
+      const perp = V().crossVectors(along, up).normalize();
+      for (const sgn of [-1, 1]) {
+        const a = along.clone().multiplyScalar(0.55).addScaledVector(perp, sgn * 0.85).addScaledVector(up, tufts ? 0.25 : -0.1).normalize();
+        frond(p, a, L, W, n, c);
+      }
+    }
+    // A frond carrying the branch on past its end.
+    frond(br.end, along.clone().addScaledVector(up, tufts ? 0.4 : 0.15).normalize(), 0.36 * scale, 0.15 * scale, n, [br.shade * 1.4, br.shade * 1.45, br.shade * 1.3]);
+  }
+  // A tuft at the top.
+  const tip = V(0, top - 0.25, 0);
+  for (let k = 0; k < 5; k++) {
+    const ang = (k / 5) * Math.PI * 2;
+    frond(tip, V(Math.cos(ang) * 0.35, 1, Math.sin(ang) * 0.35).normalize(), 0.45 * scale, 0.16 * scale, up, [1.3, 1.35, 1.2]);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  return g;
+}
