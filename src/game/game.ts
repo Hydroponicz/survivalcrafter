@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { getNextUid, isIdentified, itemDef, itemName, learnSpecies, makeItem, setNextUid, type Item } from '../data/items';
+import { getNextUid, isIdentified, itemDef, itemName, learnSpecies, makeItem, setNextUid, WEAR_SLOTS, type Item, type WearSlot } from '../data/items';
 import type { Recipe, StationKind } from '../data/recipes';
 import { SKILLS, Skills, type SkillId } from '../data/skills';
 import { pieceBoxes, STRUCTURES, type StructureDef, type V3 } from '../data/structures';
@@ -116,6 +116,8 @@ export class Game {
   lastAction: { def: ActionDef; recipe?: Recipe } | null = null;
   activeUid: number | null = null;
   hotbar: (string | null)[] = Array(9).fill(null);
+  /** What you're wearing, by slot (item uids; the items stay in your pack). */
+  equipped: Partial<Record<WearSlot, number>> = {};
   placing: StructureDef | null = null;
   /** The equipment item being set down, when placing one rather than planning a building. */
   placingItem: Item | null = null;
@@ -292,6 +294,8 @@ export class Game {
 
   inventoryChanged() {
     if (this.activeUid !== null && !this.inv.find(this.activeUid)) this.setActive(null);
+    // Clothing that has left your pack (dropped, stored) comes off.
+    for (const slot of WEAR_SLOTS) this.worn(slot);
     this.ui?.refresh();
   }
 
@@ -330,6 +334,54 @@ export class Game {
     if (this.hotbar.includes(it.type)) return;
     const free = this.hotbar.indexOf(null);
     if (free >= 0) this.hotbar[free] = it.type;
+  }
+
+  /** What's worn in a slot (forgetting anything no longer in your pack). */
+  worn(slot: WearSlot): Item | undefined {
+    const uid = this.equipped[slot];
+    if (uid === undefined) return undefined;
+    const it = this.inv.find(uid);
+    if (!it) { delete this.equipped[slot]; this.dressPlayer(); }
+    return it;
+  }
+
+  /** Put on a piece of clothing (taking off what was in its slot). */
+  putOn(uid: number) {
+    const it = this.inv.find(uid), w = it && itemDef(it.type).wear;
+    if (!it || !w) return;
+    this.equipped[w.slot] = uid;
+    this.msg(`You put on the ${itemName(it).toLowerCase()}.`, 'info');
+    this.dressPlayer();
+    this.inventoryChanged();
+  }
+
+  takeOff(slot: WearSlot) {
+    const it = this.worn(slot);
+    delete this.equipped[slot];
+    if (it) this.msg(`You take off the ${itemName(it).toLowerCase()}.`, 'info');
+    this.dressPlayer();
+    this.inventoryChanged();
+  }
+
+  /** How much of a blow your clothing takes (0..0.6): each piece by its kind and quality. */
+  armor(): number {
+    let a = 0;
+    for (const slot of WEAR_SLOTS) {
+      const it = this.worn(slot);
+      if (it) a += itemDef(it.type).wear!.armor * (0.6 + it.ql / 125);
+    }
+    return Math.min(0.6, a);
+  }
+
+  /** Show what you're wearing on your character. */
+  dressPlayer() {
+    const colours: Partial<Record<WearSlot, number>> = {};
+    for (const slot of WEAR_SLOTS) {
+      const uid = this.equipped[slot];
+      const it = uid !== undefined ? this.inv.find(uid) : undefined;
+      if (it) colours[slot] = itemDef(it.type).wear!.colour;
+    }
+    this.player.dress(colours);
   }
 
   /** Put an item type in a hotbar slot. A type lives in one slot only, so it moves (swapping with the target). */
@@ -990,9 +1042,10 @@ export class Game {
             if (this.dev.on('godMode')) {
               this.msg(`The ${d.name.toLowerCase()} bounces off you harmlessly.`, 'info');
             } else if (Math.random() < 0.7 - this.skills.get('fighting') / 250) {
-              const dmg = d.damage * (0.7 + Math.random() * 0.6);
+              const armor = this.armor();
+              const dmg = d.damage * (0.7 + Math.random() * 0.6) * (1 - armor);
               this.player.health -= dmg;
-              this.msg(`The ${d.name.toLowerCase()} gores you! (${Math.round(dmg)})`, 'warn');
+              this.msg(`The ${d.name.toLowerCase()} gores you! (${Math.round(dmg)}${armor > 0.02 ? `, your clothing took ${Math.round(armor * 100)}%` : ''})`, 'warn');
               this.ui?.flashDamage();
             } else this.msg(`You dodge the ${d.name.toLowerCase()}.`, 'info');
           }
@@ -1682,6 +1735,7 @@ export class Game {
         inv: this.inv.items,
         skills: this.skills.levels,
         hotbar: this.hotbar,
+        equipped: this.equipped,
         active: this.activeUid,
         nextUid: getNextUid(),
         onboarding: this.onboarding?.serialize() ?? null,
@@ -1823,6 +1877,8 @@ export class Game {
       g.inv.items = data.inv;
       Object.assign(g.skills.levels, data.skills);
       g.hotbar = data.hotbar;
+      g.equipped = data.equipped ?? {};
+      g.dressPlayer();
       g.earth = data.earth ?? {};
       g.knowledge.load(data.knowledge);
       g.player.effects = data.effects ?? {};

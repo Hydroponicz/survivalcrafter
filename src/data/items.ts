@@ -12,6 +12,11 @@ export const TOOL_NAMES: Record<ToolKind, string> = {
   scythe: 'scythe', weapon: 'weapon', tongs: 'pair of tongs', crucible: 'crucible',
 };
 
+/** Where on the body something is worn. */
+export type WearSlot = 'head' | 'body' | 'legs' | 'feet';
+export const WEAR_SLOTS: WearSlot[] = ['head', 'body', 'legs', 'feet'];
+export const WEAR_SLOT_NAMES: Record<WearSlot, string> = { head: 'Head', body: 'Body', legs: 'Legs', feet: 'Feet' };
+
 export interface ItemDef {
   id: string;
   name: string;
@@ -43,6 +48,8 @@ export interface ItemDef {
   noPickup?: boolean;
   /** Heavy equipment you set down in the world as this structure (and can pick back up). */
   places?: string;
+  /** Clothing and armour: where it's worn, how much of a blow it takes (share, 0..1, scaled by quality), and its colour. */
+  wear?: { slot: WearSlot; armor: number; colour: number };
 }
 
 const defs: ItemDef[] = [
@@ -64,7 +71,13 @@ const defs: ItemDef[] = [
   { id: 'sprout', name: 'Tree sprout', icon: '🌱', weight: 0.2, desc: 'Plant it on grass to grow a new tree.' },
   { id: 'wheat_seeds', name: 'Wheat seeds', icon: '🫘', weight: 0.1, desc: 'Sow on a cultivated field.' },
   { id: 'wheat', name: 'Wheat', icon: '🌾', weight: 0.5, desc: 'Harvested grain. Grind it at a quern.' },
-  { id: 'hide', name: 'Hide', icon: '🟫', weight: 2, desc: 'An animal hide.' },
+  { id: 'hide', name: 'Hide', icon: '🟫', weight: 2, desc: 'An animal hide. Cut and stitched into clothing, or stretched over a bed.' },
+
+  // --- clothing (worn: see the character window, Tab)
+  { id: 'hide_cap', name: 'Hide cap', icon: '🧢', weight: 0.4, wear: { slot: 'head', armor: 0.04, colour: 0x6e4a2c }, desc: 'A snug cap of stitched hide. Takes a little off a blow to the head.' },
+  { id: 'hide_tunic', name: 'Hide tunic', icon: '🥼', weight: 1.6, wear: { slot: 'body', armor: 0.1, colour: 0x7a5232 }, desc: 'A hide tunic laced with cordage. Turns some of a goring away.' },
+  { id: 'hide_trousers', name: 'Hide trousers', icon: '👖', weight: 1.2, wear: { slot: 'legs', armor: 0.07, colour: 0x5e4028 }, desc: 'Tough hide leggings, good against tusks and thorns.' },
+  { id: 'hide_boots', name: 'Hide boots', icon: '🥾', weight: 0.6, wear: { slot: 'feet', armor: 0.04, colour: 0x4a3220 }, desc: 'Soft hide boots, bound at the ankle.' },
 
   // --- tools
   { id: 'stone_knife', name: 'Stone knife', icon: '🔪', weight: 0.3, tool: 'knife', toolPower: 0.7, damage: 4, desc: 'A crude knapped blade.' },

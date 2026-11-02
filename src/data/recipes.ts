@@ -138,4 +138,14 @@ export const RECIPES: Recipe[] = [
     returns: [{ item: 'clay_jar', count: 1 }] },
   { id: 'bread', name: 'Bread', category: 'Cooking', skill: 'cooking', difficulty: 14, time: 14,
     stations: ['fire'], inputs: [{ item: 'dough', count: 1 }], output: { item: 'bread', count: 1 } },
+
+  // --- clothing
+  { id: 'hide_cap', name: 'Hide cap', category: 'Clothing', skill: 'tailoring', difficulty: 4, time: 8,
+    tool: 'knife', inputs: [{ item: 'hide', count: 1 }, { item: 'cordage', count: 1 }], output: { item: 'hide_cap', count: 1 } },
+  { id: 'hide_boots', name: 'Hide boots', category: 'Clothing', skill: 'tailoring', difficulty: 5, time: 10,
+    tool: 'knife', inputs: [{ item: 'hide', count: 1 }, { item: 'cordage', count: 2 }], output: { item: 'hide_boots', count: 1 } },
+  { id: 'hide_trousers', name: 'Hide trousers', category: 'Clothing', skill: 'tailoring', difficulty: 7, time: 14,
+    tool: 'knife', inputs: [{ item: 'hide', count: 2 }, { item: 'cordage', count: 2 }], output: { item: 'hide_trousers', count: 1 } },
+  { id: 'hide_tunic', name: 'Hide tunic', category: 'Clothing', skill: 'tailoring', difficulty: 8, time: 16,
+    tool: 'knife', inputs: [{ item: 'hide', count: 2 }, { item: 'cordage', count: 3 }], output: { item: 'hide_tunic', count: 1 } },
 ];

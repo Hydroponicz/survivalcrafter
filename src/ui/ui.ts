@@ -1,8 +1,10 @@
 import { GUIDE_HTML } from './guide';
 import { perf } from '../game/perf';
-import { isIdentified, ITEMS, itemDef, itemName, TOOL_NAMES, typeDesc, type Item } from '../data/items';
+import { isIdentified, ITEMS, itemDef, itemName, TOOL_NAMES, typeDesc, WEAR_SLOT_NAMES, WEAR_SLOTS, type Item } from '../data/items';
 import { RECIPES, STATION_NAMES, type Recipe } from '../data/recipes';
-import { SKILLS, type SkillId } from '../data/skills';
+import { SKILL_INFO, SKILLS, type SkillId } from '../data/skills';
+import { Tooltip } from './tooltip';
+import { CharacterPreview } from './preview';
 import { BUILDABLE, STRUCTURES, totalMaterials } from '../data/structures';
 import { ACTION_MAP, craftProblem, forageName, type ActionDef, type Ctx, type Target } from '../game/actions';
 import { DEV_FLAGS, devCommands, type DevFlag } from '../game/dev';
@@ -67,6 +69,10 @@ export class UI {
   private lastRefreshKey = '';
   /** In-game cursor for windows and menus while the mouse stays captured. */
   cursor: VirtualCursor;
+  /** Hover boxes for anything with a data-tip or title. */
+  tooltip: Tooltip;
+  /** Your character, in the inventory window. */
+  private preview = new CharacterPreview();
   /** Seconds to keep the pause screen hidden after asking to re-capture the mouse. */
   relockGrace = 0;
   private devGive = { type: 'log', count: 10, ql: 50 };
@@ -75,6 +81,7 @@ export class UI {
   constructor(private g: Game) {
     this.root = document.getElementById('ui')!;
     this.root.innerHTML = '';
+    this.tooltip = new Tooltip(document.body);
     const hud = el('div', 'hud');
     hud.innerHTML = `
       <div class="crosshair"></div>
@@ -418,6 +425,18 @@ export class UI {
     // If the mouse was released (Esc), the real cursor takes over.
     this.cursor.setVisible(this.cursorActive());
     if (g.input.locked) this.started = true;
+    // The tutorial panel steps aside while a window is open.
+    this.root.classList.toggle('has-window', this.open.size > 0);
+    // Tooltips follow the in-game cursor, and go when it does.
+    this.tooltip.check();
+    if (this.cursor.isVisible) this.tooltip.place(this.cursor.x, this.cursor.y);
+    else if (g.input.locked) this.tooltip.reset();
+    // Your character in the inventory window, as you are now.
+    if (this.open.has('inventory')) {
+      const held = g.activeItem();
+      this.preview.show(g.player.model, `${JSON.stringify(g.equipped)}|${held?.type ?? ''}`);
+      this.preview.render(1 / 60);
+    }
     this.startEl.style.display = this.started ? 'none' : 'flex';
     const showPause = this.started && !g.input.locked && !this.anyWindowOpen() && !this.wantsRelock && this.relockGrace <= 0;
     this.pauseEl.style.display = showPause ? 'flex' : 'none';
@@ -550,7 +569,7 @@ export class UI {
     row.innerHTML = `<span class="icon">${def.icon}</span>
       <span class="name">${esc(itemName(best))}${items.length > 1 ? ` <b>×${items.length}</b>` : ''}
         <small>${ql}${def.tool && best.dmg > 0 ? ` · dmg ${best.dmg.toFixed(1)}` : ''}${best.quenched ? ' · hardened' : ''}${best.hot ? ` · <span class="warn">glowing, ${Math.ceil(best.hot)}s to quench</span>` : ''} · ${weight.toFixed(1)} kg</small></span>`;
-    row.title = typeDesc(best.type);
+    row.dataset.tip = itemTip(best, items.length);
     const btns = el('span', 'btns');
     for (const a of actions) {
       const b = el('button', '', a.label);
@@ -585,7 +604,10 @@ export class UI {
       const def = itemDef(grp.type);
       const actions: { label: string; fn: (it: Item) => void }[] = [];
       const isActive = grp.items.some((i) => i.uid === g.activeUid);
-      actions.push({ label: isActive ? 'Unuse' : 'Use', fn: (it) => g.setActive(isActive ? null : it.uid) });
+      if (def.wear) {
+        const on = grp.items.some((i) => g.equipped[def.wear!.slot] === i.uid);
+        actions.push(on ? { label: 'Take off', fn: () => g.takeOff(def.wear!.slot) } : { label: 'Wear', fn: (it) => g.putOn(it.uid) });
+      } else actions.push({ label: isActive ? 'Unuse' : 'Use', fn: (it) => g.setActive(isActive ? null : it.uid) });
       if (def.food) actions.push({ label: def.food.verb ?? (def.food.nutrition || def.food.effect ? 'Eat' : 'Drink'), fn: (it) => g.eat(it.uid) });
       if (def.places) actions.push({ label: 'Place', fn: (it) => g.startPlacingItem(it) });
       if (!isIdentified(grp.type)) actions.push({ label: 'Study', fn: (it) => g.request(ACTION_MAP.study, { g, t: { kind: 'none' }, item: it }) });
@@ -625,7 +647,71 @@ export class UI {
         }
       }
     }
-    this.frame('inventory', 'Inventory', body);
+    this.frame('inventory', 'Character', this.characterLayout(body));
+    // The portrait's canvas lives on across redraws: put it back in its place.
+    const view = this.windows.get('inventory')!.querySelector('.char-view');
+    if (view && !view.contains(this.preview.canvas)) view.appendChild(this.preview.canvas);
+  }
+
+  /** The character window: you and what you wear and carry in hand, your pack, and your skills. */
+  private characterLayout(pack: HTMLElement): HTMLElement {
+    const g = this.g;
+    const layout = el('div', `char-layout${this.open.has('container') ? ' with-container' : ''}`);
+    const me = el('div', 'char-col');
+    me.appendChild(el('div', 'char-view'));
+    const slots = el('div', 'eq-slots');
+    for (const slot of WEAR_SLOTS) {
+      const it = g.worn(slot);
+      const box = el('div', `eq-slot${it ? ' filled' : ''}`, `<span class="eq-label">${WEAR_SLOT_NAMES[slot]}</span>
+        <span class="eq-icon">${it ? itemDef(it.type).icon : ''}</span><span class="eq-name">${it ? esc(itemName(it)) : 'Nothing'}</span>`);
+      box.dataset.tip = it ? itemTip(it, 1) : `<b>${WEAR_SLOT_NAMES[slot]}</b><br>Nothing worn here. Clothing is made from hides (Crafting → Clothing) and takes some of the force of a blow.`;
+      if (it) {
+        const off = el('button', 'eq-off', '✕');
+        off.dataset.tip = 'Take it off';
+        off.addEventListener('click', () => g.takeOff(slot));
+        box.appendChild(off);
+      }
+      slots.appendChild(box);
+    }
+    me.appendChild(slots);
+    // In hand, and the tools on your hotbar.
+    const held = g.activeItem();
+    const hand = el('div', `eq-slot eq-hand${held ? ' filled' : ''}`, `<span class="eq-label">In hand</span>
+      <span class="eq-icon">${held ? itemDef(held.type).icon : '✋'}</span><span class="eq-name">${held ? esc(itemName(held)) : 'Bare hands'}</span>`);
+    hand.dataset.tip = held ? itemTip(held, 1) : '<b>Bare hands</b><br>Pick things up, forage and gather stones. Choose a tool from the hotbar (1-9) to use it.';
+    me.appendChild(hand);
+    const tools = g.inv.items.filter((i) => itemDef(i.type).tool);
+    const seen = new Set<string>();
+    const belt = el('div', 'eq-tools');
+    for (const t of tools.sort((a, b) => b.ql - a.ql)) {
+      if (seen.has(t.type)) continue;
+      seen.add(t.type);
+      const chip = el('span', `eq-tool${held?.uid === t.uid ? ' on' : ''}`, itemDef(t.type).icon);
+      chip.dataset.tip = itemTip(t, 1);
+      chip.addEventListener('click', () => g.setActive(t.uid));
+      belt.appendChild(chip);
+    }
+    if (!seen.size) belt.appendChild(el('span', 'eq-none', 'No tools yet'));
+    me.appendChild(el('div', 'eq-head', 'Tools'));
+    me.appendChild(belt);
+    const armor = g.armor();
+    const prot = el('div', 'eq-armor', `Protection <b>${Math.round(armor * 100)}%</b>`);
+    prot.dataset.tip = 'How much of an animal\'s blow your clothing takes. Each piece adds some; better quality adds more.';
+    me.appendChild(prot);
+
+    const packCol = el('div', 'inv-col');
+    packCol.appendChild(pack);
+
+    const skills = el('div', 'skills-col');
+    skills.appendChild(el('div', 'eq-head', 'Skills'));
+    for (const k of (Object.keys(SKILLS) as SkillId[]).sort((a, b) => g.skills.get(b) - g.skills.get(a))) {
+      const v = g.skills.get(k);
+      const row = el('div', 'mini-skill', `<span>${SKILLS[k]}</span><b>${v.toFixed(1)}</b><div class="mini-bar"><div style="width:${v}%"></div></div>`);
+      row.dataset.tip = skillTip(k, v);
+      skills.appendChild(row);
+    }
+    layout.append(me, packCol, skills);
+    return layout;
   }
 
   private renderContainer() {
@@ -729,7 +815,7 @@ export class UI {
     const g = this.g;
     const rows = (Object.keys(SKILLS) as SkillId[]).map((k) => {
       const v = g.skills.get(k);
-      return `<div class="skill"><span>${SKILLS[k]}</span><div class="skill-bar"><div style="width:${v}%"></div></div><b>${v.toFixed(2)}</b></div>`;
+      return `<div class="skill" data-tip="${escAttr(skillTip(k, v))}"><span>${SKILLS[k]}</span><div class="skill-bar"><div style="width:${v}%"></div></div><b>${v.toFixed(2)}</b></div>`;
     }).join('');
     this.frame('skills', 'Skills', `<div class="hint">Skills rise slowly through use, fastest on tasks close to your level.</div>${rows}`);
   }
@@ -910,4 +996,29 @@ export function pickFile(then: (file: File) => void) {
   input.accept = '.gz,.json,application/json,application/gzip';
   input.onchange = () => { const f = input.files?.[0]; if (f) then(f); };
   input.click();
+}
+
+/** Hover text for an item: what it is, its quality and weight, and what it does. */
+function itemTip(it: Item, count: number): string {
+  const d = itemDef(it.type);
+  const lines = [`<b>${esc(itemName(it))}</b>${count > 1 ? ` ×${count}` : ''}`, esc(typeDesc(it.type))];
+  const facts = [`QL ${it.ql.toFixed(1)}`, `${(d.weight * count).toFixed(1)} kg`];
+  if (d.tool) facts.push(`${TOOL_NAMES[d.tool]}${d.toolPower ? `, power ${d.toolPower}` : ''}`);
+  if (d.damage) facts.push(`${d.damage} damage`);
+  if (d.wear) facts.push(`worn on the ${d.wear.slot}, takes ${Math.round(d.wear.armor * (0.6 + it.ql / 125) * 100)}% of a blow`);
+  if (d.food) facts.push(`${d.food.nutrition} food${d.food.water ? `, ${d.food.water} water` : ''}`);
+  if (d.fuel) facts.push(`burns ${Math.round(d.fuel / 60)} min`);
+  if (d.tool && it.dmg > 0) facts.push(`worn ${it.dmg.toFixed(0)}%`);
+  lines.push(`<span class="tip-facts">${facts.join(' · ')}</span>`);
+  return lines.join('<br>');
+}
+
+/** Hover text for a skill: what it does, and where you are with it. */
+function skillTip(k: SkillId, v: number): string {
+  const stage = v < 10 ? 'Novice' : v < 25 ? 'Apprentice' : v < 50 ? 'Journeyman' : v < 75 ? 'Expert' : 'Master';
+  return `<b>${SKILLS[k]}</b> · ${v.toFixed(2)} (${stage})<br>${SKILL_INFO[k]}<br><span class="tip-facts">Rises with use, fastest on work close to your level. Higher skill: faster work, fewer failures, better quality.</span>`;
+}
+
+function escAttr(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
 }

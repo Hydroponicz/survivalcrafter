@@ -18,9 +18,31 @@ export const SKILLS = {
   farming: 'Farming',
   fighting: 'Fighting',
   butchering: 'Butchering',
+  tailoring: 'Tailoring',
 } as const;
 
 export type SkillId = keyof typeof SKILLS;
+
+/** What each skill is for (tooltips). */
+export const SKILL_INFO: Record<SkillId, string> = {
+  woodcutting: 'Felling trees with a hatchet. Faster chopping, cleaner notches and better logs.',
+  mining: 'Breaking rock and ore with a pickaxe. Faster mining and better shards and ore.',
+  digging: 'Shifting earth with a shovel: digging, raising, smoothing and levelling ground.',
+  foraging: 'Picking wild things. Higher skill spots rarer finds and picks them cleanly; a survey (G) reaches further.',
+  herbalism: 'Knowing plants and fungi. Recognise mushrooms and herbs as you pick them, and study unknown ones.',
+  toolcrafting: 'Knapping stone and lashing tools together: knives, hatchets, pickaxes, hammers and spears.',
+  ropemaking: 'Twisting fiber into cordage, for tools, doors and lashings.',
+  carpentry: 'Working wood: planks, shafts, furniture, and building floors, walls, roofs and doors.',
+  masonry: 'Laying stone: foundations, stone walls, forges, querns and anvils.',
+  smithing: 'Smelting ore and forging iron tools at a forge and anvil.',
+  pottery: 'Shaping and firing clay jars and crucibles.',
+  firemaking: 'Building and lighting fires, and making kindling.',
+  cooking: 'Roasting, baking and brewing. Better cooking makes more nourishing food.',
+  farming: 'Cultivating fields, sowing, tending and harvesting wheat.',
+  fighting: 'Striking animals and dodging their attacks.',
+  butchering: 'Cutting up a kill with a knife: more meat, and the hide comes off whole.',
+  tailoring: 'Cutting and stitching hide into clothing. Better clothing protects you more.',
+};
 
 export class Skills {
   levels: Record<SkillId, number>;

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { ToolKind } from '../data/items';
+import type { ToolKind, WearSlot } from '../data/items';
 import { pieceBoxes, STRUCTURES } from '../data/structures';
 import { buildToolMesh, swingPose, type SwingKind } from './tools';
 import { Y_MIN, type Terrain } from '../world/terrain';
@@ -107,7 +107,47 @@ export class Player {
     upper.add(torso, belt, head, hair, nose, armL, armR);
     g.add(legL, legR, upper);
     this.parts = { armL, armR, legL, legR, head, upper };
+    for (const [k, o] of Object.entries(this.parts)) o.name = k;
     return g;
+  }
+
+  private worn = new Map<WearSlot, THREE.Object3D[]>();
+  /**
+   * Put on (or take off) clothing: each slot gets a colour, or nothing. Shown
+   * as a layer over the body (a cap on the head, a tunic over the torso and
+   * sleeves, leggings, boots).
+   */
+  dress(colours: Partial<Record<WearSlot, number>>) {
+    for (const [slot, meshes] of [...this.worn]) {
+      if (colours[slot] !== undefined && meshes[0]?.userData.colour === colours[slot]) continue;
+      for (const m of meshes) m.removeFromParent();
+      this.worn.delete(slot);
+    }
+    const p = this.parts;
+    const layer = (parent: THREE.Object3D, w: number, h: number, d: number, x: number, y: number, z: number, colour: number) => {
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshStandardMaterial({ color: colour, roughness: 0.95 }));
+      mesh.position.set(x, y, z);
+      mesh.castShadow = true;
+      parent.add(mesh);
+      return mesh;
+    };
+    for (const slot of Object.keys(colours) as WearSlot[]) {
+      const c = colours[slot];
+      if (c === undefined || this.worn.has(slot)) continue;
+      const shade = new THREE.Color(c).multiplyScalar(0.8).getHex();
+      let meshes: THREE.Object3D[] = [];
+      if (slot === 'head') meshes = [layer(p.upper, 0.34, 0.14, 0.34, 0, 0.99, 0, c), layer(p.upper, 0.36, 0.04, 0.36, 0, 0.93, 0, shade)];
+      else if (slot === 'body') {
+        meshes = [layer(p.upper, 0.54, 0.69, 0.32, 0, 0.3, 0, c)];
+        for (const arm of [p.armL, p.armR]) meshes.push(layer(arm, 0.18, 0.36, 0.18, 0, -0.17, 0, c));
+      } else if (slot === 'legs') {
+        for (const leg of [p.legL, p.legR]) meshes.push(layer(leg, 0.23, 0.6, 0.23, 0, -0.32, 0, c));
+      } else {
+        for (const leg of [p.legL, p.legR]) meshes.push(layer(leg, 0.24, 0.22, 0.28, 0, -0.72, 0.025, c));
+      }
+      meshes[0].userData.colour = c;
+      this.worn.set(slot, meshes);
+    }
   }
 
   setHeld(kind: ToolKind | undefined, itemType?: string) {

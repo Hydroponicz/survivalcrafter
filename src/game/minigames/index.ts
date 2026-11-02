@@ -82,6 +82,11 @@ export const RECIPE_MINIGAMES: Record<string, MinigameSpec> = {
   dough: { kind: 'crank', variant: 'stir', turns: 3 },
   poultice: { kind: 'crank', variant: 'pound', turns: 3 },
   hearty_stew: { kind: 'crank', variant: 'stir', turns: 4 },
+  // Cutting the hide to shape.
+  hide_cap: { kind: 'carve', passes: 1 },
+  hide_boots: { kind: 'carve', passes: 2 },
+  hide_trousers: { kind: 'carve', passes: 2, wide: true },
+  hide_tunic: { kind: 'carve', passes: 3, wide: true },
 };
 
 /** The hands-on work for one building step, by the material it uses. */
