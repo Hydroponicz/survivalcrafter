@@ -18,7 +18,8 @@ import { weld, simplify } from '@gltf-transform/functions';
 import { MeshoptSimplifier } from 'meshoptimizer';
 import { mkdirSync, writeFileSync } from 'node:fs';
 
-const C = { wood: [0.48, 0.34, 0.2], darkwood: [0.36, 0.25, 0.15], stone: [0.5, 0.48, 0.45], flint: [0.36, 0.36, 0.38], cord: [0.79, 0.69, 0.48], leather: [0.37, 0.27, 0.19], iron: [0.32, 0.32, 0.34], ash: [0.25, 0.23, 0.22] };
+// Colours as you'd pick them (sRGB), turned to the linear light the game's materials work in.
+const C = Object.fromEntries(Object.entries({ steel: [0.55, 0.56, 0.58], wood: [0.48, 0.34, 0.2], darkwood: [0.36, 0.25, 0.15], stone: [0.56, 0.54, 0.5], flint: [0.36, 0.36, 0.38], cord: [0.79, 0.69, 0.48], leather: [0.37, 0.27, 0.19], iron: [0.26, 0.26, 0.28], ash: [0.2, 0.18, 0.17] }).map(([k, c]) => [k, c.map((v) => v ** 2.2)]));;
 
 /**
  * Each tool: its length (metres), triangles, where the hand grips (share of
@@ -37,6 +38,17 @@ const TOOLS = {
   // Its butt is bulkier than its point: the working end is the sharp one.
   stone_spear: { length: 1.25, tris: 500, grip: 0.4, pointy: true, rules: [[0.88, 1, 0, 'flint'], [0.82, 0.88, 0, 'cord'], [0, 1, 0, 'wood']] },
   wooden_tongs: { length: 0.5, tris: 500, grip: 0.12, rules: [[0, 1, 0, 'darkwood']] },
+};
+
+/**
+ * Each prop: its width across (metres), triangles, and its colours: rules
+ * tried in order, [from, to] up its height (0 ground, 1 top), [from, to] out
+ * from its middle (share of half its width), and the colour.
+ */
+const PROPS = {
+  campfire: { width: 1.2, tris: 1400, rules: [[0, 0.32, 0.55, 9, 'stone'], [0.7, 1, 0, 9, 'ash'], [0, 1, 0, 9, 'darkwood']] },
+  iron_anvil: { width: 0.8, tris: 900, rules: [[0.88, 1, 0, 9, 'steel'], [0, 1, 0, 9, 'iron']] },
+  wood_bucket: { width: 0.62, tris: 1400, rules: [[0.68, 1, 0, 9, 'iron'], [0.1, 0.24, 0.93, 9, 'iron'], [0.52, 0.64, 0.93, 9, 'iron'], [0, 1, 0, 9, 'wood']] },
 };
 
 const io = new NodeIO();
@@ -120,10 +132,28 @@ async function bakeTool(name, cfg) {
   write(name, pos, I, col, `A ${name.replace(/_/g, ' ')}, held at the origin, handle up +Y, working end facing +Z (metres).`);
 }
 
-function write(name, pos, I, col, doc) {
+async function bakeProp(name, cfg) {
+  const { P, I } = await load(name, cfg.tris);
+  const nv = P.length / 3;
+  let min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
+  for (let v = 0; v < nv; v++) for (let k = 0; k < 3; k++) { min[k] = Math.min(min[k], P[v * 3 + k]); max[k] = Math.max(max[k], P[v * 3 + k]); }
+  const cx = (min[0] + max[0]) / 2, cz = (min[2] + max[2]) / 2, h = max[1] - min[1];
+  const half = Math.max(max[0] - min[0], max[2] - min[2]) / 2, k = cfg.width / (half * 2);
+  const pos = [], col = [];
+  for (let v = 0; v < nv; v++) {
+    const x = P[v * 3] - cx, y = P[v * 3 + 1] - min[1], z = P[v * 3 + 2] - cz;
+    pos.push(x * k, y * k, z * k);
+    const t = y / h, r = Math.hypot(x, z) / half;
+    const rule = cfg.rules.find(([a, b, r0, r1]) => t >= a && t <= b && r >= r0 && r <= r1);
+    col.push(...C[rule ? rule[4] : 'wood']);
+  }
+  write(name, pos, I, col, `A ${name.replace(/_/g, ' ')}, standing on the ground at the origin (metres).`, 'world');
+}
+
+function write(name, pos, I, col, doc, where = 'game') {
   const round = (a, d) => a.map((v) => +v.toFixed(d));
   const NAME = name.toUpperCase();
-  writeFileSync(`src/game/models/${name}.ts`, `// Made by scripts/bake-props.mjs from assets-src/models/${name}.glb: do not edit by hand.
+  writeFileSync(`src/${where}/models/${name}.ts`, `// Made by scripts/bake-props.mjs from assets-src/models/${name}.glb: do not edit by hand.
 
 /** ${doc} */
 export const ${NAME} = {
@@ -139,3 +169,4 @@ await MeshoptSimplifier.ready;
 const only = process.argv.slice(2);
 mkdirSync('src/game/models', { recursive: true });
 for (const [name, cfg] of Object.entries(TOOLS)) if (!only.length || only.includes(name)) await bakeTool(name, cfg);
+for (const [name, cfg] of Object.entries(PROPS)) if (!only.length || only.includes(name)) await bakeProp(name, cfg);

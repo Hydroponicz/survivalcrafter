@@ -131,7 +131,7 @@ const defs: StructureDef[] = [
     boxes: [box(0, 0.4, 0, 0.55, 0.4, 0.22)], snaps: [], materials: [], skill: 'smithing', difficulty: 20, stepTime: 0,
     station: 'anvil', desc: 'A cast iron anvil. Strikes land truer and the work can reach higher quality than on stone.' },
   { id: 'quench_trough', name: 'Quench trough', icon: '🛁', category: 'Smithy', snap: false, item: 'quench_trough',
-    boxes: [box(0, 0.25, 0, 0.6, 0.25, 0.3)], snaps: [], materials: [], skill: 'carpentry', difficulty: 8, stepTime: 0,
+    boxes: [box(0, 0.27, 0, 0.31, 0.27, 0.31)], snaps: [], materials: [], skill: 'carpentry', difficulty: 8, stepTime: 0,
     water: 4, desc: 'Plunge freshly forged tools into the water to harden them.' },
 
   // --- furniture

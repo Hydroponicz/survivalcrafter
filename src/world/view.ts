@@ -6,6 +6,9 @@ import { FORAGE, FORAGE_SPECIES } from '../data/forage';
 import { forageGeometry, forageScale } from './forageProps';
 import { TreeFx, treeScale } from './treefx';
 import { hash2 } from './noise';
+import { CAMPFIRE } from './models/campfire';
+import { IRON_ANVIL } from './models/iron_anvil';
+import { WOOD_BUCKET } from './models/wood_bucket';
 import type { ViewCull } from './cull';
 import {
   CROP_STAGES, cropPos, type AnimalObj, type BushObj, type ForageObj, type PileObj, type Species, type StructureObj,
@@ -592,6 +595,26 @@ const WOOD = 0x8a6440, DARK_WOOD = 0x6e4e30, STONE = 0x8a8782;
  * Meshes for a building piece in its local frame (origin at bottom centre).
  * Shared by placed pieces and the placement ghost.
  */
+/** Props made from models (see scripts/bake-props.mjs), each geometry made once and shared. */
+const PROP_MODELS: Record<string, { positions: number[]; indices: number[]; colors: number[] }> = { campfire: CAMPFIRE, iron_anvil: IRON_ANVIL, wood_bucket: WOOD_BUCKET };
+const propGeos = new Map<string, THREE.BufferGeometry>();
+const propMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85 });
+function propMesh(name: string): THREE.Mesh {
+  let geo = propGeos.get(name);
+  if (!geo) {
+    const m = PROP_MODELS[name];
+    geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(m.positions, 3));
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(m.colors, 3));
+    geo.setIndex(m.indices);
+    geo.computeVertexNormals();
+    propGeos.set(name, geo);
+  }
+  const mesh = new THREE.Mesh(geo, propMat);
+  mesh.castShadow = mesh.receiveShadow = true;
+  return mesh;
+}
+
 export function buildPieceMesh(type: string, state: { lit?: boolean; open?: boolean; water?: number } = {}): THREE.Group {
   const g = new THREE.Group();
   const add = (geo: THREE.BufferGeometry, color: number, x = 0, y = 0, z = 0, extra?: THREE.MeshStandardMaterialParameters, parent: THREE.Object3D = g) => {
@@ -679,14 +702,7 @@ export function buildPieceMesh(type: string, state: { lit?: boolean; open?: bool
         add(new THREE.BoxGeometry(0.5, 1.2, 0.5), 0x6e655d, 0.45, 1.4, 0.3);
         add(new THREE.BoxGeometry(0.8, 0.12, 0.7), 0x1a1a1a, 0, 0.91, 0);
       } else {
-        for (let i = 0; i < 8; i++) {
-          const a = (i / 8) * Math.PI * 2;
-          add(new THREE.DodecahedronGeometry(0.16), STONE, Math.cos(a) * 0.5, 0.1, Math.sin(a) * 0.5, { flatShading: true });
-        }
-        for (let i = 0; i < 3; i++) {
-          const l = add(new THREE.CylinderGeometry(0.06, 0.06, 0.8, 5), 0x5a3c22, 0, 0.12, 0);
-          l.rotation.set(Math.PI / 2, 0, (i / 3) * Math.PI);
-        }
+        g.add(propMesh('campfire'));
       }
       if (state.lit) {
         const flame = add(new THREE.ConeGeometry(forge ? 0.3 : 0.28, forge ? 0.5 : 0.75, 6), 0xffa030, 0, forge ? 1.1 : 0.4, 0,
@@ -701,14 +717,11 @@ export function buildPieceMesh(type: string, state: { lit?: boolean; open?: bool
       add(new THREE.BoxGeometry(1.0, 0.25, 0.45), 0x77746f, 0, 0.67, 0, { flatShading: true });
       break;
     case 'iron_anvil': {
-      const IRON = 0x4a4d52;
-      const metal = { metalness: 0.6, roughness: 0.45 };
-      add(new THREE.CylinderGeometry(0.28, 0.34, 0.45, 8), DARK_WOOD, 0, 0.22, 0); // stump base
-      add(new THREE.BoxGeometry(0.34, 0.14, 0.26), IRON, 0, 0.52, 0, metal);
-      add(new THREE.BoxGeometry(0.6, 0.12, 0.3), IRON, -0.04, 0.65, 0, metal);
-      const horn = add(new THREE.ConeGeometry(0.075, 0.32, 10), IRON, 0.41, 0.66, 0, metal);
-      horn.rotation.z = -Math.PI / 2;
-      add(new THREE.BoxGeometry(0.58, 0.01, 0.28), 0x8d9096, -0.04, 0.715, 0, { metalness: 0.8, roughness: 0.25 }); // worn face
+      // The anvil on a stump, its face at a good height to work at.
+      add(new THREE.CylinderGeometry(0.28, 0.34, 0.4, 8), DARK_WOOD, 0, 0.2, 0);
+      const anvil = propMesh('iron_anvil');
+      anvil.position.y = 0.4;
+      g.add(anvil);
       break;
     }
     case 'bellows': {
@@ -730,12 +743,11 @@ export function buildPieceMesh(type: string, state: { lit?: boolean; open?: bool
       break;
     }
     case 'quench_trough': {
-      add(new THREE.BoxGeometry(1.2, 0.06, 0.6), DARK_WOOD, 0, 0.05, 0);
-      for (const z of [-0.27, 0.27]) add(new THREE.BoxGeometry(1.2, 0.45, 0.06), WOOD, 0, 0.27, z);
-      for (const x of [-0.57, 0.57]) add(new THREE.BoxGeometry(0.06, 0.45, 0.6), 0x80603e, x, 0.27, 0);
+      // A big wooden bucket of water.
+      g.add(propMesh('wood_bucket'));
       const level = Math.min(1, (state.water ?? 0) / 4);
       if (level > 0) {
-        const w = add(new THREE.BoxGeometry(1.08, 0.36 * level, 0.48), 0x3f6f8a, 0, 0.08 + 0.18 * level, 0, { transparent: true, opacity: 0.8, roughness: 0.15 });
+        const w = add(new THREE.CylinderGeometry(0.255, 0.24, 0.42 * level, 16), 0x3f6f8a, 0, 0.06 + 0.21 * level, 0, { transparent: true, opacity: 0.8, roughness: 0.15 });
         w.castShadow = false;
       }
       break;
