@@ -41,6 +41,7 @@ import { Player } from './player';
 import { Sky } from './sky';
 import type { UI } from '../ui/ui';
 import { Tour } from './tour';
+import { Onboarding } from './onboarding';
 
 const REACH = 4.5;
 /** Skill above a task's difficulty needed to do it the quick way. */
@@ -166,6 +167,8 @@ export class Game {
   private saveTimer = 0;
   private respawnTimer = 0;
   private elapsed = 0;
+  /** The tutorial quest on a new world (null on worlds from before it, once it's over and saved as done it stays done). */
+  onboarding: Onboarding | null = null;
   /** The main menu's backdrop: a camera touring this world, with no one in it (never saved). */
   tour: Tour | null = null;
 
@@ -244,7 +247,8 @@ export class Game {
     this.inv.add(makeItem('berries', 10));
     this.autoBind(this.inv.items[0]);
     this.msg('You wake in the wilderness with nothing but a crude knife. Press H for help.', 'warn');
-    this.msg('Forage grass for fiber and branches, gather stones from bare rock, then craft (C) your first tools.', 'info');
+    this.msg('Follow the tutorial on the right: it walks you from bare hands to your first house.', 'info');
+    this.onboarding = Onboarding.begin(this.markerTex, s.x, s.z);
   }
 
   /** Show this world as the main menu's backdrop: a slow camera tour, nothing to play. */
@@ -1581,6 +1585,7 @@ export class Game {
       this.growth.update(this.world, p.pos.x, p.pos.z, dt * this.dev.timeScale);
     });
     this.updateMarkers();
+    this.onboarding?.update(this, dt);
     perf.time('animals', () => this.updateAnimals(dt));
     perf.time('terrain', () => this.world.terrain.update(p.pos.x, p.pos.y, p.pos.z, 6));
     this.world.focus = { x: p.pos.x, z: p.pos.z };
@@ -1679,6 +1684,7 @@ export class Game {
         hotbar: this.hotbar,
         active: this.activeUid,
         nextUid: getNextUid(),
+        onboarding: this.onboarding?.serialize() ?? null,
       };
       await writeSave(SAVE_KEY, data);
     } catch (e) {
@@ -1822,6 +1828,7 @@ export class Game {
       g.player.effects = data.effects ?? {};
       g.activeUid = data.active;
       g.setActive(data.active);
+      if (data.onboarding) g.onboarding = Onboarding.load(g.markerTex, data.onboarding);
       return g;
     } catch (e) {
       console.warn('Load failed', e);

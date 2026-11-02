@@ -134,6 +134,7 @@ export class UI {
           <button data-act="export">Export save file</button>
           <button data-act="import">Import save file</button>
           <button data-act="help">Controls &amp; guide</button>
+          <button data-act="skip-tutorial">Skip tutorial</button>
           <button data-act="new" class="danger">Abandon world</button>
         </div>
       </div>`);
@@ -152,6 +153,10 @@ export class UI {
         return;
       }
       if (act === 'help') { this.toggle('help'); return; }
+      if (act === 'skip-tutorial') {
+        if (confirm('Turn the tutorial off for this world?')) { g.onboarding?.skip(); this.log('Tutorial off. Press H any time for the guide.', 'info'); }
+        return;
+      }
       if (act === 'export') {
         g.exportSave().then(() => this.log('World exported: check your downloads.', 'good'), (err) => this.log(`Export failed: ${err?.message ?? err}`, 'fail'));
         return;
@@ -404,6 +409,7 @@ export class UI {
     this.cursor.setVisible(this.cursorActive());
     const showPause = !g.input.locked && !this.anyWindowOpen() && !this.wantsRelock && this.relockGrace <= 0;
     this.pauseEl.style.display = showPause ? 'flex' : 'none';
+    if (showPause) (this.pauseEl.querySelector('[data-act="skip-tutorial"]') as HTMLElement).style.display = g.onboarding?.active ? '' : 'none';
 
     // Live windows refresh a few times per second.
     this.refreshTimer -= 1 / 60;
