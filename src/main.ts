@@ -23,6 +23,25 @@ const cont = document.getElementById('continue') as HTMLButtonElement;
 const seedInput = document.getElementById('seed') as HTMLInputElement;
 const $ = (id: string) => document.getElementById(id) as HTMLButtonElement;
 
+// ---------- the loading screen (until the menu's world, or a game, is ready)
+const loading = document.getElementById('loading')!;
+function loadStep(text: string, share: number) {
+  document.getElementById('load-text')!.textContent = text;
+  document.getElementById('load-fill')!.style.transform = `scaleX(${share})`;
+}
+/** Let the loading screen paint before the next heavy step. */
+const paint = () => new Promise((r) => setTimeout(r, 30));
+function loadDone() {
+  loadStep('', 1);
+  loading.classList.add('done');
+  setTimeout(() => loading.remove(), 900);
+}
+/** Show the menu (and end the loading screen). */
+function revealMenu() {
+  menu.classList.remove('waiting');
+  if (loading.isConnected && !loading.classList.contains('done')) loadDone();
+}
+
 // Starting a game reloads the page with what to start written down, so the
 // world touring behind the menu is gone and the game starts afresh.
 const LAUNCH = 'survivalcrafter.launch';
@@ -72,11 +91,14 @@ function launch(make: () => Game | null | Promise<Game | null>) {
   // Let the status paint before the heavy generation work.
   setTimeout(async () => {
     const game = await make();
-    if (!game) { status.textContent = 'Could not load that save.'; menuShow('main'); menu.classList.remove('loading'); return; }
+    if (!game) { status.textContent = 'Could not load that save.'; menuShow('main'); revealMenu(); return; }
+    loadStep('Settling in…', 0.9);
+    await paint();
     game.ui = new UI(game);
     menu.remove();
     fade.remove();
     game.start();
+    loadDone();
     canvas.addEventListener('click', () => {
       if (!game.ui.anyWindowOpen()) game.input.lock();
     });
@@ -87,15 +109,16 @@ function launch(make: () => Game | null | Promise<Game | null>) {
 }
 
 function startGame(l: Launch) {
-  menu.classList.add('loading');
-  menuShow(null);
   if (l.kind === 'continue') {
-    status.textContent = 'Reading your save…';
+    loadStep('Reading your save…', 0.2);
     launch(async () => Game.loadSave(canvas, await Game.readSave()));
   } else {
-    status.textContent = 'Shaping the land…';
+    loadStep('Shaping the land…', 0.15);
     launch(async () => {
-      const g = new Game(canvas, await makeWorld(l.seed));
+      const world = await makeWorld(l.seed);
+      loadStep('Planting the forests…', 0.6);
+      await paint();
+      const g = new Game(canvas, world);
       g.newCharacter();
       g.msg(`World seed: ${l.seed}`, 'info');
       return g;
@@ -164,16 +187,30 @@ const pending = takeLaunch();
 if (pending) startGame(pending);
 else {
   void Game.hasSave().then((has) => { cont.disabled = !has; });
-  // A random world to tour behind the menu (made once the menu has shown).
+  // A random world to tour behind the menu, made behind the loading screen;
+  // the menu shows once the first view of it is ready to fade in.
   setTimeout(async () => {
     try {
+      loadStep('Shaping the land…', 0.1);
       const world = await makeWorld(Math.floor(Math.random() * 1e9));
       if (!menu.isConnected || takeLaunchPending()) return;
+      loadStep('Planting the forests…', 0.55);
+      await paint();
       backdrop = new Game(canvas, world);
+      loadStep('Finding a view…', 0.8);
+      await paint();
       backdrop.startTour(fade);
       Object.assign(window, { __tour: backdrop, __perf: perf });
+      const shown = performance.now();
+      const wait = () => {
+        // (Give up waiting after a while: better the menu over a dark screen than no menu.)
+        if (backdrop?.tour?.started || performance.now() - shown > 60000) revealMenu();
+        else setTimeout(wait, 100);
+      };
+      wait();
     } catch (e) {
       console.warn('Menu backdrop failed', e);
+      revealMenu();
     }
   }, 60);
 }

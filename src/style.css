@@ -26,7 +26,16 @@ button { font: inherit; cursor: pointer; }
   background: radial-gradient(ellipse at center, rgba(0,0,0,0) 35%, rgba(0,0,0,0.45) 100%);
   z-index: 10;
 }
-.main-menu.loading { background: rgba(11, 13, 16, 0.92); }
+/* Hidden until the world behind it is ready (the loading screen shows meanwhile). */
+.main-menu.waiting { visibility: hidden; }
+.loading-screen {
+  position: fixed; inset: 0; z-index: 12; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 28px;
+  background: radial-gradient(ellipse at center, #1f2a1e 0%, #0b0d10 75%); transition: opacity 0.8s ease;
+}
+.loading-screen.done { opacity: 0; pointer-events: none; }
+.load-bar { width: min(420px, 80vw); height: 8px; border-radius: 4px; background: rgba(255, 255, 255, 0.08); border: 1px solid var(--panel-edge); overflow: hidden; }
+.load-bar i { display: block; height: 100%; width: 100%; background: var(--accent); transform: scaleX(0); transform-origin: left; transition: transform 0.6s ease; }
+#load-text { margin: 0; color: var(--muted); font-style: italic; min-height: 1.2em; }
 .menu-title {
   font-size: clamp(44px, 8vw, 84px); margin: 0; letter-spacing: 3px; color: var(--accent);
   text-shadow: 0 4px 0 #3a2a14, 0 0 28px rgba(0, 0, 0, 0.6);

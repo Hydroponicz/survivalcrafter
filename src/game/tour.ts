@@ -35,7 +35,8 @@ export class Tour {
   private phase: 'loading' | 'in' | 'show' | 'out' = 'loading';
   private alpha = 1;
   private camY = NaN;
-  private loadWait = 0;
+  /** When the current shot was framed (ms), to stop waiting on the land after a while however slowly frames come. */
+  private framedAt = 0;
   private dayPick = 0;
 
   constructor(private gen: WorldGen, spawn: { x: number; z: number }, private fade: HTMLElement, private pending: () => number) {
@@ -84,7 +85,7 @@ export class Tour {
     this.shot = this.bestAngle(this.frame(c.kind, c.x, c.z));
     this.t = 0;
     this.camY = NaN;
-    this.loadWait = 0;
+    this.framedAt = performance.now();
     this.phase = 'in';
   }
 
@@ -185,8 +186,7 @@ export class Tour {
     const s = this.shot;
     if (this.phase === 'in' && s) {
       // Hold black until the land near the camera is made (or long enough).
-      this.loadWait += dt;
-      if (this.pending() > 8 && this.loadWait < 6) { this.place(s, camera, 0); this.setFade(1); return; }
+      if (this.pending() > 8 && performance.now() - this.framedAt < 6000) { this.place(s, camera, 0); this.setFade(1); return; }
     }
     if (!s || this.phase === 'loading') { this.setFade(1); return; }
     this.t += dt;
