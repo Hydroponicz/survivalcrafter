@@ -131,6 +131,7 @@ export class MinigameSession {
   private hintEl: HTMLElement;
   private px = window.innerWidth / 2;
   private py = window.innerHeight / 2;
+  private pointerShown = false;
   private wasDown = false;
   private elapsed = 0;
   private ended = false;
@@ -222,6 +223,10 @@ export class MinigameSession {
       this.mg.tick(dt, i);
       if (this.mg.done) this.endDelay = 0.7;
     }
+    // While hidden, the pointer still moves with the mouse (and ends up pinned
+    // in a corner); when it comes back, it comes back in the middle.
+    if (this.mg.showPointer && !this.pointerShown) { this.px = window.innerWidth / 2; this.py = window.innerHeight / 2; }
+    this.pointerShown = this.mg.showPointer;
     this.pointer.style.display = this.mg.showPointer ? 'block' : 'none';
     this.pointer.style.transform = `translate(${this.px}px, ${this.py}px)`;
     this.renderPanel();
