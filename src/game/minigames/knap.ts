@@ -14,7 +14,7 @@ export type KnapShape = 'hatchet' | 'knife' | 'spear' | 'pick' | 'hammer' | 'anv
 
 /** The shape a recipe knaps, by the item it makes. */
 export const KNAP_SHAPES: Record<string, KnapShape> = {
-  stone_hatchet: 'hatchet', stone_knife: 'knife', stone_spear: 'spear', stone_pickaxe: 'pick', stone_hammer: 'hammer', stone_anvil: 'anvil',
+  stone_hatchet: 'hatchet', stone_knife: 'knife', stone_spear: 'spear', stone_pickaxe: 'pick', stone_anvil: 'anvil',
 };
 
 const NAMES: Record<KnapShape, string> = {

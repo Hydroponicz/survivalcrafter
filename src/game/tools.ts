@@ -102,6 +102,11 @@ export function buildToolMesh(kind: ToolKind | undefined, itemType?: string): TH
     }
     case 'hammer':
       handle(0.42);
+      if (itemType === 'wooden_hammer') {
+        // A mallet: a squared block of rough plank across the end of the shaft.
+        add(new THREE.BoxGeometry(0.075, 0.075, 0.15), mat(0x6e5a44, { roughness: 0.95 }), 0, 0.35, 0.0);
+        break;
+      }
       add(stone ? new THREE.DodecahedronGeometry(0.05, 0) : new THREE.BoxGeometry(0.06, 0.06, 0.13), head, 0, 0.34, 0.02);
       break;
     case 'bow': {

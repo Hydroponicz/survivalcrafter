@@ -150,26 +150,20 @@ const HOME_STEPS: Step[] = [
     targets: (g) => { const f = forage(g, ['fallen_branch', 'driftwood']); return f.length ? f : trees(g, true); },
     far: 'None close by: head into the woods.' },
   { id: 'stones', title: 'Find small rocks',
-    text: 'Small rocks lie loose on shores and around bare rock. Pick up four: two you\'ll knap into a knife, the others become the heads of your hatchet and hammer.',
+    text: 'Small rocks lie loose on shores and around bare rock. Pick up three: two you\'ll knap into a knife, and one becomes the head of your hatchet.',
     // (Rocks already made into tools count.)
-    progress: (g) => [Math.min(4, g.inv.count('rock_shard') + (hasTool(g, 'knife') ? 2 : 0) + (hasTool(g, 'hatchet') ? 1 : 0) + (hasTool(g, 'hammer') ? 1 : 0)), 4],
+    progress: (g) => [Math.min(3, g.inv.count('rock_shard') + (hasTool(g, 'knife') ? 2 : 0) + (hasTool(g, 'hatchet') ? 1 : 0)), 3],
     targets: (g) => forage(g, ['pebbles']),
     far: 'None close by: look along a shore or at the foot of a rocky slope.' },
   { id: 'knife', title: 'Knap a stone knife',
     text: `Your first tool. Press ${KEY('C')} to open crafting and, under <b>Primitive</b>, make a <b>Stone knife</b> from two small rocks. It's knapped: strike flakes off the edge of the stone until it has the shape of a blade. You'll need the knife for kindling, shafts, butchering and much more.`,
     progress: (g) => hasTool(g, 'knife') },
   { id: 'cordage', title: 'Twist some cordage',
-    text: `Press ${KEY('C')} to open crafting. Under <b>Primitive</b>, craft <b>Cordage</b> twice (3 fiber each). Crafting takes a moment; you can keep the window open.`,
-    progress: (g) => {
-      const tools = (hasTool(g, 'hatchet') ? 1 : 0) + (hasTool(g, 'hammer') ? 1 : 0);
-      return [Math.min(2, g.inv.count('cordage') + tools), 2];
-    } },
+    text: `Press ${KEY('C')} to open crafting. Under <b>Primitive</b>, craft <b>Cordage</b> (3 fiber): it lashes the hatchet's stone to its handle. Crafting takes a moment; you can keep the window open.`,
+    progress: (g) => g.inv.count('cordage') > 0 || hasTool(g, 'hatchet') },
   { id: 'hatchet', title: 'Make a stone hatchet',
     text: `In crafting (${KEY('C')}), make a <b>Stone hatchet</b>: a branch, a stone and cordage. It fells trees and splits logs.`,
     progress: (g) => hasTool(g, 'hatchet') },
-  { id: 'hammer', title: 'Make a stone hammer',
-    text: `Now a <b>Stone hammer</b> (same materials). You build most things with it.`,
-    progress: (g) => hasTool(g, 'hammer') },
   { id: 'fell', title: 'Fell a tree',
     text: `Put the hatchet in your hand from the hotbar (${KEY('1')}-${KEY('9')}), aim at a grown tree and ${KEY('Left click')} to chop. Keep at it until it falls. Logs are heavy: they land on the ground, and you pick them up from the pile.`,
     // Done once your first tree is down and its logs are lying in a pile.
@@ -177,10 +171,14 @@ const HOME_STEPS: Step[] = [
     targets: (g) => trees(g),
     far: 'No grown trees close by: head for the woods.' },
   { id: 'planks', title: 'Split rough planks',
-    text: `Pick up the logs from the pile where your tree fell (aim at it, ${KEY('Right click')} → <b>Take all</b>). Then, in crafting (${KEY('C')}), under <b>Woodworking</b>, <b>Split log into rough planks</b> with your hatchet: 2 a log. Rough planks are what you build with; the first floor needs 4. (Later, an iron saw cuts <b>refined planks</b> for fine furniture.)`,
-    progress: (g) => has(g, 'plank', 4),
+    text: `Pick up the logs from the pile where your tree fell (aim at it, ${KEY('Right click')} → <b>Take all</b>). Then, in crafting (${KEY('C')}), under <b>Woodworking</b>, <b>Split log into rough planks</b> with your hatchet: 2 a log. Rough planks are what you build with: one for your hammer, and the first floor needs 4. (Later, an iron saw cuts <b>refined planks</b> for fine furniture.)`,
+    // (A plank already made into the hammer counts.)
+    progress: (g) => [Math.min(5, g.inv.count('plank') + (g.inv.count('wooden_hammer') > 0 ? 1 : 0)), 5],
     // The logs still lying about, until you've picked them up.
     targets: (g) => (g.inv.count('log') > 0 ? [] : logPiles(g)) },
+  { id: 'hammer', title: 'Make a wooden hammer',
+    text: `Your building tool. Carve a <b>Shaft</b> from a branch with your knife (Woodworking), then under <b>Primitive</b> make a <b>Wooden hammer</b>: the shaft and one rough plank. You drive the handle into the head with a rock.`,
+    progress: (g) => hasTool(g, 'hammer') },
   { id: 'floor', title: 'Lay the floor',
     text: `Press ${KEY('B')} to build and pick <b>Wooden floor</b>. Find level ground, ${KEY('Left click')} to place the plan, then hold your hammer, aim at the plan and ${KEY('Left click')} to build it, one plank at a time. Your house is four floors in a square (4 × 4 m): aim at the edge of a built floor and the next plan snaps beside it. Each floor takes 4 planks.`,
     progress: (g, q) => [Math.min(4, builtNear(g, q, ['floor'], 4)), 4],
@@ -438,15 +436,14 @@ export class QuestLog {
         let step = q.step;
         const at = q.stepId ? steps.findIndex((s) => s.id === q.stepId) : -1;
         if (at >= 0) step = at;
-        // Saves from before steps were saved by id: the knife step was added after the stones.
-        else if (!q.stepId && q.id === 'home' && step >= 4) step += 1;
+        // Saves from before steps were saved by name: their numbers follow the first order.
+        else if (!q.stepId && q.id === 'home') step = oldHomeStep(step);
         return { ...q, step: Math.min(steps.length, step) };
       });
       log.off = d.off;
     } else {
       // The old single tutorial is the first-house quest.
-      // (Before the knife step was added after the stones.)
-      log.quests.push({ id: 'home', status: d.done ? 'done' : 'active', step: Math.min(HOME_STEPS.length, d.step >= 4 && !d.done ? d.step + 1 : d.step), tracked: true, anchor: d.anchor, start: d.start });
+      log.quests.push({ id: 'home', status: d.done ? 'done' : 'active', step: d.done ? HOME_STEPS.length : oldHomeStep(d.step), tracked: true, anchor: d.anchor, start: d.start });
       log.off = d.done && d.step < HOME_STEPS.length;
     }
     return log;
@@ -712,6 +709,14 @@ export class QuestLog {
 
 /** The colour of quest markers (rings and arrow): a cool sky blue. */
 const MARKER = 0x7fd8ff;
+
+/** The first-house quest's steps in the order saves numbered them before steps were saved by name. */
+const FIRST_HOME_ORDER = ['move', 'fiber', 'branch', 'stones', 'cordage', 'hatchet', 'hammer', 'fell', 'planks', 'floor', 'walls', 'window', 'door', 'roof', 'gables', 'hides', 'bed', 'chest'];
+function oldHomeStep(n: number): number {
+  const id = FIRST_HOME_ORDER[n];
+  const at = id ? HOME_STEPS.findIndex((s) => s.id === id) : -1;
+  return at >= 0 ? at : Math.min(n, HOME_STEPS.length);
+}
 
 const isDone = (p: [number, number] | boolean) => (Array.isArray(p) ? p[0] >= p[1] : p);
 

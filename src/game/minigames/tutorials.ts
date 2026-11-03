@@ -111,6 +111,15 @@ const T: Record<string, Tutorial> = {
     ],
     quality: 'The closer the finished stone matches the outline, the better the tool.',
   },
+  'strike:haft': {
+    title: 'Hafting a mallet',
+    what: 'Drive the handle down into the mallet head with a rock, blow by blow, until it sits tight.',
+    steps: [
+      { gesture: 'hold', text: 'Aim at the top of the handle (the yellow mark). A white ring shrinks toward it.' },
+      { gesture: 'click', text: 'Strike as the ring meets the mark: each clean blow drives the handle further in.' },
+    ],
+    quality: 'Square, well-timed blows seat the head tight: a better hammer.',
+  },
   'strike:knap': {
     title: 'Knapping stone',
     what: 'Strike flakes off the stone to shape a sharp edge.',

@@ -59,7 +59,7 @@ export const RECIPE_MINIGAMES: Record<string, MinigameSpec> = {
   stone_knife: { kind: 'knap', shape: 'knife', hits: 3 },
   stone_hatchet: { kind: 'knap', shape: 'hatchet', hits: 4 },
   stone_pickaxe: { kind: 'knap', shape: 'pick', hits: 5 },
-  stone_hammer: { kind: 'knap', shape: 'hammer', hits: 4 },
+  wooden_hammer: { kind: 'strike', variant: 'haft', hits: 4 },
   stone_spear: { kind: 'knap', shape: 'spear', hits: 4 },
   kindling_branch: { kind: 'carve', passes: 1, make: 'kindling' },
   torch: { kind: 'bowdrill' },
@@ -134,7 +134,7 @@ export function minigameVerb(spec: MinigameSpec): string {
     case 'crank': return { grind: 'grind', stir: 'stir', pound: 'pound' }[spec.variant];
     case 'cord': return 'twist and wrap';
     case 'knap': return 'knap';
-    case 'strike': return { split: 'split', knap: 'knap', forge: 'hammer', nail: 'nail' }[spec.variant];
+    case 'strike': return { split: 'split', knap: 'knap', forge: 'hammer', nail: 'nail', haft: 'haft' }[spec.variant];
     case 'carve': return 'carve';
     case 'build': return 'build';
     case 'heat': return { roast: 'cook', bake: 'bake', fire: 'fire', brew: 'brew' }[spec.variant];

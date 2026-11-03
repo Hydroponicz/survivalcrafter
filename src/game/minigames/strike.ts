@@ -2,13 +2,14 @@ import * as THREE from 'three';
 import { box, clamp01, cyl, logMesh, Minigame, ringMesh, workTool, type Meter, type MgInput } from './core';
 import type { Gesture } from './tutorials';
 
-export type StrikeVariant = 'split' | 'knap' | 'forge' | 'nail';
+export type StrikeVariant = 'split' | 'knap' | 'forge' | 'nail' | 'haft';
 
 const TEXT: Record<StrikeVariant, { title: string; how: string }> = {
   split: { title: 'Splitting', how: 'Aim at the mark and click when the closing ring meets it. Clean strikes split clean wood.' },
   knap: { title: 'Knapping', how: 'Aim at the glowing spot on the stone and click as the ring closes to strike off a flake.' },
   forge: { title: 'Smithing', how: 'Aim at the mark and strike as the ring closes. Work fast — the metal cools!' },
   nail: { title: 'Nailing', how: 'Aim at the nail head and strike as the ring closes.' },
+  haft: { title: 'Hafting the mallet', how: 'Strike the top of the handle with a rock as the ring closes, driving it down into the mallet head.' },
 };
 
 /**
@@ -31,6 +32,8 @@ export class StrikeGame extends Minigame {
   private nails: THREE.Mesh[] = [];
   private period: number;
   private misses = 0;
+  /** Hafting: how far each good blow drives the handle in. */
+  private driveStep = 0;
   /** Facing of the struck surface: rings face +y (top) or +z (front). */
   private face: 'top' | 'front';
 
@@ -48,16 +51,17 @@ export class StrikeGame extends Minigame {
     const handle = cyl(0.018, 0.018, 0.5, 0x7a5634, 6);
     handle.rotation.z = Math.PI / 2;
     handle.position.x = 0.25;
-    const head = variant === 'knap'
+    const stoneInHand = variant === 'knap' || variant === 'haft';
+    const head = stoneInHand
       ? new THREE.Mesh(new THREE.DodecahedronGeometry(0.05), new THREE.MeshStandardMaterial({ color: toolHead, flatShading: true }))
       : box(variant === 'split' ? 0.12 : 0.07, 0.07, 0.07, toolHead, { metalness: 0.5 });
     // Your own tool (the hatchet splitting, the hammer smithing or nailing);
     // knapping is stone on stone.
-    const own = variant === 'knap' ? null : workTool(toolType);
+    const own = stoneInHand ? null : workTool(toolType);
     if (own) this.tool.add(own);
     else {
       this.tool.add(head);
-      if (variant !== 'knap') this.tool.add(handle);
+      if (!stoneInHand) this.tool.add(handle);
     }
 
     if (variant === 'split') {
@@ -87,6 +91,21 @@ export class StrikeGame extends Minigame {
         this.targets.push(new THREE.Vector3(Math.cos(a) * 0.12, 0.17, Math.sin(a) * 0.07));
       }
       this.look([0.1, 0.75, 0.45], [0, 0.1, 0]);
+    } else if (variant === 'haft') {
+      // A block of rough plank (the mallet head) on a stump, the handle stood in its hole.
+      const stump = cyl(0.3, 0.33, 0.4, 0x5a3c22, 16);
+      stump.position.y = -0.2;
+      this.scene.add(stump);
+      const malletHead = box(0.24, 0.12, 0.13, 0x6e5a44);
+      malletHead.position.y = 0.06;
+      this.scene.add(malletHead);
+      const handleRod = cyl(0.018, 0.02, 0.5, 0x8a6a44, 8);
+      handleRod.position.y = 0.31;
+      this.scene.add(handleRod);
+      this.work = handleRod;
+      this.driveStep = 0.1 / hits;
+      for (let k = 0; k < hits; k++) this.targets.push(new THREE.Vector3(0, 0.56 - k * this.driveStep, 0));
+      this.look([0.4, 1.3, 1.05], [0, 0.22, 0]);
     } else if (variant === 'forge') {
       const anvil = new THREE.Group();
       if (this.gear.iron) {
@@ -204,6 +223,7 @@ export class StrikeGame extends Minigame {
       this.sample(q);
       this.say(q > 0.85 ? 'Perfect!' : q > 0.55 ? 'Good' : 'Rough', q > 0.55);
       if (this.variant === 'nail' && this.nails[this.hit]) this.nails[this.hit].position.y = 0.02;
+      if (this.variant === 'haft') this.work.position.y -= this.driveStep;
       this.hit++;
       this.progress = this.hit / this.hits;
       if (this.hit >= this.hits) { this.done = true; this.finishEffect(); return; }
@@ -226,7 +246,7 @@ export class StrikeGame extends Minigame {
   }
 
   private strikeEffect(at: THREE.Vector3, q: number) {
-    const colour = this.variant === 'forge' ? 0xffa040 : this.variant === 'knap' ? 0x9e9a92 : this.variant === 'nail' ? 0xcfcfcf : 0xd9b88a;
+    const colour = this.variant === 'forge' ? 0xffa040 : this.variant === 'knap' ? 0x9e9a92 : this.variant === 'nail' ? 0xcfcfcf : this.variant === 'haft' ? 0xb8956a : 0xd9b88a;
     this.burst(at.clone().add(new THREE.Vector3(0, 0.01, 0)), colour, 6 + Math.round(q * 8), 0.8, this.variant === 'forge');
     if (this.variant === 'knap') this.work.scale.multiplyScalar(0.97);
   }
