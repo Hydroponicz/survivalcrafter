@@ -345,6 +345,14 @@ export class World {
     const out: WorldObj[] = [];
     const c0x = Math.floor((x - r) / CELL), c1x = Math.floor((x + r) / CELL);
     const c0z = Math.floor((z - r) / CELL), c1z = Math.floor((z + r) / CELL);
+    // A wide search covers more cells than are filled: walk the filled ones instead.
+    if ((c1x - c0x + 1) * (c1z - c0z + 1) > this.grid.size) {
+      for (const [k, set] of this.grid) {
+        const cz = Math.floor(k / GSPAN) - GOFF, cx = k - (cz + GOFF) * GSPAN - GOFF;
+        if (cx >= c0x && cx <= c1x && cz >= c0z && cz <= c1z) for (const o of set) out.push(o);
+      }
+      return out;
+    }
     for (let cz = c0z; cz <= c1z; cz++) {
       for (let cx = c0x; cx <= c1x; cx++) {
         const set = this.grid.get(cellKey(cx, cz));

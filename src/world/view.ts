@@ -544,7 +544,11 @@ export class WorldView implements WorldListener {
   /** Flicker flames and park the light pool on the fires nearest the player. */
   updateFires(px: number, pz: number, time: number) {
     const lit: StructureObj[] = [];
-    for (const o of this.world.near(px, pz, 40)) if (o.kind === 'structure' && o.lit) lit.push(o);
+    // Only built things carry a flame: look through those, not everything around.
+    for (const id of this.meshes.keys()) {
+      const o = this.world.objects.get(id);
+      if (o?.kind === 'structure' && o.lit && Math.abs(o.x - px) < 40 && Math.abs(o.z - pz) < 40) lit.push(o);
+    }
     lit.sort((a, b) => Math.hypot(a.x - px, a.z - pz) - Math.hypot(b.x - px, b.z - pz));
     this.fireLights.forEach((l, i) => {
       const f = lit[i];

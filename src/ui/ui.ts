@@ -64,6 +64,8 @@ export class UI {
   private craftCategory = 'Primitive';
   private expanded = new Set<string>();
   private refreshTimer = 0;
+  private hintTimer = 0;
+  private hintKey = '';
   private lastHtml = new Map<WindowName, string>();
   private pressedWindow: WindowName | null = null;
   /** A window being dragged by its title bar, and where in it you took hold. */
@@ -461,12 +463,11 @@ export class UI {
   // ---------- per-frame HUD
   update() {
     const g = this.g, p = g.player;
-    this.bars.health.style.width = `${p.health}%`;
-    this.bars.food.style.width = `${p.food}%`;
-    this.bars.water.style.width = `${p.water}%`;
-    this.bars.stamina.style.width = `${p.stamina}%`;
+    // (Everything below touches the page only when what it shows has changed:
+    // writing the same thing every frame still costs the browser style and layout work.)
+    for (const k of ['health', 'food', 'water', 'stamina'] as const) setStyle(this.bars[k], 'width', `${Math.round(p[k] * 2) / 2}%`);
 
-    const bar = (k: string, v: number, what: string) => { this.bars[k].parentElement!.dataset.tip = `<b>${k[0].toUpperCase() + k.slice(1)}</b> ${Math.round(v)} / 100<br>${what}`; };
+    const bar = (k: string, v: number, what: string) => setData(this.bars[k].parentElement!, 'tip', `<b>${k[0].toUpperCase() + k.slice(1)}</b> ${Math.round(v)} / 100<br>${what}`);
     bar('health', p.health, 'At zero you die and wake at home, your pack left where you fell. Heals slowly while you\'re fed and watered.');
     bar('food', p.food, 'Falls over time. Eat (from your backpack): cooked food and better quality feed you more. Starving hurts.');
     bar('water', p.water, 'Falls faster than food. Aim at a lake or river and drink, or carry jars of water.');
@@ -476,13 +477,13 @@ export class UI {
     const hh = String(Math.floor(mins / 60)).padStart(2, '0'), mm = String(mins % 60).padStart(2, '0');
     // With dev settings on, where you are too (handy for reporting a spot).
     const pos = g.dev.anyActive ? ` · ${Math.round(g.player.pos.x)}, ${Math.round(g.player.pos.z)} · ${perf.fps} fps` : '';
-    this.clockEl.dataset.tip = '<b>Time</b><br>A day lasts 20 minutes. Nights are dark: have a fire, or a house to wait them out in.';
-    this.clockEl.textContent = `Day ${g.world.day} · ${hh}:${mm}${f > 0.78 || f < 0.22 ? ' · night' : ''}${pos}`;
+    setData(this.clockEl, 'tip', '<b>Time</b><br>A day lasts 20 minutes. Nights are dark: have a fire, or a house to wait them out in.');
+    setText(this.clockEl, `Day ${g.world.day} · ${hh}:${mm}${f > 0.78 || f < 0.22 ? ' · night' : ''}${pos}`);
     // With dev settings on: the slowest frame each second, and what took the time in it.
-    this.perfEl.style.display = g.dev.anyActive ? '' : 'none';
+    setStyle(this.perfEl, 'display', g.dev.anyActive ? '' : 'none');
     if (g.dev.anyActive) {
       const top = perf.worstParts.filter(([, ms]) => ms >= 1).slice(0, 3).map(([k, ms]) => `${k} ${ms.toFixed(0)}`).join(', ');
-      this.perfEl.textContent = `slowest ${perf.worst.toFixed(0)} ms${top ? ` (${top})` : ''}`;
+      setText(this.perfEl, `slowest ${perf.worst.toFixed(0)} ms${top ? ` (${top})` : ''}`);
     }
 
     const status: string[] = [];
@@ -501,27 +502,34 @@ export class UI {
     if (p.effects.refreshed) status.push('<span class="good-text" data-tip="Mint tea: stamina comes back twice as fast for a while.">Refreshed</span>');
     if (g.placing) status.push(`${g.placingItem ? 'Placing' : 'Planning'}: ${g.placing.name} — LMB place · ${g.placing.attach ? 'aim at a forge side' : 'wheel or Q/E rotate'} · RMB stop${g.placement?.snapped ? ' · snapped' : ''}`);
     if (g.placement && !g.placement.valid) status.push(`<span class="warn">${esc(g.placement.reason)}</span>`);
-    this.statusEl.innerHTML = status.join(' · ');
+    setHTML(this.statusEl, status.join(' · '));
 
+    // What you're aiming at, and what a click would do (worked out a few times a second, or when the aim changes).
     const t = g.target;
-    if (t && !g.placing) {
-      this.targetEl.textContent = this.describeTarget(t);
-      const opts = g.actionsFor(t);
-      const first = opts.find((o) => !o.problem) ?? opts[0];
-      this.hintEl.innerHTML = first ? `<b>LMB</b> ${esc(first.label)} &nbsp; <b>RMB</b> more` : '';
-    } else {
-      this.targetEl.textContent = '';
-      this.hintEl.textContent = '';
+    this.hintTimer -= 1 / 60;
+    const tKey = t ? targetKey(t) : '';
+    if (tKey !== this.hintKey || this.hintTimer <= 0) {
+      this.hintKey = tKey;
+      this.hintTimer = 0.2;
+      if (t && !g.placing) {
+        setText(this.targetEl, this.describeTarget(t));
+        const opts = g.actionsFor(t);
+        const first = opts.find((o) => !o.problem) ?? opts[0];
+        setHTML(this.hintEl, first ? `<b>LMB</b> ${esc(first.label)} &nbsp; <b>RMB</b> more` : '');
+      } else {
+        setText(this.targetEl, '');
+        setText(this.hintEl, '');
+      }
     }
 
     const a = g.action;
     if (a) {
-      this.progress.style.display = 'block';
+      setStyle(this.progress, 'display', 'block');
       const label = typeof a.def.label === 'function' ? a.def.label(a.ctx) : a.def.label;
-      this.progressLabel.textContent = `${label}${g.queue.length ? ` (+${g.queue.length} queued)` : ''}`;
-      this.progressFill.style.width = `${Math.min(100, (a.elapsed / a.total) * 100)}%`;
+      setText(this.progressLabel, `${label}${g.queue.length ? ` (+${g.queue.length} queued)` : ''}`);
+      setStyle(this.progressFill, 'width', `${Math.min(100, Math.round((a.elapsed / a.total) * 200) / 2)}%`);
     } else {
-      this.progress.style.display = 'none';
+      setStyle(this.progress, 'display', 'none');
     }
 
     // Don't flash the pause screen while the game is taking the mouse back.
@@ -532,7 +540,7 @@ export class UI {
     // Item portraits, a few a frame as they're asked for.
     drawIcons();
     // The tutorial panel steps aside while a window is open.
-    this.root.classList.toggle('has-window', this.open.size > 0);
+    if (this.root.classList.contains('has-window') !== this.open.size > 0) this.root.classList.toggle('has-window', this.open.size > 0);
     if (!this.altSeen && g.input.locked && g.input.keys.has('AltLeft')) this.showAltHint();
     // Tooltips follow the in-game cursor, and go when it does (and stay out of the way of a drag).
     this.tooltip.check();
@@ -546,9 +554,9 @@ export class UI {
       this.preview.show(g.player.model, `${JSON.stringify(g.equipped)}|${held?.type ?? ''}`);
       this.preview.render(1 / 60);
     }
-    this.startEl.style.display = this.started ? 'none' : 'flex';
+    setStyle(this.startEl, 'display', this.started ? 'none' : 'flex');
     const showPause = this.started && !g.input.locked && !this.anyWindowOpen() && !this.wantsRelock && this.relockGrace <= 0;
-    this.pauseEl.style.display = showPause ? 'flex' : 'none';
+    setStyle(this.pauseEl, 'display', showPause ? 'flex' : 'none');
     if (showPause) (this.pauseEl.querySelector('[data-act="skip-tutorial"]') as HTMLElement).style.display = g.onboarding?.active ? '' : 'none';
 
     // Live windows refresh a few times per second.
@@ -1182,4 +1190,21 @@ function weightTip(items: Item[], cap: number | undefined, capNote: string): str
     ${top.map(([type, e]) => line(`${esc(itemDef(type).name)}${e.n > 1 ? ` ×${e.n}` : ''}`, e.kg)).join('')}
     ${rest > 0 ? line(`${rows.length - 6} other kinds`, rest) : ''}
     ${capNote ? `<span class="tip-facts">${capNote}</span>` : ''}`;
+}
+
+// ---------- touching the page only when something changes
+function setText(e: HTMLElement, v: string) { if (e.textContent !== v) e.textContent = v; }
+const htmlCache = new WeakMap<HTMLElement, string>();
+function setHTML(e: HTMLElement, v: string) { if (htmlCache.get(e) !== v) { htmlCache.set(e, v); e.innerHTML = v; } }
+function setStyle(e: HTMLElement, prop: 'width' | 'display', v: string) { if (e.style[prop] !== v) e.style[prop] = v; }
+function setData(e: HTMLElement, key: string, v: string) { if (e.dataset[key] !== v) e.dataset[key] = v; }
+/** Identity of what's aimed at (its kind and which one). */
+function targetKey(t: Target): string {
+  switch (t.kind) {
+    case 'object': return `o${t.obj.id}`;
+    case 'animal': return `a${t.animal.id}`;
+    case 'rock': return `r${t.rock.key}`;
+    case 'terrain': return `t${t.mat}`;
+    default: return t.kind;
+  }
 }
