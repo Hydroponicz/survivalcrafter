@@ -31,6 +31,7 @@ import { distVol, Sound } from './sound';
 import type { SwingKind } from './tools';
 import { ViewModel } from './viewmodel';
 import { treeScale } from '../world/treefx';
+import { CharacterRig, characterLoaded, SEGMENTS, type Clip } from './character';
 import { MinigameSession, minigameVerb, type MinigameSpec } from './minigames';
 import { TutorialProgress, tutorialKey } from './minigames/tutorials';
 import { FORAGE, type ForageCategory } from '../data/forage';
@@ -1523,6 +1524,8 @@ export class Game {
       // Hands-on work: the mouse drives the minigame; you stand still.
       if (!inp.locked) this.working.session.cancel();
       else this.working.session.update(dt, inp);
+      p.work = this.working ? { clip: workClip(this.working.def.id, this.working.ctx) ?? 'craft' } : null;
+      p.faceYaw = this.working ? this.faceToward(this.working.ctx.t) : null;
       p.update(dt, inp, this.world, true, 0, false, false);
       p.updateCamera(this.camera, this.world.terrain);
       // Work in the world (building) is seen through its own view of the piece.
@@ -1607,6 +1610,7 @@ export class Game {
     // --- action progress
     p.swingAnim = null;
     p.faceYaw = null;
+    p.work = null;
     if (this.action) {
       const a = this.action;
       a.elapsed += dt;
@@ -1629,6 +1633,14 @@ export class Game {
           const blow = Math.floor(a.elapsed / period - 0.62);
           if (blow >= 0 && blow !== a.lastBlow) { a.lastBlow = blow; this.blowFx(a.ctx, swing); }
         }
+      }
+      // The body at work: a clip kept in time with the job (each blow on its beat), or a loop.
+      const clip = workClip(a.def.id, a.ctx);
+      if (clip) {
+        const sw = p.swingAnim;
+        const seg = SEGMENTS[clip];
+        p.work = sw ? { clip, phase: sw.phase % 1, impactAt: sw.impactAt }
+          : seg ? { clip, phase: Math.min(1, a.elapsed / Math.max(0.3, a.total)), impactAt: 0.55 } : { clip };
       }
       if (this.action === a && a.elapsed >= a.total) {
         if (a.resolved) { this.action = null; this.afterAction(a.def, a.ctx); }
@@ -1769,9 +1781,18 @@ export class Game {
       const it = this.activeItem();
       const kind = it ? itemDef(it.type).tool : undefined;
       this.viewModel.setTool(kind, it?.type);
-      const show = p.cameraMode === 'first' && (!!kind || !!p.swingAnim) && !this.ui.anyWindowOpen();
       const speed = Math.min(1, Math.hypot(p.vel.x, p.vel.z) / 4);
-      this.viewModel.update(this.renderDt, show, p.swingAnim, speed, { hemi: this.sky.hemi.intensity, sun: this.sky.sun.intensity * 0.6 });
+      const light = { hemi: this.sky.hemi.intensity, sun: this.sky.sun.intensity * 0.6 };
+      // Your body's own arms, once it has loaded (otherwise a plain hand and tool).
+      const g = characterLoaded();
+      if (p.rig && g && !this.viewModel.hasArms) this.viewModel.useArms(new CharacterRig(g, true));
+      if (this.viewModel.hasArms) {
+        const show = p.cameraMode === 'first' && !this.ui.anyWindowOpen();
+        this.viewModel.updateArms(this.renderDt, show, p.pose, p.poseBlend, p.model, this.camera.position, p.pitch, this.camera, { kind, type: it?.type }, p.wornColours, light);
+      } else {
+        const show = p.cameraMode === 'first' && (!!kind || !!p.swingAnim) && !this.ui.anyWindowOpen();
+        this.viewModel.update(this.renderDt, show, p.swingAnim, speed, light);
+      }
       this.viewModel.render(this.renderer);
     }
     this.working?.session.render(this.renderer);
@@ -1984,6 +2005,23 @@ function makeGlowTexture(): THREE.Texture {
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
+}
+
+/** What the body does for each job (null: stands at ease). `minigame`: the hands-on version. */
+function workClip(id: string, c: Ctx): Clip | null {
+  switch (id) {
+    case 'cut_tree': return 'chop';
+    case 'mine': case 'break_rock': case 'dig': case 'level': case 'raise': case 'smooth': case 'cultivate': return 'mine';
+    case 'attack': return c.tool && /spear|hatchet|axe|hammer/.test(c.tool.type) ? 'attack_two' : 'attack_one';
+    case 'harvest': return 'sickle';
+    case 'pick_forage': case 'collect_branch': case 'pick_sprout': case 'pick_berries': case 'sow': case 'tend': case 'plant_sprout': case 'butcher': return 'gather';
+    case 'pick_up': case 'take_all': case 'place_item': case 'fill_jar': return 'pickup';
+    case 'drink': return 'drink';
+    case 'continue_build': case 'quick_build': case 'demolish': return 'hammer';
+    case 'craft': return 'craft';
+    case 'light_fire': case 'add_fuel': case 'fill_trough': case 'quench': case 'toggle_open': case 'open_container': return 'interact';
+    default: return null;
+  }
 }
 
 /** How far from its anchor an object can be hit (in plan): a tree's crown, a piece's furthest corner. */

@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { CharacterRig, characterLoaded } from '../game/character';
+import type { Player } from '../game/player';
 
 // The character window's portrait: a copy of your character, standing at
 // ease and slowly turning, drawn into its own little canvas.
@@ -9,6 +11,8 @@ export class CharacterPreview {
   private scene = new THREE.Scene();
   private camera = new THREE.PerspectiveCamera(30, 0.75, 0.1, 20);
   private figure: THREE.Object3D | null = null;
+  /** The animated body (standing at ease), when the model has loaded. */
+  private rig: CharacterRig | null = null;
   private key = '';
   private angle = 0.5;
 
@@ -35,11 +39,24 @@ export class CharacterPreview {
    * Show a copy of the model, posed at rest. `key` says when it needs copying
    * again (what's worn and held changed).
    */
-  show(model: THREE.Object3D, key: string) {
+  show(player: Player, key: string) {
     if (key === this.key && this.figure) return;
     this.key = key;
     if (this.figure) this.scene.remove(this.figure);
-    const f = model.clone(true);
+    const g = characterLoaded();
+    if (player.rig && g) {
+      // Your body, in what you're wearing and with what you're holding, at ease.
+      this.rig ??= new CharacterRig(g);
+      this.rig.setColours(player.wornColours);
+      this.rig.hand.clear();
+      const held = player.heldItem.clone(true);
+      held.visible = true;
+      this.rig.hand.add(held);
+      this.figure = this.rig.root;
+      this.scene.add(this.figure);
+      return;
+    }
+    const f = player.blocks.clone(true);
     f.visible = true;
     f.position.set(0, 0, 0);
     f.rotation.set(0, 0, 0);
@@ -62,6 +79,7 @@ export class CharacterPreview {
       } catch { return; }
     }
     this.angle += dt * 0.5;
+    this.rig?.update(dt, { kind: 'loop', clip: 'idle' });
     this.figure.rotation.y = this.angle;
     this.renderer.render(this.scene, this.camera);
   }

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { ToolKind } from '../data/items';
 import { buildToolMesh, swingPose, type SwingKind } from './tools';
+import { CharacterRig, HOLD, type Pose as BodyPose, type Region } from './character';
 
 // The first-person arm and tool, drawn in its own pass on top of the world so
 // it never clips into the tree you're chopping.
@@ -31,6 +32,16 @@ export class ViewModel {
   private bob = 0;
   /** 1 = lowered out of view, 0 = up. */
   lower = 1;
+  /**
+   * Your own arms (from the animated body), drawn on top of the world so they
+   * never clip into what you're working on. They do just what your body does;
+   * looking ahead, they're tipped up into view a little (a swing at waist
+   * height would otherwise be out of sight), and looking down they line up
+   * with your body.
+   */
+  private arms: CharacterRig | null = null;
+  private armsTool = new THREE.Group();
+  private armsToolKey = '';
   /** Elbow, off the bottom-right corner: the forearm runs from here to the hand. */
   private elbow = new THREE.Vector3(0.5, -0.85, -0.5);
 
@@ -42,6 +53,57 @@ export class ViewModel {
     // Unit-length sleeve along +Z, stretched each frame between elbow and wrist.
     this.forearm = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.07, 1).translate(0, 0, 0.5), new THREE.MeshStandardMaterial({ color: 0x6b5a3e, roughness: 0.9 }));
     this.camera.add(this.hand, this.forearm);
+  }
+
+  useArms(rig: CharacterRig) {
+    this.arms = rig;
+    this.scene.add(rig.root);
+    this.armsTool.position.set(HOLD.pos[0], HOLD.pos[1], HOLD.pos[2]);
+    this.armsTool.rotation.set(HOLD.rot[0], HOLD.rot[1], HOLD.rot[2]);
+    rig.hand.add(this.armsTool);
+    this.hand.visible = this.forearm.visible = false;
+  }
+
+  get hasArms(): boolean {
+    return !!this.arms;
+  }
+
+  /**
+   * The arms this frame: the body's pose, where the body stands and faces,
+   * the eye they're seen from and the camera.
+   */
+  updateArms(dt: number, show: boolean, pose: BodyPose | null, blend: number, body: THREE.Object3D, eye: THREE.Vector3, pitch: number,
+    cam: THREE.PerspectiveCamera, tool: { kind: ToolKind | undefined; type?: string }, colours: Partial<Record<Region, number>>, light: { hemi: number; sun: number }) {
+    const rig = this.arms;
+    if (!rig) return;
+    this.hemi.intensity = light.hemi;
+    this.sun.intensity = light.sun;
+    this.lower = show ? 0 : 1;
+    rig.root.visible = show;
+    if (!show || !pose) return;
+    const key = `${tool.kind}:${tool.type}`;
+    if (key !== this.armsToolKey) {
+      this.armsToolKey = key;
+      this.armsTool.clear();
+      if (tool.kind) this.armsTool.add(buildToolMesh(tool.kind, tool.type));
+    }
+    rig.setColours(colours);
+    rig.update(dt, pose, blend);
+    // Seen from the world camera (same place, same lens).
+    this.camera.position.copy(cam.position);
+    this.camera.quaternion.copy(cam.quaternion);
+    if (this.camera.fov !== cam.fov || this.camera.near !== 0.03) { this.camera.fov = cam.fov; this.camera.near = 0.03; this.camera.updateProjectionMatrix(); }
+    // Stand with the body, tipped back about the eyes by more the further up you look.
+    const tilt = 0.6 * THREE.MathUtils.clamp((pitch + 0.9) / 0.9, 0, 1);
+    const yaw = body.rotation.y;
+    const right = new THREE.Vector3(-Math.cos(yaw), 0, Math.sin(yaw));
+    const q = new THREE.Quaternion().setFromAxisAngle(right, tilt);
+    rig.root.quaternion.copy(q).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw));
+    rig.root.position.copy(body.position).sub(eye).applyQuaternion(q).add(eye);
+    // A little further off than true, so a tool doesn't fill the view.
+    rig.root.position.x += Math.sin(yaw) * 0.1;
+    rig.root.position.z += Math.cos(yaw) * 0.1;
+    rig.head.scale.setScalar(0.001);
   }
 
   setTool(kind: ToolKind | undefined, itemType?: string) {

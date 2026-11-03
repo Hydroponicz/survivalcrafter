@@ -551,7 +551,7 @@ export class UI {
     // Your character in the inventory window, as you are now.
     if (this.open.has('character')) {
       const held = g.activeItem();
-      this.preview.show(g.player.model, `${JSON.stringify(g.equipped)}|${held?.type ?? ''}`);
+      this.preview.show(g.player, `${JSON.stringify(g.equipped)}|${held?.type ?? ''}|${g.player.rig ? 1 : 0}`);
       this.preview.render(1 / 60);
     }
     setStyle(this.startEl, 'display', this.started ? 'none' : 'flex');

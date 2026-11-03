@@ -6,9 +6,12 @@ import { Y_MIN, type Terrain } from '../world/terrain';
 import { toLocal, type World } from '../world/world';
 import { treeScale, TRUNK } from '../world/treefx';
 import type { Input } from './input';
+import { CharacterRig, HOLD, loadCharacter, SEGMENTS, segmentTime, type Clip, type Pose, type Region } from './character';
 
 const RADIUS = 0.3;
 const EYE = 1.62;
+const CROUCH_EYE = 1.15;
+
 const HEIGHT = 1.8;
 /** Highest ledge you can walk straight up onto (stairs, floor edges). */
 const STEP = 0.55;
@@ -58,11 +61,43 @@ export class Player {
   faceYaw: number | null = null;
   heldItem = new THREE.Group();
   private heldKind: ToolKind | undefined;
+  /** The animated body, once it has loaded (until then, a figure of blocks). */
+  rig: CharacterRig | null = null;
+  blocks!: THREE.Group;
+  /** What the hands are busy with, set each frame by the game: a clip, and how far through a job (if it keeps time with one). */
+  work: { clip: Clip; phase?: number; impactAt?: number } | null = null;
+  /** What the body did this frame (the first-person arms do the same). */
+  pose: Pose | null = null;
+  poseBlend = 0.2;
+  crouching = false;
+  /** Seconds since leaving the ground (jumping or falling), since landing, and since being hurt. */
+  private airT = -1;
+  private landT = -1;
+  private hurtT = -1;
+  private lastHealth = 100;
+  /** What's worn, as the colour of each part of the body. */
+  wornColours: Partial<Record<Region, number>> = {};
   private shakeAmt = 0;
   private modelYaw = 0;
 
   constructor() {
-    this.model = this.buildModel();
+    this.model = new THREE.Group();
+    this.blocks = this.buildModel();
+    this.model.add(this.blocks);
+    loadCharacter().then((g) => this.useRig(new CharacterRig(g))).catch((e) => console.warn('Character model failed to load; keeping the block figure.', e));
+  }
+
+  /** Swap the block figure for the animated body. */
+  private useRig(rig: CharacterRig) {
+    this.rig = rig;
+    this.blocks.visible = false;
+    this.model.add(rig.root);
+    // Tools sit in the right hand's grip.
+    this.heldItem.removeFromParent();
+    this.heldItem.position.set(HOLD.pos[0], HOLD.pos[1], HOLD.pos[2]);
+    this.heldItem.rotation.set(HOLD.rot[0], HOLD.rot[1], HOLD.rot[2]);
+    rig.hand.add(this.heldItem);
+    rig.setColours(this.wornColours);
   }
 
   private buildModel(): THREE.Group {
@@ -118,6 +153,9 @@ export class Player {
    * sleeves, leggings, boots).
    */
   dress(colours: Partial<Record<WearSlot, number>>) {
+    // The animated body: what's worn colours that part of it (a cap colours the hair).
+    this.wornColours = { hair: colours.head, tunic: colours.body, trousers: colours.legs, boots: colours.feet };
+    this.rig?.setColours(this.wornColours);
     for (const [slot, meshes] of [...this.worn]) {
       if (colours[slot] !== undefined && meshes[0]?.userData.colour === colours[slot]) continue;
       for (const m of meshes) m.removeFromParent();
@@ -157,7 +195,7 @@ export class Player {
   }
 
   get eye(): THREE.Vector3 {
-    return new THREE.Vector3(this.pos.x, this.pos.y + (this.swimming ? 1.2 : EYE), this.pos.z);
+    return new THREE.Vector3(this.pos.x, this.pos.y + (this.swimming ? 1.2 : this.crouching ? CROUCH_EYE : EYE), this.pos.z);
   }
 
   forward(): THREE.Vector3 {
@@ -275,8 +313,10 @@ export class Player {
     }
     const len = Math.hypot(mx, mz);
     this.moving = len > 0;
+    if (allowMove && input.hit('KeyZ')) this.crouching = !this.crouching;
     this.sprinting = this.moving && k.has('ShiftLeft') && this.stamina > 5 && !this.swimming;
-    let speed = this.swimming ? 2.2 : this.sprinting ? 6.5 : 3.6;
+    if (this.sprinting || this.swimming) this.crouching = false;
+    let speed = this.swimming ? 2.2 : this.sprinting ? 6.5 : this.crouching ? 1.5 : 3.6;
     if (this.wading) speed *= 0.6;
     if (overweight > 0) speed *= Math.max(0.15, 1 - overweight / 40);
     if (this.stamina <= 0) speed *= 0.6;
@@ -380,6 +420,7 @@ export class Player {
       this.stamina -= dt * 1.5;
     } else {
       if (this.onGround && allowMove && input.hit('Space') && this.stamina > 3) {
+        this.crouching = false;
         this.vel.y = 6.5;
         this.stamina -= 3;
         this.onGround = false;
@@ -440,6 +481,7 @@ export class Player {
 
   private animate(dt: number) {
     if (this.slope === 'blocked') this.scramble += dt; else this.scramble = 0;
+    if (this.rig) { this.animateRig(dt, this.rig); return; }
     if (this.slope === 'sliding') this.shake(0.18);
     const speed = Math.hypot(this.vel.x, this.vel.z);
     if (speed > 0.1 && this.onGround) this.walkPhase += dt * speed * 2.2;
@@ -508,6 +550,89 @@ export class Player {
     this.shakeAmt = Math.max(0, this.shakeAmt - dt * 2.8);
   }
 
+  /** Work out what the body is doing, and turn it to face where it's going. */
+  private animateRig(dt: number, rig: CharacterRig) {
+    const vx = this.vel.x, vz = this.vel.z, speed = Math.hypot(vx, vz);
+    // Ground under you or not: time in the air, and since landing.
+    const air = !this.onGround && !this.swimming;
+    if (air) { if (this.airT < 0) this.airT = 0; this.airT += dt; this.landT = -1; }
+    else { if (this.airT > 0.25) this.landT = 0; this.airT = -1; }
+    if (this.landT >= 0) { this.landT += dt; if (this.landT > 0.3) this.landT = -1; }
+    if (this.health < this.lastHealth - 2.5) this.hurtT = 0;
+    this.lastHealth = this.health;
+    if (this.hurtT >= 0) { this.hurtT += dt; if (this.hurtT > 0.9) this.hurtT = -1; }
+
+    // Facing: forward with the camera, or the way you're running, or the work.
+    let face = this.yaw + Math.PI;
+    let pose: Pose;
+    const w = this.work, look = { x: -Math.sin(this.yaw), z: -Math.cos(this.yaw) };
+    const fwd = vx * look.x + vz * look.z, side = vx * -look.z + vz * look.x;
+    if (w) {
+      const seg = SEGMENTS[w.clip];
+      pose = seg && w.phase !== undefined ? { kind: 'scrub', clip: w.clip, time: segmentTime(seg, w.phase, w.impactAt ?? 0.6) } : { kind: 'loop', clip: w.clip };
+    } else if (this.hurtT >= 0) {
+      pose = { kind: 'scrub', clip: 'hurt', time: segmentTime(SEGMENTS.hurt!, this.hurtT / 0.9, 0.3) };
+    } else if (air && (this.airT > 0.12 || this.vel.y > 0.5)) {
+      // Up, and hanging there until you come down.
+      pose = { kind: 'scrub', clip: 'jump', time: Math.min(1.3, 1.0 + this.airT) };
+      if (speed > 0.5) face = Math.atan2(vx, vz);
+    } else if (this.landT >= 0) {
+      pose = { kind: 'scrub', clip: 'jump', time: 1.45 + this.landT };
+    } else if (this.slope === 'sliding') {
+      pose = { kind: 'loop', clip: 'crouch_idle' };
+    } else if (this.slope === 'blocked') {
+      pose = { kind: 'loop', clip: 'crouch_walk', speed: 1.6 };
+    } else if (speed < 0.25) {
+      pose = { kind: 'loop', clip: this.crouching ? 'crouch_idle' : 'idle', speed: this.swimming ? 0.6 : 1 };
+    } else if (this.crouching) {
+      pose = { kind: 'move', clip: 'crouch_walk', groundSpeed: speed };
+      if (fwd > -0.3 * speed) face = Math.atan2(vx, vz);
+    } else if (fwd < -0.3 * speed) {
+      // Backing away, still facing ahead.
+      pose = { kind: 'move', clip: 'walk_back', groundSpeed: speed };
+      face = Math.atan2(-vx, -vz);
+    } else if (Math.abs(side) > 0.85 * speed && !this.swimming) {
+      pose = { kind: 'move', clip: side < 0 ? 'strafe_left' : 'strafe_right', groundSpeed: speed };
+    } else {
+      pose = { kind: 'move', clip: speed > 5 ? 'sprint' : speed > 2.1 ? 'run' : 'walk', groundSpeed: speed };
+      face = Math.atan2(vx, vz);
+    }
+    this.pose = pose;
+    this.poseBlend = pose.kind === 'scrub' && pose.clip === 'jump' ? 0.1 : 0.2;
+    rig.update(dt, pose, this.poseBlend);
+
+    this.model.position.copy(this.pos);
+    // Swimming: in the water to the chest.
+    if (this.swimming) this.model.position.y -= 0.3;
+    // The jump clip lifts the body itself: don't add that to the real jump.
+    if (pose.kind === 'scrub' && pose.clip === 'jump' && air) this.model.position.y -= 0.18;
+    const want = this.faceYaw ?? face;
+    let d = want - this.modelYaw;
+    while (d > Math.PI) d -= Math.PI * 2;
+    while (d < -Math.PI) d += Math.PI * 2;
+    this.modelYaw += d * Math.min(1, dt * 10);
+    this.model.rotation.y = this.modelYaw;
+    this.shakeAmt = Math.max(0, this.shakeAmt - dt * 2.8);
+  }
+
+  /** The eyes, where the animated head is (just in front of the head bone), smoothed a little. */
+  private eyeInBody(rig: CharacterRig, fallback: THREE.Vector3): THREE.Vector3 {
+    this.model.updateMatrixWorld(true);
+    const head = rig.head.getWorldPosition(new THREE.Vector3());
+    const fx = Math.sin(this.modelYaw), fz = Math.cos(this.modelYaw);
+    // From the base of the skull up to eye level and forward to the eyes; and,
+    // as you look down, forward out past your chest, to see your legs and feet.
+    const out = 0.1 + 0.22 * THREE.MathUtils.clamp(-this.pitch / 1.3, 0, 1);
+    head.x += fx * out; head.z += fz * out; head.y += 0.09;
+    // Keep within reach of where the eyes would be standing up straight (a deep bend doesn't take the view with it).
+    const d = head.clone().sub(fallback);
+    if (d.length() > 0.6) head.copy(fallback).addScaledVector(d.normalize(), 0.6);
+    const e = this.bodyEye;
+    if (!Number.isFinite(e.x) || e.distanceTo(head) > 2) e.copy(head);
+    else e.lerp(head, 0.5);
+    return e.clone();
+  }
+
   private applyShake(cam: THREE.PerspectiveCamera) {
     if (this.shakeAmt <= 0) return;
     const a = this.shakeAmt * this.shakeAmt * 0.035;
@@ -516,10 +641,22 @@ export class Player {
     cam.rotateZ((Math.random() - 0.5) * a * 0.6);
   }
 
+  /** Where the eyes are in the animated body (smoothed), for the first-person view. */
+  private bodyEye = new THREE.Vector3(NaN, NaN, NaN);
+
   updateCamera(cam: THREE.PerspectiveCamera, terrain: Terrain) {
-    this.model.visible = this.cameraMode === 'third';
-    const eye = this.eye;
-    if (this.cameraMode === 'first') {
+    const first = this.cameraMode === 'first';
+    // In first person you're in your own body: you see your arms at work and
+    // your feet when you look down (but not the inside of your own head).
+    this.model.visible = !first || !!this.rig;
+    if (this.rig) {
+      // In first person the head would be in the way, and the arms are drawn on their own (see ViewModel).
+      this.rig.head.scale.setScalar(first ? 0.001 : 1);
+      for (const a of this.rig.arms) a.scale.setScalar(first ? 0.001 : 1);
+    }
+    let eye = this.eye;
+    if (first && this.rig) eye = this.eyeInBody(this.rig, eye);
+    if (first) {
       cam.position.copy(eye);
       cam.lookAt(eye.clone().add(this.forward()));
       this.applyShake(cam);

@@ -4,6 +4,7 @@ export const GUIDE_HTML = `
       <h3>Controls</h3>
       <table class="keys">
         <tr><td>WASD / Shift / Space</td><td>Move / sprint / jump</td></tr>
+        <tr><td>Z</td><td>Crouch (toggle)</td></tr>
         <tr><td>Mouse</td><td>Look (click the game to capture the mouse)</td></tr>
         <tr><td>V</td><td>Toggle first / third person · mouse wheel zooms in third person</td></tr>
         <tr><td>Left click / E</td><td>Do the default action on what you're looking at</td></tr>
