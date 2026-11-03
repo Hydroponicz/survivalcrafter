@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { benchMesh, box, clamp01, cyl, fireMesh, logMesh, Minigame, ringMesh, type Meter, type MgInput } from './core';
+import { benchMesh, box, clamp01, cyl, fireMesh, logMesh, Minigame, ringMesh, workTool, type Meter, type MgInput } from './core';
 import type { Gesture } from './tutorials';
 
 /**
@@ -17,7 +17,7 @@ export class CarveGame extends Minigame {
   private branch: THREE.Group;
   private readonly topY = 0.06;
 
-  constructor(ease: number, private passes: number, wide = false) {
+  constructor(ease: number, private passes: number, wide = false, toolType?: string) {
     super(ease);
     this.scene.add(benchMesh());
     this.branch = wide ? (() => { const g = new THREE.Group(); const p = box(1.0, 0.04, 0.24, 0x9a7650); p.position.y = 0.02; g.add(p); return g; })() : logMesh(1.1, 0.045, 0x8a6a46);
@@ -27,7 +27,10 @@ export class CarveGame extends Minigame {
     blade.position.x = -0.05;
     const handle = box(0.09, 0.02, 0.025, 0x5a3c22);
     handle.position.x = 0.05;
-    this.knife.add(blade, handle);
+    // Your own knife where it has a model, else a plain one.
+    const own = workTool(toolType, 'grip');
+    if (own) this.knife.add(own);
+    else this.knife.add(blade, handle);
     this.knife.rotation.y = 0.5;
     this.scene.add(this.knife);
     this.line = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineDashedMaterial({ color: 0xffd54a, dashSize: 0.02, gapSize: 0.012, depthTest: false }));

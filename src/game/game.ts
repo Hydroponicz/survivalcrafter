@@ -782,7 +782,7 @@ export class Game {
     if (!this.working && !this.reopen.length) this.reopen = this.ui.closeAllWindows();
     const label = typeof def.label === 'function' ? def.label(ctx) : def.label;
     const session = new MinigameSession(spec, ease, this.ui.root, (perf, secs) => this.endWork(perf, secs), label,
-      { intro: runs === 0, coach: runs < 3 });
+      { intro: runs === 0, coach: runs < 3 }, tool?.type);
     this.working = { session, def, ctx, key };
     this.lastAction = { def, recipe: ctx.recipe };
     if (runs > 0) this.msg(`You set to work (${minigameVerb(spec)}). Right-click to stop.`, 'info');

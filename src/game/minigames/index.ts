@@ -23,7 +23,8 @@ export type MinigameSpec =
   | { kind: 'center' }
   | { kind: 'cord'; plies: number };
 
-export function createMinigame(spec: MinigameSpec, ease: number): Minigame {
+/** `toolType`: the item you're working with, shown in the scene where the work uses one. */
+export function createMinigame(spec: MinigameSpec, ease: number, toolType?: string): Minigame {
   switch (spec.kind) {
     case 'saw': return new SawGame(ease, spec.cuts);
     case 'bowdrill': return new BowDrillGame(ease);
@@ -31,8 +32,8 @@ export function createMinigame(spec: MinigameSpec, ease: number): Minigame {
     case 'pour': return new PourGame(ease, spec.gear ?? 0.5);
     case 'quench': return new QuenchGame(ease, spec.gear ?? 0.5);
     case 'crank': return new CrankGame(ease, spec.variant, spec.turns);
-    case 'strike': return new StrikeGame(ease, spec.variant, spec.hits, { anvil: spec.gear, heat: spec.heat, iron: spec.iron });
-    case 'carve': return new CarveGame(ease, spec.passes, spec.wide);
+    case 'strike': return new StrikeGame(ease, spec.variant, spec.hits, { anvil: spec.gear, heat: spec.heat, iron: spec.iron }, toolType);
+    case 'carve': return new CarveGame(ease, spec.passes, spec.wide, toolType);
     case 'heat': return new HeatGame(ease, spec.variant);
     case 'place': return new PlaceGame(ease, spec.variant, spec.count);
     case 'center': return new CenterGame(ease);
@@ -149,8 +150,8 @@ export class MinigameSession {
   private lastProgress = 0;
 
   constructor(spec: MinigameSpec, ease: number, root: HTMLElement, private onEnd: (perf: number | null, seconds: number) => void, private label: string,
-    guide: { intro: boolean; coach: boolean } = { intro: false, coach: false }) {
-    this.mg = createMinigame(spec, ease);
+    guide: { intro: boolean; coach: boolean } = { intro: false, coach: false }, toolType?: string) {
+    this.mg = createMinigame(spec, ease, toolType);
     this.coach = guide.coach;
     this.intro = guide.intro ? tutorialFor(spec) : null;
     if (this.intro) {

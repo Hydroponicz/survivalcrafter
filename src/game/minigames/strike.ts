@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { box, clamp01, cyl, logMesh, Minigame, ringMesh, type Meter, type MgInput } from './core';
+import { box, clamp01, cyl, logMesh, Minigame, ringMesh, workTool, type Meter, type MgInput } from './core';
 import type { Gesture } from './tutorials';
 
 export type StrikeVariant = 'split' | 'knap' | 'forge' | 'nail';
@@ -37,7 +37,7 @@ export class StrikeGame extends Minigame {
   /** Smithing equipment: anvil grade (truer strikes), bellows grade (hotter metal), iron or stone face. */
   private gear: { anvil: number; heat: number; iron: boolean };
 
-  constructor(ease: number, private variant: StrikeVariant, private hits: number, gear?: { anvil?: number; heat?: number; iron?: boolean }) {
+  constructor(ease: number, private variant: StrikeVariant, private hits: number, gear?: { anvil?: number; heat?: number; iron?: boolean }, toolType?: string) {
     super(ease);
     this.title = TEXT[variant].title;
     this.instructions = TEXT[variant].how;
@@ -51,8 +51,14 @@ export class StrikeGame extends Minigame {
     const head = variant === 'knap'
       ? new THREE.Mesh(new THREE.DodecahedronGeometry(0.05), new THREE.MeshStandardMaterial({ color: toolHead, flatShading: true }))
       : box(variant === 'split' ? 0.12 : 0.07, 0.07, 0.07, toolHead, { metalness: 0.5 });
-    this.tool.add(head);
-    if (variant !== 'knap') this.tool.add(handle);
+    // Your own tool (the hatchet splitting, the hammer smithing or nailing);
+    // knapping is stone on stone.
+    const own = variant === 'knap' ? null : workTool(toolType);
+    if (own) this.tool.add(own);
+    else {
+      this.tool.add(head);
+      if (variant !== 'knap') this.tool.add(handle);
+    }
 
     if (variant === 'split') {
       const stump = cyl(0.3, 0.33, 0.4, 0x5a3c22, 16);

@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import type { Gesture } from './tutorials';
+import { itemDef } from '../../data/items';
+import { buildToolMesh } from '../tools';
 
 // Hands-on crafting, in the spirit of Schedule 1: the view closes in on the
 // workstation and you do the work yourself with the mouse. Each minigame is a
@@ -251,3 +253,32 @@ export function fireMesh(): { group: THREE.Group; flicker: (t: number, strength?
 
 /** Clamp helper. */
 export const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
+
+/**
+ * The tool you're working with, as held in the game (its model where there
+ * is one), turned for a workbench scene: its working end at the origin (or
+ * its grip, for a knife drawn by the handle), the handle running off along
+ * +x, and the blade or face pointing down (-y) at the work. Null when there's
+ * no tool to show.
+ */
+export function workTool(type: string | undefined, anchor: 'head' | 'grip' = 'head'): THREE.Group | null {
+  const kind = type ? itemDef(type).tool : undefined;
+  if (!kind) return null;
+  const m = buildToolMesh(kind, type);
+  if (anchor === 'head') {
+    const b = new THREE.Box3().setFromObject(m);
+    m.position.y = -(b.max.y - 0.05);
+  }
+  const w = new THREE.Group();
+  w.add(m);
+  // Tool frame (handle up +y to the head, face +z) to scene frame: the head to
+  // -x and its face down for a striking tool; a knife lies flat on the work,
+  // its blade leading.
+  const basis = anchor === 'head'
+    ? [new THREE.Vector3(0, 0, 1), new THREE.Vector3(-1, 0, 0), new THREE.Vector3(0, -1, 0)]
+    : [new THREE.Vector3(0, 1, 0), new THREE.Vector3(-1, 0, 0), new THREE.Vector3(0, 0, 1)];
+  w.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(basis[0], basis[1], basis[2]));
+  if (anchor === 'grip') w.position.y = 0.012;
+  m.traverse((o) => { if ((o as THREE.Mesh).isMesh) o.castShadow = true; });
+  return w;
+}
