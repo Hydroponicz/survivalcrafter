@@ -295,8 +295,10 @@ export class BuildGame extends Minigame {
         const flat = this.flatSlot();
         const local = this.pointOnSlot(i.ndc, flat);
         if (!local) return;
-        const off = flat ? Math.hypot(local.x - c.x, local.z - c.z) : Math.hypot(local.x - c.x, local.y - c.y);
-        const tol = this.tolerance();
+        // How far off, as a share of what still fits each way (a long course forgives more along its length).
+        const [tu, tv] = this.tolerances();
+        const off = flat ? Math.hypot((local.x - c.x) / tu, (local.z - c.z) / tv) : Math.hypot((local.x - c.x) / tu, (local.y - c.y) / tv);
+        const tol = 1;
         const q = clamp01(1 - off / tol);
         this.hoverQ = q;
         // Close enough, and it settles into the slot with a little nudge.
@@ -362,11 +364,13 @@ export class BuildGame extends Minigame {
     return size.y < Math.min(size.x, size.z);
   }
 
-  /** How far off the slot still fits (m), from the slot's size in the surface you move over, and your skill. */
-  private tolerance(): number {
+  /** How far off the slot still fits (m) each way across the surface you move over (x, then z or y), with your skill. */
+  private tolerances(): [number, number] {
     const size = this.slot.max.clone().sub(this.slot.min);
-    const m = this.flatSlot() ? Math.min(size.x, size.z) : Math.min(size.x, size.y);
-    return Math.max(0.1, m * 0.35) * (0.7 + this.ease * 0.6);
+    const v = this.flatSlot() ? size.z : size.y;
+    const base = Math.max(0.1, Math.min(size.x, v) * 0.35);
+    const k = 0.7 + this.ease * 0.6;
+    return [Math.max(base, size.x * 0.12) * k, Math.max(base, v * 0.12) * k];
   }
 
   /** Where the pointer meets the slot's surface, in the piece's frame (or null). */
