@@ -29,6 +29,8 @@ export const FORAGE_SPECIES: ForageSpecies[] = [
     item: 'plant_fiber', count: [3, 5], notice: 0, difficulty: 2 },
   { id: 'fallen_branch', name: 'Fallen branch', category: 'material', biomes: { forest: 14, meadow: 2 },
     item: 'branch', count: [1, 2], notice: 0, difficulty: 1 },
+  { id: 'flint', name: 'Flint nodule', category: 'material', biomes: { shore: 9, rocky: 16, meadow: 1 },
+    item: 'flint', count: [1, 2], notice: 0, difficulty: 2 },
   { id: 'driftwood', name: 'Driftwood', category: 'material', biomes: { shore: 22 },
     item: 'branch', count: [1, 2], notice: 0, difficulty: 1 },
   { id: 'pebbles', name: 'Small rocks', category: 'material', biomes: { shore: 26, rocky: 40, meadow: 3 },

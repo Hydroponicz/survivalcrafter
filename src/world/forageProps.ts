@@ -97,6 +97,12 @@ export function forageGeometry(species: string): THREE.BufferGeometry {
         paint(new THREE.CylinderGeometry(0.02, 0.03, 0.45, 4).rotateZ(Math.PI / 2).rotateY(0.7).translate(0.25, 0.05, 0.12), wood),
       ]);
     }
+    case 'flint':
+      // Knobbly nodules: a chalky rind, glassy dark where one has split.
+      return merge([
+        paint(new THREE.DodecahedronGeometry(0.075, 0).scale(1.2, 0.7, 1).translate(0, 0.04, 0), 0xd8d2c4),
+        paint(new THREE.DodecahedronGeometry(0.06, 0).scale(1, 0.7, 1.1).translate(0.1, 0.035, 0.06), 0x2e2c30),
+      ]);
     case 'pebbles':
       return merge([
         paint(new THREE.DodecahedronGeometry(0.09).scale(1, 0.6, 1).translate(0, 0.04, 0), 0x8d8a85),

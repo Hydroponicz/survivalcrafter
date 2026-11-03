@@ -57,6 +57,12 @@ export interface AnimalObj {
   state: 'wander' | 'idle' | 'flee' | 'attack';
   timer: number; speed: number; dirX: number; dirZ: number;
   attackCooldown: number;
+  /** Lowering its head to charge: seconds until the lunge lands (0: not winding up). */
+  windup?: number;
+  /** Staggered by a blow: seconds until it can act again. */
+  stun?: number;
+  /** Just hurt (seconds left of the flinch). */
+  hurt?: number;
   /** When an animal stranded in water next re-aims for the shore. */
   shoreAt?: number;
 }

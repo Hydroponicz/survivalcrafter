@@ -184,6 +184,7 @@ export const ACTIONS: ActionDef[] = [
         return g.msg(`You can't quite work the ${forageName(node).toLowerCase()} loose. Try again.`, 'fail');
       }
       g.world.remove(node);
+      if (sp.category === 'mushroom') g.quests?.note('picked_mushroom');
       const n = sp.count[0] + Math.floor(Math.random() * (sp.count[1] - sp.count[0] + 1)) + (Math.random() < g.skills.get('foraging') / 150 ? 1 : 0);
       const biome = biomeAt(g.world, node.x, node.y, node.z, g.world.terrain.materialAt(node.x, node.y - 0.05, node.z));
       const wasKnown = isIdentified(sp.item);
@@ -342,6 +343,8 @@ export const ACTIONS: ActionDef[] = [
       c.g.groundCover.invalidate(b.x, b.z, 2);
       const n = Math.max(2, Math.round(2 + b.sc * 5 + Math.random() * 2));
       c.g.give('rock_shard', o.ql, n);
+      // Some boulders hold a nodule or two of flint.
+      if (Math.random() < 0.45) { const f = 1 + (Math.random() < 0.35 ? 1 : 0); c.g.give('flint', o.ql, f); c.g.msg(`There ${f > 1 ? 'are two nodules' : 'is a nodule'} of flint in it.`, 'good'); }
       c.g.sound.chop(0.8);
       c.g.msg(`The boulder cracks apart: ${n} small rocks.`, 'good');
     },
@@ -506,6 +509,7 @@ export const ACTIONS: ActionDef[] = [
     run: ({ g }) => {
       g.player.water = Math.min(100, g.player.water + 20);
       g.msg('You drink the fresh water.', 'info');
+      g.quests?.note('drank');
     },
   },
   {
@@ -567,6 +571,8 @@ export const ACTIONS: ActionDef[] = [
       for (let i = 0; i < logs; i++) items.push(makeItem('log', ql * (0.75 + t.age * 0.35), `${t.species} log`));
       for (let i = 0; i < 1 + Math.floor(Math.random() * 3); i++) items.push(makeItem('branch', ql));
       if (Math.random() < 0.35) items.push(makeItem('sprout', ql, `${t.species} sprout`));
+      // A bird's nest in the crown comes down with it: feathers.
+      if (Math.random() < 0.6) for (let i = 0; i < 1 + Math.floor(Math.random() * 3); i++) items.push(makeItem('feather', ql));
       g.msg('Timber! The tree creaks and starts to fall.', 'good');
       g.fellTree(t, items, () => {
         g.msg(`The ${t.species} crashes down, leaving ${logs} log${logs > 1 ? 's' : ''} and some branches.`, 'good');
@@ -917,6 +923,7 @@ export const ACTIONS: ActionDef[] = [
       if (p.items.length === 0) c.g.world.remove(p);
       else c.g.world.changed(p);
       c.g.msg(`You butcher the ${species}: ${meat} meat${o.success ? ' and a hide' : '. The hide is ruined'}.`, o.success ? 'good' : 'info');
+      c.g.quests?.note('butchered');
     },
   },
 
@@ -931,32 +938,24 @@ export const ACTIONS: ActionDef[] = [
       c.g.msg(`A ${d.name.toLowerCase()}. ${hp > 0.8 ? 'It looks healthy.' : hp > 0.4 ? 'It is wounded.' : 'It is badly hurt.'}${d.aggressive ? ' It looks ill-tempered.' : ''}`, 'info');
     },
   },
+  // ===== looking after yourself
   {
-    id: 'attack', label: 'Attack',
-    show: (c) => c.t.kind === 'animal',
+    id: 'apply_bandage', label: 'Apply a bandage', show: () => false,
     check: (c) => {
-      if (c.t.kind !== 'animal') return '';
-      if (c.t.animal.hp <= 0 || !c.g.world.animals.includes(c.t.animal)) return 'It is gone.';
-      const d = Math.hypot(c.t.animal.x - c.g.player.pos.x, c.t.animal.z - c.g.player.pos.z);
-      return d > 3.2 ? 'It is out of reach.' : null;
+      if (c.g.inv.count('bandage') === 0) return 'You have no bandages. Twist some from plant fiber (Primitive).';
+      if (c.g.player.health >= 99) return 'You are not hurt.';
+      if (c.g.combat.inCombat()) return 'You can\'t stop to bind a wound in the middle of a fight. Get clear first.';
+      return null;
     },
-    time: (c) => (toolIs(c, 'weapon') ? 1.8 : c.tool ? 2.2 : 1.5), fixedTime: true, swing: 'chop', impactAt: 0.6, skill: 'fighting',
-    difficulty: (c) => (c.t.kind === 'animal' && c.t.animal.species === 'boar' ? 8 : 4) - (toolIs(c, 'weapon') ? 4 : 0),
-    stamina: 6, toolWear: 0.15,
-    repeat: (c) => c.t.kind === 'animal' && c.t.animal.hp > 0,
-    run: (c, o) => {
-      if (c.t.kind !== 'animal') return;
-      const a = c.t.animal;
-      if (!o.success) { c.g.msg('You miss!', 'fail'); c.g.provoke(a); return; }
-      const base = c.tool ? (itemDef(c.tool.type).damage ?? 3) * (0.6 + c.tool.ql / 200) : 2.5;
-      const dmg = base * (0.85 + c.g.skills.get('fighting') / 80) * (0.8 + Math.random() * 0.4);
-      a.hp -= dmg;
-      if (a.hp <= 0) {
-        c.g.killAnimal(a);
-      } else {
-        c.g.msg(`You hit the ${ANIMALS[a.species].name.toLowerCase()} (${Math.round(dmg)} damage).`, 'info');
-        c.g.provoke(a);
-      }
+    time: 4, fixedTime: true,
+    run: (c) => {
+      const g = c.g;
+      g.inv.take('bandage', 1);
+      g.inventoryChanged();
+      // It heals slowly: 25 health over 40 seconds.
+      g.player.effects.bandaged = { t: BANDAGE_TIME, rate: 25 / BANDAGE_TIME };
+      g.quests?.note('bandaged');
+      g.msg('You bind the wound. It will heal over the next while (25 health).', 'good');
     },
   },
 
@@ -1043,6 +1042,8 @@ export function nextMaterial(def: StructureDef, s: StructureObj): string | undef
 const FUEL_ORDER = ['log', 'plank', 'refined_plank', 'branch', 'shaft', 'kindling'];
 /** Fine furniture within this many metres of a bed counts toward a good night's sleep, up to this much. */
 const COMFORT_RANGE = 6;
+/** Seconds a bandage takes to heal its 25 health. */
+const BANDAGE_TIME = 40;
 const MAX_COMFORT = 10;
 /** Faster stamina recovery per point of comfort when you wake rested. */
 export const COMFORT_REGEN = 0.2;

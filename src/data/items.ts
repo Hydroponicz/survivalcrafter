@@ -5,12 +5,12 @@ import { FURNITURE } from './furniture';
 export type FoodEffect = 'nausea' | 'poison' | 'severe_poison' | 'heal' | 'refresh' | 'soothe';
 
 export type ToolKind =
-  | 'knife' | 'hatchet' | 'pickaxe' | 'shovel' | 'hammer' | 'saw' | 'scythe' | 'weapon' | 'tongs' | 'crucible';
+  | 'knife' | 'hatchet' | 'pickaxe' | 'shovel' | 'hammer' | 'saw' | 'scythe' | 'weapon' | 'tongs' | 'crucible' | 'bow';
 
 /** What each tool kind is called in requirement messages. */
 export const TOOL_NAMES: Record<ToolKind, string> = {
   knife: 'knife', hatchet: 'hatchet', pickaxe: 'pickaxe', shovel: 'shovel', hammer: 'hammer', saw: 'saw',
-  scythe: 'scythe', weapon: 'weapon', tongs: 'pair of tongs', crucible: 'crucible',
+  scythe: 'scythe', weapon: 'weapon', tongs: 'pair of tongs', crucible: 'crucible', bow: 'bow',
 };
 
 /** Where on the body something is worn. */
@@ -92,6 +92,11 @@ const defs: ItemDef[] = [
   { id: 'stone_pickaxe', name: 'Stone pickaxe', icon: '⛏️', weight: 1.5, tool: 'pickaxe', toolPower: 0.55, damage: 6, desc: 'Barely bites into rock, but it works.' },
   { id: 'stone_hammer', name: 'Stone hammer', icon: '🔨', weight: 1.2, tool: 'hammer', toolPower: 0.6, damage: 6, desc: 'For building and rough smithing.' },
   { id: 'wooden_shovel', name: 'Wooden shovel', icon: '🪏', weight: 1.5, tool: 'shovel', toolPower: 0.6, damage: 4, desc: 'Digs dirt, sand and clay.' },
+  { id: 'flint', name: 'Flint', icon: '🪨', weight: 0.3, desc: 'A glassy nodule of flint. Knapped small and sharp, it tips arrows. Found on shores and rocky ground, and in broken boulders.' },
+  { id: 'feather', name: 'Feather', icon: '🪶', weight: 0.01, desc: 'A long flight feather, from a nest that came down with a tree. Fletches arrows.' },
+  { id: 'bow', name: 'Short bow', icon: '🏹', weight: 1.0, tool: 'bow', toolPower: 0.8, damage: 0, desc: 'A stave of springy wood strung with cordage. Hold it, hold the left button to draw, let go to loose an arrow. Needs arrows in your pack.' },
+  { id: 'arrow', name: 'Arrow', icon: '➶', weight: 0.05, desc: 'A shaft tipped with flint and fletched with feathers. Shot from a bow.' },
+  { id: 'bandage', name: 'Bandage', icon: '🩹', weight: 0.1, desc: 'Plant fiber twisted and woven into a soft strip. Takes a few seconds to bind on, and can\'t be done in a fight: get clear first. Heals 25 health, slowly.' },
   { id: 'stone_spear', name: 'Stone spear', icon: '🗡️', weight: 1.5, tool: 'weapon', toolPower: 0.7, damage: 12, desc: 'A long branch tipped with a sharp shard.' },
   { id: 'iron_knife', name: 'Carving knife', icon: '🔪', weight: 0.4, tool: 'knife', toolPower: 1.0, damage: 6, desc: 'A fine iron carving knife.' },
   { id: 'iron_hatchet', name: 'Iron hatchet', icon: '🪓', weight: 1.5, tool: 'hatchet', toolPower: 1.0, damage: 11, desc: 'A proper woodcutting hatchet.' },

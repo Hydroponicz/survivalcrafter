@@ -51,6 +51,12 @@ export const RECIPES: Recipe[] = [
     inputs: [{ item: 'branch', count: 1 }, { item: 'plant_fiber', count: 2 }, { item: 'kindling', count: 1 }], output: { item: 'torch', count: 1 } },
   { id: 'relight_torch', name: 'Relight a spent torch', category: 'Primitive', skill: 'firemaking', difficulty: 2, time: 4,
     inputs: [{ item: 'torch_spent', count: 1 }, { item: 'kindling', count: 1 }, { item: 'branch', count: 1 }], output: { item: 'torch', count: 1 } },
+  { id: 'bandage', name: 'Bandage', category: 'Primitive', skill: 'herbalism', difficulty: 2, time: 5,
+    inputs: [{ item: 'plant_fiber', count: 4 }], output: { item: 'bandage', count: 1 } },
+  { id: 'bow', name: 'Short bow', category: 'Primitive', skill: 'toolcrafting', difficulty: 10, time: 12,
+    tool: 'knife', inputs: [{ item: 'shaft', count: 2 }, { item: 'cordage', count: 2 }], output: { item: 'bow', count: 1 } },
+  { id: 'arrows', name: 'Arrows', category: 'Primitive', skill: 'toolcrafting', difficulty: 6, time: 8,
+    tool: 'knife', inputs: [{ item: 'shaft', count: 1 }, { item: 'flint', count: 1 }, { item: 'feather', count: 1 }], output: { item: 'arrow', count: 3 } },
   { id: 'kindling_branch', name: 'Kindling (from branch)', category: 'Primitive', skill: 'firemaking', difficulty: 1, time: 3,
     tool: 'knife', inputs: [{ item: 'branch', count: 1 }], output: { item: 'kindling', count: 2 } },
 

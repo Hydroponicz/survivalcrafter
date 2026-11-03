@@ -104,6 +104,14 @@ export function buildToolMesh(kind: ToolKind | undefined, itemType?: string): TH
       handle(0.42);
       add(stone ? new THREE.DodecahedronGeometry(0.05, 0) : new THREE.BoxGeometry(0.06, 0.06, 0.13), head, 0, 0.34, 0.02);
       break;
+    case 'bow': {
+      // A curved stave held at its middle (the grip at the origin), strung with cordage.
+      const stave = add(new THREE.TorusGeometry(0.55, 0.014, 6, 24, 1.5).rotateZ(Math.PI - 0.75), wood, 0.47, 0, 0);
+      stave.castShadow = true;
+      add(new THREE.CylinderGeometry(0.003, 0.003, 0.75, 4), mat(0xd8c8a0), 0.06, 0, 0);
+      add(new THREE.CylinderGeometry(0.022, 0.022, 0.1, 7), mat(0x5a3c22), 0, 0, 0); // the grip, wrapped
+      break;
+    }
     case 'knife':
       add(new THREE.BoxGeometry(0.03, 0.1, 0.03), wood, 0, 0.0, 0);
       add(new THREE.ConeGeometry(0.018, 0.16, 4).scale(1, 1, 0.35), head, 0, 0.13, 0);

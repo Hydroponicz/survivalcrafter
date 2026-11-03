@@ -563,6 +563,9 @@ export class WorldView implements WorldListener {
       m.position.set(a.x, this.world.terrain.heightAt(a.x, a.z), a.z);
       m.rotation.y = a.rot;
       animateLegs(m, a, time);
+      // Winding up to charge: head down and shuddering. Just hit: a flinch.
+      if ((a.windup ?? 0) > 0) { m.position.y -= 0.07; m.rotation.y += Math.sin(time * 40) * 0.05; }
+      m.scale.setScalar(1 + (a.hurt ?? 0) * 0.25);
     }
     for (const [id, m] of this.animalMeshes) {
       if (!live.has(id)) { this.group.remove(m); this.animalMeshes.delete(id); }

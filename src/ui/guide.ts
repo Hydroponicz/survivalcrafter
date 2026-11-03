@@ -16,6 +16,9 @@ export const GUIDE_HTML = `
         <tr><td>H · Esc</td><td>This guide · release mouse / close windows</td></tr>
         <tr><td>G · J · M</td><td>Survey the area for things to pick · Field journal · Sound on/off</td></tr>
         <tr><td>L</td><td>Quests: take up new ones, choose which are tracked on screen</td></tr>
+        <tr><td>Weapon in hand + Left click</td><td>Strike what's in front of you (any tool or bare fists hit an animal you aim at)</td></tr>
+        <tr><td>Bow in hand + hold Left click</td><td>Draw; let go to shoot (needs arrows in your pack; a full draw shoots further and harder)</td></tr>
+        <tr><td>Bandage (hotbar or pack → Apply)</td><td>Bind a wound: a few seconds, out of combat; heals 25 health slowly</td></tr>
         <tr><td>Torch in hand + Left click on soft ground</td><td>Plant the torch there (it burns about three days; pick it up again any time)</td></tr>
         <tr><td>Mouse in windows</td><td>While a window or the action menu is open, the mouse moves an in-game cursor (the camera holds still). Esc releases the real mouse.</td></tr>
         <tr><td>&#96; or F2</td><td>Dev console (cheats: instant crafting, no needs, fly…)</td></tr>
@@ -38,6 +41,7 @@ export const GUIDE_HTML = `
         <li>Plan a <b>campfire</b> (B), build it, add fuel, and light it with <b>kindling</b>. Cook mushrooms and meat; fire clay jars.</li>
         <li>Set up a <b>smithy</b>. Dig <b>clay</b> by the water and build a <b>forge</b> (B). Then craft its equipment (Crafting → Smithy) and <b>Place</b> it from your pack: <b>bellows</b> against the forge's side (without them it can't get hot enough for metal), a <b>stone anvil</b> nearby, and a <b>quench trough</b> filled with jars of water. You also need a fired <b>crucible</b> to smelt ore in and <b>tongs</b> to handle hot metal. Mine <b>iron ore</b>, smelt it, smith iron tools, and quench them while they're still glowing to harden them. Later, cast an <b>iron anvil</b>. Better equipment makes the work easier and raises the best quality you can reach. Equipment can be picked up and moved.</li>
         <li><b>Cultivate</b> fields with a shovel, <b>sow</b> wheat seeds, tend them, harvest, grind flour at a <b>quern</b>, and bake <b>bread</b>.</li>
-        <li>Hunt deer and boar (careful — boars fight back), <b>butcher</b> them with a knife for meat and hides, and build a <b>bed</b> to set your home.</li>
+        <li>Hunt deer and boar with a <b>stone spear</b> or a <b>bow</b> (two shafts and two cordage; <b>arrows</b> are a shaft, a <b>flint</b> nodule (shores, rocky ground, broken boulders) and a <b>feather</b> (from nests in trees you fell), three at a time). Fighting is live: strike what's in front of you. Boars fight back: when one <b>lowers its head and shudders</b> it's about to charge, so step back or aside. <b>Butcher</b> kills with a knife for meat and hides, and build a <b>bed</b> to set your home.</li>
+        <li>Hurt? <b>Bandages</b> (4 plant fiber) heal 25 health slowly; binding one takes a few seconds and can't be done mid-fight.</li>
       </ol>
       <p>Watch your <b>food</b> and <b>water</b>: drink from lakes (aim at water), and eat cooked food — higher QL food is more nourishing. Your game saves automatically.</p>`;

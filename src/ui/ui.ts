@@ -253,6 +253,7 @@ export class UI {
   }
 
   show(name: WindowName) {
+    if (name === 'journal') this.g.quests?.note('journal');
     this.open.add(name);
     this.windows.get(name)!.style.display = 'flex';
     const pos = this.windowPos[name];
@@ -455,6 +456,26 @@ export class UI {
     this.damageEl.classList.add('flash');
   }
 
+  /** A notice that pauses the game until you've read it. */
+  modalOpen = false;
+  showNotice(title: string, html: string, button: string, onOk: () => void) {
+    const g = this.g;
+    this.modalOpen = true;
+    g.paused = true;
+    g.input.unlock();
+    this.cursor.setVisible(false);
+    const el2 = el('div', 'notice-backdrop');
+    el2.innerHTML = `<div class="notice"><div class="notice-head">${title}</div><div class="notice-body">${html}</div><button class="notice-ok">${button}</button></div>`;
+    this.root.appendChild(el2);
+    el2.querySelector('button')!.addEventListener('click', () => {
+      el2.remove();
+      this.modalOpen = false;
+      g.paused = false;
+      g.input.lock();
+      onOk();
+    });
+  }
+
   showDeath() {
     this.deathEl.classList.add('show');
     setTimeout(() => this.deathEl.classList.remove('show'), 4000);
@@ -500,6 +521,7 @@ export class UI {
     if (p.effects.poisoned) status.push(`<span class="bad" data-tip="Losing health until it wears off. A yarrow poultice draws poison out.">Poisoned ${Math.ceil(p.effects.poisoned.t)}s</span>`);
     if (p.effects.nauseous) status.push('<span class="warn" data-tip="You recover stamina slowly for a while.">Nauseous</span>');
     if (p.effects.refreshed) status.push('<span class="good-text" data-tip="Mint tea: stamina comes back twice as fast for a while.">Refreshed</span>');
+    if (p.effects.bandaged) status.push('<span class="good-text" data-tip="A bandage is healing you, slowly.">Bandaged</span>');
     if (p.effects.rested) status.push(`<span class="good-text" data-tip="You slept in comfort (${p.effects.rested.rate}): stamina comes back ${Math.round(p.effects.rested.rate * 20)}% faster for a while.">Well rested</span>`);
     if (g.placing) status.push(`${g.placingItem ? 'Placing' : 'Planning'}: ${g.placing.name} — LMB place · ${g.placing.attach ? 'aim at a forge side' : 'wheel or Q/E rotate'} · RMB stop${g.placement?.snapped ? ' · snapped' : ''}`);
     if (g.placement && !g.placement.valid) status.push(`<span class="warn">${esc(g.placement.reason)}</span>`);
@@ -556,7 +578,7 @@ export class UI {
       this.preview.render(1 / 60);
     }
     setStyle(this.startEl, 'display', this.started ? 'none' : 'flex');
-    const showPause = this.started && !g.input.locked && !this.anyWindowOpen() && !this.wantsRelock && this.relockGrace <= 0;
+    const showPause = this.started && !g.input.locked && !this.anyWindowOpen() && !this.wantsRelock && this.relockGrace <= 0 && !this.modalOpen;
     setStyle(this.pauseEl, 'display', showPause ? 'flex' : 'none');
     if (showPause) (this.pauseEl.querySelector('[data-act="skip-tutorial"]') as HTMLElement).style.display = g.quests?.active ? '' : 'none';
 
@@ -736,6 +758,7 @@ export class UI {
       } else actions.push({ label: isActive ? 'Unuse' : 'Use', fn: (it) => g.setActive(isActive ? null : it.uid) });
       if (def.food) actions.push({ label: def.food.verb ?? (def.food.nutrition || def.food.effect ? 'Eat' : 'Drink'), fn: (it) => g.eat(it.uid) });
       if (def.places) actions.push({ label: 'Place', fn: (it) => g.startPlacingItem(it) });
+      if (grp.type === 'bandage') actions.push({ label: 'Apply', fn: () => g.applyBandage() });
       if (!isIdentified(grp.type)) actions.push({ label: 'Study', fn: (it) => g.request(ACTION_MAP.study, { g, t: { kind: 'none' }, item: it }) });
       if (chest) {
         actions.push({ label: 'Store', fn: (it) => g.putIntoContainer(chest, [it.uid]) });

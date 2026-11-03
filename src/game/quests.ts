@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { itemDef } from '../data/items';
+import { isIdentified, itemDef } from '../data/items';
+import { FORAGE_SPECIES } from '../data/forage';
 import type { ToolKind } from '../data/items';
 import type { StructureObj } from '../world/world';
 import type { Game } from './game';
@@ -205,7 +206,7 @@ const HOME_STEPS: Step[] = [
     progress: (g, q) => [Math.min(4, builtNear(g, q, ['gable'])), 4],
     targets: (g) => plans(g, ['gable']) },
   { id: 'hides', title: 'Hunt for hides',
-    text: `A bed needs two hides. Craft a <b>Stone spear</b>, find deer (or a boar, if you're brave: they fight back), and ${KEY('Left click')} to strike. Then hold your knife and <b>Butcher</b> the carcass.`,
+    text: `A bed needs two hides. Craft a <b>Stone spear</b> (or a bow and arrows), find deer (or a boar, if you're brave: they fight back). With the spear in hand, ${KEY('Left click')} to strike whatever's in front of you; a boar lowers its head before it charges, so step back or aside. Then hold your knife and <b>Butcher</b> the carcass.`,
     progress: (g) => has(g, 'hide', 2),
     targets: (g) => game(g),
     far: 'No animals in sight: deer graze in meadows and at the edges of woods. Explore a little.' },
@@ -217,6 +218,96 @@ const HOME_STEPS: Step[] = [
     text: `Last, a <b>Storage chest</b> (${KEY('B')} → Furniture): 8 planks. It holds 300 kg, so you can keep what you gather safe at home.`,
     progress: (g, q) => builtNear(g, q, ['chest']) > 0,
     targets: (g) => plans(g, ['chest']) },
+];
+
+/** Mushrooms (by the item they give). */
+const MUSHROOMS = FORAGE_SPECIES.filter((s) => s.category === 'mushroom');
+const MUSHROOM_ITEMS = [...new Set(MUSHROOMS.map((s) => s.item))];
+
+/** The nearest open water: a few spots on lakes, rivers and streams around you. */
+function water(g: Game): Target[] {
+  const p = g.player.pos, t = g.world.terrain, out: Target[] = [];
+  for (let r = 6; r <= 180 && out.length < 3; r += 6) {
+    for (let k = 0; k < 24; k++) {
+      const a = (k / 24) * Math.PI * 2, x = p.x + Math.cos(a) * r, z = p.z + Math.sin(a) * r;
+      const w = t.waterAt(x, z);
+      if (Number.isFinite(w) && w > t.heightAt(x, z) + 0.15) out.push({ x, y: w + 0.4, z, id: -1 - out.length });
+      if (out.length >= 3) break;
+    }
+  }
+  return out;
+}
+
+/** Boars about, to hunt. */
+function boars(g: Game): Target[] {
+  const p = g.player.pos;
+  return g.world.animals.filter((a) => a.species === 'boar' && a.hp > 0 && Math.hypot(a.x - p.x, a.z - p.z) < SEARCH * 2)
+    .map((a) => ({ x: a.x, y: g.world.terrain.heightAt(a.x, a.z) + 1.4, z: a.z, id: a.id }));
+}
+
+/** Boar carcasses to butcher. */
+function carcasses(g: Game): Target[] {
+  const p = g.player.pos, out: Target[] = [];
+  for (const o of g.world.near(p.x, p.z, SEARCH)) {
+    if (o.kind === 'pile' && o.items.some((i) => i.type === 'corpse')) out.push({ x: o.x, y: o.y + 0.6, z: o.z, id: o.id });
+  }
+  return out;
+}
+
+const flagged = (q: QuestState, f: string) => !!q.flags?.includes(f);
+
+const WATER_STEPS: Step[] = [
+  { id: 'drink', title: 'Find water and drink',
+    text: `Your water is running low, and it falls faster than food. Find fresh water (a river, stream or lake: the arrow points to the nearest), aim at it and ${KEY('Left click')} to <b>Drink</b>.`,
+    progress: (_g, q) => flagged(q, 'drank'),
+    targets: (g) => water(g),
+    far: 'No water close by: head downhill; streams run in the valleys.' },
+  { id: 'full', title: 'Drink your fill',
+    text: `Keep drinking until you're no longer thirsty (the blue bar). Drinking goes on by itself while you stand there.`,
+    progress: (g) => [Math.min(85, Math.round(g.player.water)), 85],
+    targets: (g) => water(g) },
+];
+
+const FOOD_STEPS: Step[] = [
+  { id: 'mushroom', title: 'Pick a mushroom',
+    text: `You're getting hungry. Mushrooms grow on the forest floor and in wet ground: pick one (or a few). Wild mushrooms come in many kinds, and you won't know at first which is which.`,
+    progress: (_g, q) => flagged(q, 'picked_mushroom'),
+    targets: (g) => forage(g, MUSHROOMS.map((s) => s.id)),
+    far: 'None close by: look in the woods, especially damp ones.' },
+  { id: 'journal', title: 'Open your field journal',
+    text: `Press ${KEY('J')}. Your <b>field journal</b> keeps every wild plant and mushroom you've come across: what it looks like, where you found it, and, once you know, what it is. Some are good to eat; some are <b>poisonous</b>.`,
+    progress: (_g, q) => flagged(q, 'journal') },
+  { id: 'identify', title: 'Identify a mushroom',
+    text: `An unknown mushroom is a gamble to eat. Learn what it is: pick with care (your Foraging and Herbalism help you recognise them), <b>Study</b> one from your pack, or handle enough of a kind to know it. The journal shows what you've learned.`,
+    progress: () => MUSHROOM_ITEMS.some((t) => isIdentified(t)) },
+  { id: 'eat', title: 'Eat something safe',
+    text: `Eat something you know is safe: berries, or a mushroom you've identified as edible (open your pack and <b>Eat</b>). Cooked on a campfire, mushrooms and meat feed you far more.`,
+    progress: (_g, q) => flagged(q, 'ate') },
+  { id: 'spear', title: 'Make a stone spear',
+    text: `For real food, hunt. In crafting (${KEY('C')}), under <b>Primitive</b>, make a <b>Stone spear</b>: two branches, a small rock and cordage. (Or a <b>bow</b> and <b>arrows</b>, if you've found flint and feathers.)`,
+    progress: (g) => g.inv.items.some((i) => itemDef(i.type).tool === 'weapon' || itemDef(i.type).tool === 'bow') },
+  { id: 'boar', title: 'Hunt a boar',
+    text: `Boars root about at the edges of the woods. They fight back. With the spear in hand, ${KEY('Left click')} to strike what's in front of you. When the boar <b>lowers its head and shudders</b>, it's about to charge: step back or aside, then strike again. If you're hurt, get clear before you bandage up.`,
+    progress: (_g, q) => flagged(q, 'killed_boar'),
+    targets: (g) => boars(g),
+    far: 'No boars in sight: they root at the edges of the woods. Explore a little.' },
+  { id: 'butcher', title: 'Butcher the boar',
+    text: `Hold your knife, aim at the carcass and use <b>Butcher corpse</b>: meat, and a hide if you work cleanly. Cook the meat on a campfire before you eat it.`,
+    progress: (_g, q) => flagged(q, 'butchered'),
+    targets: (g) => carcasses(g) },
+];
+
+const BANDAGE_STEPS: Step[] = [
+  { id: 'fiber', title: 'Gather plant fiber',
+    text: `A bandage takes 4 plant fiber. Pick fiber grass in the meadows (or reeds by the water).`,
+    progress: (g) => [Math.min(4, g.inv.count('plant_fiber') + g.inv.count('bandage') * 4), 4],
+    targets: (g) => forage(g, ['fiber_grass', 'reeds']) },
+  { id: 'make', title: 'Twist a bandage',
+    text: `In crafting (${KEY('C')}), under <b>Primitive</b>, make a <b>Bandage</b>. It goes on your hotbar.`,
+    progress: (g, q) => g.inv.count('bandage') > 0 || flagged(q, 'bandaged') },
+  { id: 'apply', title: 'Bind your wounds',
+    text: `Away from any fight, <b>Apply</b> the bandage (from your pack, or its hotbar key). It takes a few seconds: stand still. It heals 25 health, slowly.`,
+    progress: (_g, q) => flagged(q, 'bandaged') },
 ];
 
 /** Dusk: the sun low and going down (the first evening you see, in practice your first day). */
@@ -259,6 +350,27 @@ export const QUESTS: QuestDef[] = [
     outro: { title: 'Lights in the night',
       text: `A torch is a light to carry, but it burns out. For steadier light: a <b>campfire</b> (${KEY('B')} → build one, add fuel, and light it with a bow drill) lights up your camp, cooks your food and warms you while it has fuel; a lit <b>forge</b> glows as it heats metal. Fires burn down too: feed them branches, kindling or logs.`,
       msg: 'Quest complete: you have a torch to see by. Campfires and a lit forge light the night too, as long as you keep them fed.' } },
+  { id: 'water', title: 'Something to drink', tutorial: true,
+    summary: 'You\'re getting thirsty. Find fresh water and drink.',
+    offer: (g) => g.player.water < 50,
+    steps: WATER_STEPS,
+    outro: { title: 'Water',
+      text: `Water runs low faster than food, and when it's gone you lose health. Drink from rivers, streams and lakes. To carry water with you, make <b>clay jars</b>: dig clay by the water, shape a jar (Pottery) and fire it in a campfire, then aim at water and <b>Fill clay jar</b>, and drink from your pack.`,
+      msg: 'Quest complete: you know where to find water. Clay jars let you carry it.' } },
+  { id: 'food', title: 'Living off the land', tutorial: true,
+    summary: 'You\'re getting hungry. Forage safely, then hunt.',
+    offer: (g) => g.player.food < 50,
+    steps: FOOD_STEPS,
+    outro: { title: 'A hunter-gatherer',
+      text: `Forage what you know, learn what you don't (${KEY('J')} keeps track), and hunt for meat and hides. Cook meat on a campfire: raw, it may turn your stomach. Hides make clothing and a bed.`,
+      msg: 'Quest complete: you can feed yourself from the land.' } },
+  { id: 'bandages', title: 'Patch yourself up', tutorial: true,
+    summary: 'You\'re hurt. Make a bandage and bind your wounds, away from any fight.',
+    offer: (g) => g.tips.has('health_ok'),
+    steps: BANDAGE_STEPS,
+    outro: { title: 'Bandaged',
+      text: `Health comes back slowly on its own while you're fed and watered; a bandage heals 25 more over the next while. Keep a few on your hotbar, and remember: get clear of a fight before you bind a wound.`,
+      msg: 'Quest complete: keep a few bandages on you.' } },
 ];
 
 const DEF = new Map(QUESTS.map((d) => [d.id, d]));
@@ -530,7 +642,8 @@ export class QuestLog {
   /** Put the arrow and glows on the targets, and the screen-edge arrow toward the nearest when it's out of view. */
   private place(g: Game) {
     // Things that have gone (picked, felled) drop out until the next check.
-    this.targets = this.targets.filter((t) => g.world.objects.has(t.id) || g.world.animals.some((a) => a.id === t.id && a.hp > 0));
+    // (Places, like a stretch of water, have no id of their own: they stay.)
+    this.targets = this.targets.filter((t) => t.id < 0 || g.world.objects.has(t.id) || g.world.animals.some((a) => a.id === t.id && a.hp > 0));
     // Animals move: follow them.
     for (const t of this.targets) {
       const a = g.world.animals.find((x) => x.id === t.id);

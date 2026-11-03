@@ -47,6 +47,7 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { SMAAPass } from 'three/examples/jsm/postprocessing/SMAAPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { QuestLog } from './quests';
+import { Combat } from './combat';
 
 const REACH = 4.5;
 /** Skill above a task's difficulty needed to do it the quick way. */
@@ -174,7 +175,11 @@ export class Game {
   private viewModel = new ViewModel();
   private saveTimer = 0;
   private respawnTimer = 0;
-  private elapsed = 0;
+  elapsed = 0;
+  /** Explanations already shown (and acknowledged) in this world. */
+  tips = new Set<string>();
+  /** Swinging, drawing a bow, arrows in flight; and whether you're in a fight. */
+  readonly combat = new Combat(this);
   /** The tutorial quest on a new world (null on worlds from before it, once it's over and saved as done it stays done). */
   /** Your quests (a world from before quests has an empty log, so later quests are still offered). */
   quests: QuestLog | null = null;
@@ -343,8 +348,13 @@ export class Game {
     this.inventoryChanged();
   }
 
+  /** Bind on a bandage (takes a few seconds, and not in a fight). */
+  applyBandage() {
+    this.request(ACTION_MAP.apply_bandage, { g: this, t: { kind: 'none' } });
+  }
+
   autoBind(it: Item) {
-    if (!itemDef(it.type).tool && !HELD_ITEMS.has(it.type)) return;
+    if (!itemDef(it.type).tool && !HELD_ITEMS.has(it.type) && it.type !== 'bandage') return;
     if (this.hotbar.includes(it.type)) return;
     const free = this.hotbar.indexOf(null);
     if (free >= 0) this.hotbar[free] = it.type;
@@ -416,6 +426,7 @@ export class Game {
     const type = this.hotbar[slot];
     const it = type ? this.inv.ofType(type)[0] : undefined;
     if (!it) return;
+    if (type === 'bandage') return this.applyBandage();
     const active = this.activeItem();
     this.setActive(active && active.type === type ? null : it.uid);
   }
@@ -524,6 +535,7 @@ export class Game {
     const qm = 0.6 + it.ql / 125;
     p.food = Math.min(100, p.food + f.nutrition * qm);
     p.water = Math.min(100, p.water + (f.water ?? 0) * (f.nutrition ? qm : 1));
+    if (f.nutrition > 0 && !harmful) this.quests?.note('ate');
     if (f.returns) {
       it.type = f.returns;
       this.msg(`You ${f.nutrition ? 'eat' : 'drink'} the ${name}.`, 'info');
@@ -1050,6 +1062,7 @@ export class Game {
     const d = ANIMALS[a.species];
     this.dropToGround([makeItem('corpse', 50, `${d.name.toLowerCase()} corpse`)], a.x, this.world.terrain.heightAt(a.x, a.z), a.z);
     this.msg(`You kill the ${d.name.toLowerCase()}! Butcher the corpse with a knife.`, 'good');
+    this.quests?.note(`killed_${a.species}`);
     if (this.action?.ctx.t.kind === 'animal' && this.action.ctx.t.animal === a) this.action = null;
     this.queue = this.queue.filter((q) => !(q.ctx.t.kind === 'animal' && q.ctx.t.animal === a));
   }
@@ -1061,6 +1074,9 @@ export class Game {
       const toP = Math.hypot(p.x - a.x, p.z - a.z);
       a.timer -= dt;
       a.attackCooldown -= dt;
+      if (a.hurt) a.hurt = Math.max(0, a.hurt - dt);
+      // Staggered by a blow: it stands a moment before it can act.
+      if ((a.stun ?? 0) > 0) { a.stun! -= dt; a.speed = 0; continue; }
       if (a.state === 'attack' && this.dev.on('peaceful')) { a.state = 'idle'; a.timer = 2; }
       // Deer are skittish: they bolt when you sprint nearby.
       if (a.species === 'deer' && a.state !== 'flee' && toP < 8 && this.player.sprinting) { a.state = 'flee'; a.timer = 4; }
@@ -1087,19 +1103,33 @@ export class Game {
         }
         case 'attack': {
           const l = toP || 1;
-          a.dirX = (p.x - a.x) / l; a.dirZ = (p.z - a.z) / l;
-          a.speed = toP > 1.4 ? d.speed * 0.9 : 0;
-          if (toP < 1.8 && a.attackCooldown <= 0) {
-            a.attackCooldown = 2.2;
-            if (this.dev.on('godMode')) {
-              this.msg(`The ${d.name.toLowerCase()} bounces off you harmlessly.`, 'info');
-            } else if (Math.random() < 0.7 - this.skills.get('fighting') / 250) {
-              const armor = this.armor();
-              const dmg = d.damage * (0.7 + Math.random() * 0.6) * (1 - armor);
-              this.player.health -= dmg;
-              this.msg(`The ${d.name.toLowerCase()} gores you! (${Math.round(dmg)}${armor > 0.02 ? `, your clothing took ${Math.round(armor * 100)}%` : ''})`, 'warn');
-              this.ui?.flashDamage();
-            } else this.msg(`You dodge the ${d.name.toLowerCase()}.`, 'info');
+          this.combat.lastFight = this.elapsed;
+          if ((a.windup ?? 0) > 0) {
+            // Head down, it gathers itself... and lunges. Whoever's still in front of it gets the tusks.
+            a.windup! -= dt;
+            a.speed = a.windup! < 0.15 ? d.speed * 1.8 : 0;
+            if (a.windup! <= 0) {
+              a.windup = 0;
+              a.attackCooldown = 1.6 + Math.random() * 0.8;
+              const facing = (p.x - a.x) * a.dirX + (p.z - a.z) * a.dirZ;
+              if (toP < 2.2 && facing > 0) {
+                if (this.dev.on('godMode')) this.msg(`The ${d.name.toLowerCase()} bounces off you harmlessly.`, 'info');
+                else {
+                  const armor = this.armor();
+                  const dmg = d.damage * (0.75 + Math.random() * 0.5) * (1 - armor);
+                  this.player.health -= dmg;
+                  this.msg(`The ${d.name.toLowerCase()} gores you! (${Math.round(dmg)}${armor > 0.02 ? `, your clothing took ${Math.round(armor * 100)}%` : ''})`, 'warn');
+                  this.ui?.flashDamage();
+                  this.player.shake(0.5);
+                  if (this.action?.def.id === 'apply_bandage') this.cancelAction('The blow knocks the bandage out of your hands.');
+                }
+              } else this.msg(`You get clear of the ${d.name.toLowerCase()}'s charge.`, 'info');
+            }
+          } else {
+            a.dirX = (p.x - a.x) / l; a.dirZ = (p.z - a.z) / l;
+            a.speed = toP > 1.4 ? d.speed * 0.9 : 0;
+            // Close enough: it lowers its head to charge (you have a moment to get out of the way).
+            if (toP < 2.0 && a.attackCooldown <= 0) a.windup = 0.6;
           }
           if (a.timer <= 0 || toP > 30) { a.state = 'idle'; a.timer = 3; }
           break;
@@ -1625,6 +1655,8 @@ export class Game {
         else { this.stopPlacing(); this.msg('Stopped planning.', 'info'); }
         continue;
       }
+      // A weapon or bow in hand, or an animal under your aim: fight.
+      if (btn === 0 && !this.action && this.combat.wantsClick()) { this.combat.press(); continue; }
       if (!this.target) continue;
       const opts = this.actionsFor(this.target);
       if (btn === 0) {
@@ -1683,6 +1715,7 @@ export class Game {
     } else {
       p.swing = 0;
     }
+    perf.time('combat', () => this.combat.update(dt));
 
     this.tickLife(dt);
   }
@@ -1706,11 +1739,12 @@ export class Game {
       p.stamina = Math.min(100, p.stamina + dt * regen);
     }
     if (fx.poisoned) p.health -= dt * fx.poisoned.rate;
+    if (fx.bandaged) p.health = Math.min(100, p.health + dt * fx.bandaged.rate);
     for (const [k, e] of Object.entries(fx)) {
       e.t -= dt;
       if (e.t <= 0) {
         delete fx[k];
-        this.msg(k === 'poisoned' ? 'The poison has run its course.' : k === 'nauseous' ? 'Your stomach settles.' : k === 'rested' ? 'The rested feeling wears off.' : 'The tea wears off.', 'info');
+        this.msg(k === 'poisoned' ? 'The poison has run its course.' : k === 'nauseous' ? 'Your stomach settles.' : k === 'rested' ? 'The rested feeling wears off.' : k === 'bandaged' ? 'The bandage has done its work.' : 'The tea wears off.', 'info');
       }
     }
     if (p.food <= 0 || p.water <= 0) {
@@ -1747,6 +1781,15 @@ export class Game {
     }
     if (this.dev.on('noNeeds')) { p.food = 100; p.water = 100; p.stamina = 100; }
     if (this.dev.on('godMode')) p.health = 100;
+    // The first time you're badly hurt: stop and explain health and bandages.
+    if (p.health < 50 && p.health > 0 && !this.tips.has('health') && !this.dev.on('godMode')) {
+      this.tips.add('health');
+      this.ui.showNotice('You are badly hurt',
+        `<p>Your <b>health</b> is below half. At zero you die: you wake at home (your bed, once you've slept in one) and your pack is left where you fell.</p>
+        <p>Health comes back on its own, slowly, while you're fed and watered. To heal faster, bind on a <b>bandage</b>: twist one from 4 plant fiber (Crafting → Primitive), then <b>Apply</b> it from your pack or the hotbar. It takes a few seconds and heals 25 health over the next while.</p>
+        <p>You can't bandage yourself <b>in the middle of a fight</b>: back off and get clear first. Getting hit knocks the bandage out of your hands.</p>`,
+        'I understand', () => this.tips.add('health_ok'));
+    }
     if (p.health <= 0) this.die();
 
     // --- world
@@ -1887,6 +1930,7 @@ export class Game {
         active: this.activeUid,
         nextUid: getNextUid(),
         quests: this.quests?.serialize() ?? null,
+        tips: [...this.tips],
       };
       await writeSave(SAVE_KEY, data);
     } catch (e) {
@@ -2032,6 +2076,7 @@ export class Game {
       g.player.effects = data.effects ?? {};
       g.activeUid = data.active;
       g.setActive(data.active);
+      g.tips = new Set(data.tips ?? []);
       const quests = data.quests ?? data.onboarding;
       if (quests) g.quests = QuestLog.load(g.markerTex, quests);
       return g;
@@ -2076,18 +2121,18 @@ function makeGlowTexture(): THREE.Texture {
 }
 
 /** What the body does for each job (null: stands at ease). `minigame`: the hands-on version. */
-function workClip(id: string, c: Ctx): Clip | null {
+function workClip(id: string, _c?: Ctx): Clip | null {
   switch (id) {
     case 'cut_tree': return 'chop';
     case 'mine': case 'break_rock': case 'dig': case 'level': case 'raise': case 'smooth': case 'cultivate': return 'mine';
-    case 'attack': return c.tool && /spear|hatchet|axe|hammer/.test(c.tool.type) ? 'attack_two' : 'attack_one';
     case 'harvest': return 'sickle';
     case 'pick_forage': case 'collect_branch': case 'pick_sprout': case 'pick_berries': case 'sow': case 'tend': case 'plant_sprout': case 'butcher': return 'gather';
     case 'pick_up': case 'take_all': case 'place_item': case 'fill_jar': return 'pickup';
     case 'drink': return 'drink';
     case 'continue_build': case 'quick_build': case 'demolish': return 'hammer';
     case 'craft': return 'craft';
-    case 'light_fire': case 'add_fuel': case 'fill_trough': case 'quench': case 'toggle_open': case 'open_container': return 'interact';
+    case 'light_fire': case 'add_fuel': case 'fill_trough': case 'quench': case 'toggle_open': case 'open_container': case 'relight_torch': case 'apply_bandage': return 'interact';
+    case 'plant_torch': return 'pickup';
     default: return null;
   }
 }
