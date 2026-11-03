@@ -15,7 +15,7 @@ export const GUIDE_HTML = `
         <tr><td>Hold Left Alt</td><td>Show the cursor: hover anything for a tooltip, or drag windows and the tutorial panel where you like</td></tr>
         <tr><td>H · Esc</td><td>This guide · release mouse / close windows</td></tr>
         <tr><td>G · J · M</td><td>Survey the area for things to pick · Field journal · Map of what you've explored</td></tr>
-        <tr><td>L</td><td>Quests: take up new ones, choose which are tracked on screen</td></tr>
+        <tr><td>L</td><td>Quests: accept new ones, track one (its targets are marked), pin the ones you want on screen</td></tr>
         <tr><td>Weapon in hand + Left click</td><td>Strike what's in front of you (any tool or bare fists hit an animal you aim at)</td></tr>
         <tr><td>Bow in hand + hold Left click</td><td>Draw; let go to shoot (needs arrows in your pack; a full draw shoots further and harder)</td></tr>
         <tr><td>Bandage (hotbar or pack → Apply)</td><td>Bind a wound: a few seconds, out of combat; heals 25 health slowly</td></tr>

@@ -573,9 +573,9 @@ export class QuestLog {
       <p>Quests come to you as you go: this one runs <b>alongside</b> your house, not instead of it. You can follow several at once.</p>
       <p>Your <b>quest log</b> (${KEY('L')}) holds them all. There you:</p>
       <ul>
-        <li><b>Accept</b> a new quest to take it up. It shows in the panel on the right while it's <b>tracked</b>.</li>
-        <li><b>Point it out</b>: one quest at a time has what it needs marked in the world, with <span style="color:#8fd0ff">blue rings</span> on the ground and an arrow. Point out the quest you want to work on now, and switch back whenever you like.</li>
-        <li><b>Untrack</b> a quest to set it aside: it keeps its progress for later.</li>
+        <li><b>Accept</b> a new quest to take it up. It's <b>pinned</b> to the panel on the right.</li>
+        <li><b>Track</b> the quest you want to work on now: its targets are marked in the world, with <span style="color:#8fd0ff">blue rings</span> on the ground and an arrow. You track one quest at a time, and can switch whenever you like.</li>
+        <li><b>Unpin</b> a quest to take it off the screen: it keeps its progress for later.</li>
       </ul>
       <p>Let's take this one up now.</p>`,
       'Open my quests', () => { g.ui.show('quests'); g.ui.refresh(); });
@@ -652,7 +652,7 @@ export class QuestLog {
       html += `<div class="quest-card quest-offer"><div class="tut-head">New quest</div>
         <div class="tut-title">${d.title}</div>
         <div class="tut-text">${d.summary}</div>
-        <div class="tut-hint quest-how">Press ${KEY('L')} for your quest log: <b>Accept</b> it, then <b>Point it out</b> to have what it needs marked in the world.</div></div>`;
+        <div class="tut-hint quest-how">Press ${KEY('L')} for your quest log: <b>Accept</b> it, then <b>Track</b> it to mark its targets in the world.</div></div>`;
     }
     for (const id of this.finished.keys()) {
       const d = DEF.get(id)!;

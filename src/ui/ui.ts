@@ -1144,7 +1144,7 @@ export class UI {
   private renderQuests() {
     const g = this.g, log = g.quests;
     const body = el('div');
-    body.appendChild(el('div', 'hint', 'You can follow several quests at once. <b>Tracked</b> quests show in the panel on screen; the first of them has what it needs pointed out in the world. Untrack one to set it aside for later: it keeps its place.'));
+    body.appendChild(el('div', 'hint', 'You can have several quests at once. <b>Track</b> the one you want to work on: its targets are marked in the world. <b>Pinned</b> quests show in the panel on screen; unpin one to set it aside (it keeps its progress).'));
     if (!log || !log.quests.length) {
       body.appendChild(el('div', 'quest-none', 'No quests yet.'));
       this.frame('quests', 'Quests', body);
@@ -1171,7 +1171,7 @@ export class UI {
         const row = el('div', `quest-row quest-${q.status}${q === log.focused ? ' quest-focused' : ''}`);
         let html = `<div class="quest-row-head"><b>${d.title}</b>`;
         if (q.status === 'active') html += ` <small>step ${Math.min(q.step + 1, d.steps.length)} of ${d.steps.length}</small>`;
-        if (q === log.focused) html += ' <span class="quest-tag">pointed out</span>';
+        if (q === log.focused) html += ' <span class="quest-tag">◎ Tracking</span>';
         html += `</div><div class="quest-summary">${d.summary}</div>`;
         if (q.status === 'active') {
           // The steps: done, the one you're on (with its progress), still to come.
@@ -1195,24 +1195,24 @@ export class UI {
         const btns = el('div', 'btns');
         let coachOn: [HTMLElement, number, string] | null = null;
         if (q.status === 'offered') {
-          const accept = button('Accept', 'Take up this quest and track it on screen', () => { log.accept(q.id); if (coaching) this.coachQuest = q.id; });
-          btns.append(accept, button('Accept, don\'t track', 'Take it up but keep it out of the panel for now', () => log.accept(q.id, false)));
-          if (coaching && !this.coachQuest) coachOn = [accept, 1, '<b>Accept</b> takes up the quest. It shows in the panel on the right while it\'s tracked.'];
+          const accept = button('Accept', 'Take up this quest (it is pinned on screen)', () => { log.accept(q.id); if (coaching) this.coachQuest = q.id; });
+          btns.append(accept, button('Accept, don\'t pin', 'Take it up but keep it out of the panel for now', () => log.accept(q.id, false)));
+          if (coaching && !this.coachQuest) coachOn = [accept, 1, '<b>Accept</b> takes up the quest. It\'s pinned to the panel on the right.'];
         } else if (q.status === 'active') {
           btns.append(q.tracked
-            ? button('Untrack', 'Hide it from the panel on screen (it keeps its progress)', () => log.setTracked(q.id, false))
-            : button('Track', 'Show it in the panel on screen', () => log.setTracked(q.id, true)));
+            ? button('Unpin', 'Take it off the panel on screen (it keeps its progress)', () => log.setTracked(q.id, false))
+            : button('Pin', 'Show it in the panel on screen', () => log.setTracked(q.id, true)));
           if (q !== log.focused) {
-            const point = button('Point it out', 'Track it first: the things it needs are marked in the world', () => {
+            const point = button('Track', 'Mark its targets in the world (one quest is tracked at a time)', () => {
               log.focus(q.id);
               if (coaching && this.coachQuest === q.id) {
                 g.tips.add('quest_coached');
                 this.coachQuest = null;
-                this.log(`${d.title} is pointed out: follow the blue rings and the arrow. To go back to another quest, open your quests (L) and point that one out instead.`, 'good');
+                this.log(`Now tracking: ${d.title}. Follow the blue rings and the arrow. To switch back, open your quests (L) and track another one.`, 'good');
               }
             });
             btns.append(point);
-            if (coaching && this.coachQuest === q.id) coachOn = [point, 2, `<b>Point it out</b> to have what this quest needs marked in the world (blue rings and an arrow). Only one quest is pointed out at a time; your house waits until you come back to it.`];
+            if (coaching && this.coachQuest === q.id) coachOn = [point, 2, `<b>Track</b> it to mark its targets in the world (blue rings and an arrow). You track one quest at a time; your house waits until you switch back.`];
           }
         }
         if (btns.childElementCount) row.appendChild(btns);
