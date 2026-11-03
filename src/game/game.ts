@@ -7,7 +7,7 @@ import { anvilGrade } from './smithy';
 import { isRock, Mat, WATER_LEVEL, type Volumes } from '../world/terrain';
 import { forageHeight, forageScale } from '../world/forageProps';
 import { buildPieceMesh, WorldView } from '../world/view';
-import { GroundCover } from '../world/groundcover';
+import { GroundCover, PIECE_MARGIN } from '../world/groundcover';
 import { Fireflies } from '../world/fireflies';
 import { DistantLand } from '../world/lod';
 import { GraphicsSettings } from './graphics';
@@ -240,7 +240,8 @@ export class Game {
     this.groundCover.view = this.grassCull;
     this.applyGraphics();
     this.scene.add(this.groundCover.group, this.fireflies.points);
-    this.view.onStructure = (o) => this.groundCover.invalidate(o.x, o.z, 3);
+    // A piece going up (or coming down) changes the grass round it: redraw the patches it reaches.
+    this.view.onStructure = (o) => this.groundCover.invalidate(o.x, o.z, 4.5);
     // A find turning up (or going) where the grass is already drawn: redraw that patch round it.
     this.view.onLowFind = (o) => this.groundCover.invalidateIfDrawn(o.x, o.z);
 
@@ -1279,13 +1280,14 @@ export class Game {
     }
   }
 
-  /** Ring(s) on the ground showing the area a shovel or pickaxe will work. */
+  /** Ring(s) on the ground showing the area a shovel, hoe or pickaxe will work. */
   private updateBrush() {
     const t = this.target;
     const tool = this.activeItem() ? itemDef(this.activeItem()!.type).tool : undefined;
-    const show = !this.placing && t?.kind === 'terrain' && (tool === 'shovel' || tool === 'pickaxe');
+    const show = !this.placing && t?.kind === 'terrain' && (tool === 'shovel' || tool === 'pickaxe' || tool === 'hoe');
     this.brush.visible = show;
-    this.brushOuter.visible = show && tool === 'shovel';
+    // The hoe levels a wider round (the outer ring); the inner is what it tills.
+    this.brushOuter.visible = show && tool === 'hoe';
     if (!show || t?.kind !== 'terrain') return;
     const place = (ring: THREE.LineLoop, r: number) => {
       const pos = ring.geometry.attributes.position as THREE.BufferAttribute;
@@ -1301,7 +1303,7 @@ export class Game {
       ring.geometry.computeBoundingSphere();
     };
     place(this.brush, tool === 'pickaxe' ? 1.1 : DIG_RADIUS);
-    if (tool === 'shovel') place(this.brushOuter, LEVEL_RADIUS);
+    if (tool === 'hoe') place(this.brushOuter, LEVEL_RADIUS);
   }
 
   // ---------- building placement (Valheim-style planning)
@@ -1375,7 +1377,7 @@ export class Game {
       if (fit) ({ x, y, z, yaw } = fit), snapped = true;
       else { valid = false; reason = 'Bellows have to go against the side of a forge. Aim at a forge.'; }
     }
-    if (!snapped && hit.kind === 'terrain' && !def.snap && hit.normal.y < 0.75) { valid = false; reason = 'The ground is too steep here. Level it with a shovel.'; }
+    if (!snapped && hit.kind === 'terrain' && !def.snap && hit.normal.y < 0.75) { valid = false; reason = 'The ground is too steep here. Level it with a hoe.'; }
     if (!snapped && hit.kind === 'water') { valid = false; reason = 'You cannot build on water.'; }
     if (!snapped && hit.kind === 'object' && hit.obj.kind !== 'structure') { valid = false; reason = 'Something is in the way.'; }
     const probe: StructureObj = { kind: 'structure', id: -1, type: def.id, x, y, z, yaw, consumed: {}, built: true, ql: 0, fuel: 0, lit: false };
@@ -1483,6 +1485,13 @@ export class Game {
     this.msg(`[dev] ${def.name} built instantly.`, 'info');
   }
 
+  /** Clear the finds lying where a piece goes (stones, mushrooms, branches...): they'd poke up through it. */
+  private clearAround(s: StructureObj) {
+    for (const o of [...this.world.near(s.x, s.z, 6)]) {
+      if (o.kind === 'forage' && pointInPiece(s, o.x, o.y + 0.1, o.z, PIECE_MARGIN)) this.world.remove(o);
+    }
+  }
+
   private confirmPlacement() {
     const p = this.placement;
     if (!p) return;
@@ -1498,6 +1507,7 @@ export class Game {
         consumed: {}, built: true, ql: item.ql, dmg: item.dmg, fuel: 0, lit: false,
       });
       if (p.def.water) placed.water = 0;
+      this.clearAround(placed);
       this.stopPlacing();
       this.sound.glance(0.6);
       const name = p.def.name.toLowerCase();
@@ -1513,6 +1523,7 @@ export class Game {
       consumed: {}, built: false, ql: 0, fuel: 0, lit: false,
     });
     if (p.def.container) s.items = [];
+    this.clearAround(s);
     if (this.dev.on('freeBuild')) this.devFinishStructure(s);
     else this.msg(`Planned a ${p.def.name.toLowerCase()}. Build it with "Continue building" using the materials and tools it needs.`, 'good');
   }

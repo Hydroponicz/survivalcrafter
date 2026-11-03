@@ -10,15 +10,15 @@ import type { Gesture } from './tutorials';
 // bigger flakes. Too hard, or too far in, and a flake bites into the shape
 // itself; bite too deep and the stone is spoiled.
 
-export type KnapShape = 'hatchet' | 'knife' | 'spear' | 'pick' | 'hammer' | 'anvil';
+export type KnapShape = 'hatchet' | 'knife' | 'spear' | 'pick' | 'hoe' | 'hammer' | 'anvil';
 
 /** The shape a recipe knaps, by the item it makes. */
 export const KNAP_SHAPES: Record<string, KnapShape> = {
-  stone_hatchet: 'hatchet', stone_knife: 'knife', stone_spear: 'spear', stone_pickaxe: 'pick', stone_anvil: 'anvil',
+  stone_hatchet: 'hatchet', stone_knife: 'knife', stone_spear: 'spear', stone_pickaxe: 'pick', stone_hoe: 'hoe', stone_anvil: 'anvil',
 };
 
 const NAMES: Record<KnapShape, string> = {
-  hatchet: 'an axe head', knife: 'a blade', spear: 'a spear point', pick: 'a pick head', hammer: 'a hammerstone', anvil: 'an anvil stone',
+  hatchet: 'an axe head', knife: 'a blade', spear: 'a spear point', pick: 'a pick head', hoe: 'a hoe blade', hammer: 'a hammerstone', anvil: 'an anvil stone',
 };
 
 /**
@@ -34,6 +34,8 @@ const OUTLINES: Record<KnapShape, { len: number; w: number; at: (t: number) => n
   spear: { len: 0.17, w: 0.04, at: (t) => Math.pow(Math.sin(Math.PI * Math.pow(t, 0.65)), 0.85) },
   // Long, narrow, pointed.
   pick: { len: 0.19, w: 0.03, at: (t) => Math.pow(Math.sin(Math.PI * t), 0.5) * (1.25 - 0.75 * t) },
+  // A broad flat blade: a short neck to lash on, flaring to a wide, nearly straight edge.
+  hoe: { len: 0.15, w: 0.066, at: (t) => (0.42 + 0.58 * Math.min(1, t / 0.55)) * roundEnds(t, 0.1, 0.05) },
   // A rounded lump for the hand.
   hammer: { len: 0.12, w: 0.046, at: (t) => Math.sqrt(Math.sin(Math.PI * t)) },
   // A broad flat slab.

@@ -87,7 +87,7 @@ const groundMat = (c: Ctx) => (isGround(c) ? c.t.mat : undefined);
 /** Cubic metres of earth in one dirt/sand/clay item (and one small rock). */
 export const EARTH_PER_ITEM = 0.5;
 
-/** Radius of the shovel/pickaxe brush (metres). */
+/** Radius of the shovel/pickaxe brush (metres), and of the hoe's levelling. */
 export const DIG_RADIUS = 1.3;
 export const LEVEL_RADIUS = 2.2;
 
@@ -247,7 +247,7 @@ export const ACTIONS: ActionDef[] = [
   },
   {
     id: 'level', label: 'Level ground (to your feet)',
-    show: (c) => toolIs(c, 'shovel') && isGround(c),
+    show: (c) => toolIs(c, 'hoe') && isGround(c),
     check: (c) => {
       if (!isGround(c)) return '';
       const p = c.t.point;
@@ -301,7 +301,7 @@ export const ACTIONS: ActionDef[] = [
   },
   {
     id: 'smooth', label: 'Smooth ground',
-    show: (c) => toolIs(c, 'shovel') && isGround(c),
+    show: (c) => toolIs(c, 'hoe') && isGround(c),
     swing: 'dig',
     time: 3, skill: 'digging', difficulty: 4, stamina: 4, toolWear: 0.05,
     run: (c) => {
@@ -358,8 +358,8 @@ export const ACTIONS: ActionDef[] = [
     },
   },
   {
-    id: 'cultivate', label: 'Cultivate',
-    show: (c) => toolIs(c, 'shovel') && (groundMat(c) === Mat.Grass || groundMat(c) === Mat.Dirt),
+    id: 'cultivate', label: 'Till the soil',
+    show: (c) => toolIs(c, 'hoe') && (groundMat(c) === Mat.Grass || groundMat(c) === Mat.Dirt),
     check: (c) => {
       if (!isGround(c)) return '';
       if (c.t.normal.y < 0.85) return 'The ground is too steep to farm. Level it first.';
@@ -395,7 +395,7 @@ export const ACTIONS: ActionDef[] = [
   },
   {
     id: 'tend', label: 'Tend crop',
-    show: (c) => toolIs(c, 'shovel') && !!cropAt(c).crop,
+    show: (c) => toolIs(c, 'hoe') && !!cropAt(c).crop,
     check: (c) => {
       const crop = cropAt(c).crop!;
       if (crop.tended >= 3) return 'The crop is already well tended.';

@@ -5,11 +5,11 @@ import { FURNITURE } from './furniture';
 export type FoodEffect = 'nausea' | 'poison' | 'severe_poison' | 'heal' | 'refresh' | 'soothe';
 
 export type ToolKind =
-  | 'knife' | 'hatchet' | 'pickaxe' | 'shovel' | 'hammer' | 'saw' | 'scythe' | 'weapon' | 'tongs' | 'crucible' | 'bow';
+  | 'knife' | 'hatchet' | 'pickaxe' | 'shovel' | 'hoe' | 'hammer' | 'saw' | 'scythe' | 'weapon' | 'tongs' | 'crucible' | 'bow';
 
 /** What each tool kind is called in requirement messages. */
 export const TOOL_NAMES: Record<ToolKind, string> = {
-  knife: 'knife', hatchet: 'hatchet', pickaxe: 'pickaxe', shovel: 'shovel', hammer: 'hammer', saw: 'saw',
+  knife: 'knife', hatchet: 'hatchet', pickaxe: 'pickaxe', shovel: 'shovel', hoe: 'hoe', hammer: 'hammer', saw: 'saw',
   scythe: 'scythe', weapon: 'weapon', tongs: 'pair of tongs', crucible: 'crucible', bow: 'bow',
 };
 
@@ -93,6 +93,7 @@ const defs: ItemDef[] = [
   { id: 'wooden_hammer', name: 'Wooden hammer', icon: '🔨', weight: 0.9, tool: 'hammer', toolPower: 0.6, damage: 5, desc: 'A mallet: a block of rough plank driven onto a shaft. For building and rough smithing.' },
   { id: 'stone_hammer', name: 'Stone hammer', icon: '🔨', weight: 1.2, tool: 'hammer', toolPower: 0.6, damage: 6, desc: 'For building and rough smithing. (No longer made: today\'s builders use a wooden hammer.)' },
   { id: 'wooden_shovel', name: 'Wooden shovel', icon: '🪏', weight: 1.5, tool: 'shovel', toolPower: 0.6, damage: 4, desc: 'Digs dirt, sand and clay.' },
+  { id: 'stone_hoe', name: 'Stone hoe', icon: '🌱', weight: 1.3, tool: 'hoe', toolPower: 0.6, damage: 5, desc: 'A flat knapped blade lashed across a shaft. Tills soil into a field for sowing, weeds crops, and levels and smooths the ground.' },
   { id: 'flint', name: 'Flint', icon: '🪨', weight: 0.3, desc: 'A glassy nodule of flint. Knapped small and sharp, it tips arrows. Found on shores and rocky ground, and in broken boulders.' },
   { id: 'feather', name: 'Feather', icon: '🪶', weight: 0.01, desc: 'A long flight feather, from a nest that came down with a tree. Fletches arrows.' },
   { id: 'bow', name: 'Short bow', icon: '🏹', weight: 1.0, tool: 'bow', toolPower: 0.8, damage: 0, desc: 'A stave of springy wood strung with cordage. Hold it, hold the left button to draw, let go to loose an arrow. Needs arrows in your pack.' },
@@ -104,6 +105,7 @@ const defs: ItemDef[] = [
   { id: 'iron_pickaxe', name: 'Iron pickaxe', icon: '⛏️', weight: 2.5, tool: 'pickaxe', toolPower: 1.0, damage: 10, desc: 'Breaks rock with authority.' },
   { id: 'iron_hammer', name: 'Iron hammer', icon: '🔨', weight: 1.5, tool: 'hammer', toolPower: 1.0, damage: 9, desc: 'Smithing and construction.' },
   { id: 'iron_shovel', name: 'Iron shovel', icon: '🪏', weight: 2, tool: 'shovel', toolPower: 1.0, damage: 7, desc: 'Moves earth quickly.' },
+  { id: 'iron_hoe', name: 'Iron hoe', icon: '🌱', weight: 1.6, tool: 'hoe', toolPower: 1.0, damage: 8, desc: 'A broad iron blade on a long shaft. Tills and weeds quickly, and levels ground fast and true.' },
   { id: 'saw', name: 'Saw', icon: '🪚', weight: 1.5, tool: 'saw', toolPower: 1.0, damage: 5, desc: 'Cuts logs into many planks.' },
   { id: 'scythe', name: 'Scythe', icon: '🌙', weight: 2.5, tool: 'scythe', toolPower: 1.0, damage: 10, desc: 'Harvests crops with a better yield.' },
   { id: 'wooden_tongs', name: 'Green-wood tongs', icon: '🥢', weight: 0.5, tool: 'tongs', toolPower: 0.45,

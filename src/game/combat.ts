@@ -26,7 +26,7 @@ function styleOf(it: Item | undefined): SwingStyle {
         ? { dur: 0.75, impactAt: 0.5, reach: 3.0, arc: 0.55, clip: 'attack_two', kind: 'reach', stamina: 5 }
         : { dur: 0.6, impactAt: 0.5, reach: 2.6, arc: 1.0, clip: 'attack_one', kind: 'chop', stamina: 5 };
     case 'knife': return { dur: 0.45, impactAt: 0.5, reach: 1.9, arc: 0.9, clip: 'attack_one', kind: 'reach', stamina: 3 };
-    case 'hatchet': case 'pickaxe': case 'hammer': case 'shovel': case 'scythe': case 'saw': case 'tongs':
+    case 'hatchet': case 'pickaxe': case 'hammer': case 'shovel': case 'hoe': case 'scythe': case 'saw': case 'tongs':
       return { dur: 0.85, impactAt: 0.55, reach: 2.3, arc: 0.9, clip: 'attack_two', kind: 'chop', stamina: 6 };
     default: return FISTS;
   }

@@ -4,7 +4,10 @@ import type { ViewCull } from './cull';
 import { hash2, mulberry32 } from './noise';
 import { isRock, Mat } from './terrain';
 import type { Zone } from './climate';
-import type { World } from './world';
+import { pointInPiece, type World } from './world';
+
+/** How far round a building piece the ground is kept clear of grass and stones (m). */
+export const PIECE_MARGIN = 0.35;
 
 // Ground cover: the grass, flowers, ferns, reeds, heather and pebbles around
 // you, plus boulders and fallen logs further out. Purely visual and
@@ -474,7 +477,10 @@ export class GroundCover {
       const slope = Math.hypot(gx, gz);
       return { h, slope, mat: t.topAt(x, z) };
     };
-    const blocked = (x: number, y: number, z: number) => pieces.length > 0 && this.world.blockedAt(x, y + 0.12, z);
+    // Nothing grows in or right against a building piece, planned or built: no grass poking up through a
+    // floor or into a wall. (A hand's breadth round its shape, near the ground; a roof up high clears nothing.)
+    const blocked = (x: number, y: number, z: number) => pieces.length > 0
+      && (this.world.blockedAt(x, y + 0.12, z) || pieces.some((s) => pointInPiece(s, x, y + 0.15, z, PIECE_MARGIN)));
 
     // Logs and boulders lying here (they can reach in from the next tile, too).
     const obs: Obstacle[] = [];
@@ -535,7 +541,7 @@ export class GroundCover {
         }
         if (g.h < water + 0.05) continue;
         if (isRock(g.mat) || g.mat === Mat.Gravel || g.mat === Mat.Sand) {
-          if (roll < (g.mat === Mat.Sand ? 0.12 : 0.3) && g.slope < 1.2) {
+          if (roll < (g.mat === Mat.Sand ? 0.12 : 0.3) && g.slope < 1.2 && !blocked(x, g.h, z)) {
             t.surfaceColor(g.mat, x, g.h, z, 1, col);
             const v = rnd(r, 0.6, 1.0);
             put('pebble', x, g.h - 0.02, z, yaw, rnd(r, 0.5, 1.6), col[0] * v * 1.6, col[1] * v * 1.6, col[2] * v * 1.6);

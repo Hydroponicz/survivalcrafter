@@ -100,6 +100,23 @@ export function buildToolMesh(kind: ToolKind | undefined, itemType?: string): TH
       blade.rotation.x = 0.12;
       break;
     }
+    case 'hoe': {
+      // A long shaft with a flat blade set across its end, like an adze: the edge faces the ground.
+      handle(1.05, 0.016);
+      if (stone) {
+        const blade = add(new THREE.DodecahedronGeometry(0.08, 0), mat(0x8a857c, { flatShading: true }), 0, 0.93, 0.1);
+        blade.scale.set(1.0, 0.22, 1.25);
+        blade.rotation.x = -0.12;
+        add(new THREE.CylinderGeometry(0.024, 0.024, 0.08, 6), mat(0xc9b07a), 0, 0.93, 0); // lashing
+      } else {
+        // An iron blade: a socket round the shaft, a neck, and a wide thin plate.
+        add(new THREE.CylinderGeometry(0.024, 0.022, 0.08, 8), head, 0, 0.93, 0);
+        add(new THREE.BoxGeometry(0.03, 0.02, 0.07), head, 0, 0.93, 0.05);
+        const plate = add(new THREE.BoxGeometry(0.17, 0.008, 0.13), head, 0, 0.91, 0.14);
+        plate.rotation.x = -0.18;
+      }
+      break;
+    }
     case 'hammer':
       handle(0.42);
       if (itemType === 'wooden_hammer') {
