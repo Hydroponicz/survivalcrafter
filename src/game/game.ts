@@ -41,6 +41,10 @@ import { Player } from './player';
 import { Sky } from './sky';
 import type { UI } from '../ui/ui';
 import { Tour } from './tour';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { SMAAPass } from 'three/examples/jsm/postprocessing/SMAAPass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { Onboarding } from './onboarding';
 
 const REACH = 4.5;
@@ -176,7 +180,8 @@ export class Game {
 
   constructor(canvas: HTMLCanvasElement, world: World) {
     // Log depth: the view runs out to kilometres without distant hills flickering.
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance', logarithmicDepthBuffer: true });
+    // (MSAA on the canvas can only be chosen now: turning anti-aliasing off or on takes a restart.)
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: this.graphics.aa !== 'off', powerPreference: 'high-performance', logarithmicDepthBuffer: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.shadowMap.enabled = true;
@@ -235,6 +240,7 @@ export class Game {
       this.camera.aspect = window.innerWidth / window.innerHeight;
       this.camera.updateProjectionMatrix();
       this.renderer.setSize(window.innerWidth, window.innerHeight);
+      this.composer?.setSize(window.innerWidth, window.innerHeight);
     });
     // Save when the tab is hidden or closed. Hiding comes first and gives the
     // save time to finish; closing alone may not wait for it.
@@ -1449,8 +1455,32 @@ export class Game {
       sun.shadow.map = null;
     }
     this.groundCover.setDensity(q.plants);
+    this.applyAA();
     this.distant.radius = q.viewTiles;
     this.distant.forestThin = q.forestThin;
+  }
+
+  /** High anti-aliasing: the world drawn into a multisampled buffer, then SMAA over it. */
+  private composer: EffectComposer | null = null;
+
+  private applyAA() {
+    const aa = this.graphics.aa;
+    // Cut-out edges (the distant trees' cards) smoothed by the multisampling.
+    this.distant.setAlphaToCoverage(aa !== 'off');
+    const want = aa === 'high';
+    if (want && !this.composer) {
+      const target = new THREE.WebGLRenderTarget(1, 1, { samples: 4, type: THREE.HalfFloatType });
+      const c = new EffectComposer(this.renderer, target);
+      c.addPass(new RenderPass(this.scene, this.camera));
+      c.addPass(new SMAAPass());
+      c.addPass(new OutputPass());
+      this.composer = c;
+    } else if (!want && this.composer) {
+      this.composer.dispose();
+      this.composer = null;
+    }
+    this.composer?.setPixelRatio(this.renderer.getPixelRatio());
+    this.composer?.setSize(window.innerWidth, window.innerHeight);
   }
 
   private frame(timestamp: number) {
@@ -1726,7 +1756,7 @@ export class Game {
     this.view.updateFires(p.pos.x, p.pos.z, this.elapsed);
     this.frameNo++;
     this.renderer.shadowMap.needsUpdate = this.frameNo % this.graphics.level.shadowEvery === 0;
-    perf.time('draw', () => this.renderer.render(this.scene, this.camera));
+    perf.time('draw', () => { if (this.composer) this.composer.render(this.renderDt); else this.renderer.render(this.scene, this.camera); });
     // First-person hands and tool, on top of the world.
     if (!this.working && !this.tour) {
       const it = this.activeItem();

@@ -71,6 +71,13 @@ varying vec2 vCell;`)
     };
   }
 
+  /** With multisampling, cut-out edges come out smooth instead of stair-stepped. */
+  setAlphaToCoverage(on: boolean) {
+    if (this.material.alphaToCoverage === on) return;
+    this.material.alphaToCoverage = on;
+    this.material.needsUpdate = true;
+  }
+
   /** Take the pictures (once, with the game's renderer). */
   bake(renderer: THREE.WebGLRenderer) {
     if (this.baked) return;

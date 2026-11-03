@@ -47,6 +47,8 @@ export class DistantLand {
   /** Thin the distant forests by this many levels (a graphics setting). */
   forestThin = 0;
   private forest: FarForest | null;
+  /** Smooth the distant trees' cut-out edges with the multisampling (anti-aliasing on). */
+  setAlphaToCoverage(on: boolean) { this.forest?.impostors.setAlphaToCoverage(on); }
   /** Take the distant trees' pictures (once, with the game's renderer). */
   bakeTrees(renderer: THREE.WebGLRenderer) { this.forest?.bake(renderer); }
 

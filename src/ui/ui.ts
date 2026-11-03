@@ -151,6 +151,7 @@ export class UI {
           <button data-act="save" title="Save now (the game also saves every minute and when you leave)">Save game</button>
           <button data-act="unstuck" title="Move to the nearest open ground if you are stuck in terrain">Unstuck</button>
           <button data-act="quality" title="Cycle Low / Medium / High: shadows, view distance, plants and sharpness">Graphics: ${g.graphics.level.label}</button>
+          <button data-act="aa" title="Smooths jagged edges. Standard: the graphics card's own (MSAA). High adds SMAA over the whole picture.">Anti-aliasing: ${g.graphics.aaLabel}</button>
           <button data-act="fps" title="Cap the frame rate to save power and keep your computer cool">Frame cap: ${g.graphics.fpsLabel}</button>
           <button data-act="export" title="Download your world as a file (a backup, or to move it to another browser)">Export save file</button>
           <button data-act="import" title="Load a world from a save file, replacing this one">Import save file</button>
@@ -167,6 +168,14 @@ export class UI {
       if (act === 'quality') {
         g.graphics.nextQuality(); g.applyGraphics();
         (e.target as HTMLElement).textContent = `Graphics: ${g.graphics.level.label}`;
+        return;
+      }
+      if (act === 'aa') {
+        const was = g.graphics.aa;
+        g.graphics.nextAA(); g.applyGraphics();
+        (e.target as HTMLElement).textContent = `Anti-aliasing: ${g.graphics.aaLabel}`;
+        // The graphics card's own smoothing is set when the game starts.
+        if ((was === 'off') !== (g.graphics.aa === 'off')) this.log('Turning anti-aliasing fully on or off takes effect when you next load the game.', 'info');
         return;
       }
       if (act === 'fps') {

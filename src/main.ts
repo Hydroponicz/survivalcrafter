@@ -143,6 +143,7 @@ const sound = () => backdrop?.sound ?? new Sound();
 function showSettings() {
   $('set-quality').textContent = `Graphics: ${graphics().level.label}`;
   $('set-fps').textContent = `Frame cap: ${graphics().fpsLabel}`;
+  $('set-aa').textContent = `Anti-aliasing: ${graphics().aaLabel}`;
   $('set-sound').textContent = `Sound: ${sound().muted ? 'Off' : 'On'}`;
 }
 
@@ -168,6 +169,7 @@ $('set-quality').addEventListener('click', () => {
   showSettings();
 });
 $('set-fps').addEventListener('click', () => { graphics().nextFpsCap(); showSettings(); });
+$('set-aa').addEventListener('click', () => { graphics().nextAA(); backdrop?.applyGraphics(); showSettings(); });
 $('set-sound').addEventListener('click', () => { const s = sound(); s.muted = !s.muted; showSettings(); });
 menu.querySelector('[data-go="settings"]')!.addEventListener('click', showSettings);
 menu.querySelector('.wiki-body')!.innerHTML = GUIDE_HTML;

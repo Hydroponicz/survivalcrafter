@@ -30,15 +30,21 @@ export const QUALITY: Record<Quality, QualityLevel> = {
 /** Frame rate caps on offer (0: as fast as the screen refreshes). */
 export const FPS_CAPS = [30, 60, 120, 0];
 
+/** Anti-aliasing: none; the GPU's own (MSAA, with smoothed cut-out edges); or that plus SMAA over the finished picture. */
+export type AA = 'off' | 'standard' | 'high';
+const AA_LABELS: Record<AA, string> = { off: 'Off', standard: 'Standard', high: 'High (SMAA)' };
+
 export class GraphicsSettings {
   quality: Quality = 'medium';
   fpsCap = 60;
+  aa: AA = 'standard';
 
   constructor() {
     try {
       const data = JSON.parse(localStorage.getItem(KEY) ?? '{}');
       if (data.quality in QUALITY) this.quality = data.quality;
       if (FPS_CAPS.includes(data.fpsCap)) this.fpsCap = data.fpsCap;
+      if (data.aa in AA_LABELS) this.aa = data.aa;
     } catch { /* ignore broken settings */ }
   }
 
@@ -55,9 +61,17 @@ export class GraphicsSettings {
     this.persist();
   }
 
+  nextAA() {
+    const order = Object.keys(AA_LABELS) as AA[];
+    this.aa = order[(order.indexOf(this.aa) + 1) % order.length];
+    this.persist();
+  }
+
+  get aaLabel() { return AA_LABELS[this.aa]; }
+
   get fpsLabel() { return this.fpsCap ? `${this.fpsCap} fps` : 'Unlimited'; }
 
   private persist() {
-    try { localStorage.setItem(KEY, JSON.stringify({ quality: this.quality, fpsCap: this.fpsCap })); } catch { /* private mode */ }
+    try { localStorage.setItem(KEY, JSON.stringify({ quality: this.quality, fpsCap: this.fpsCap, aa: this.aa })); } catch { /* private mode */ }
   }
 }
