@@ -892,10 +892,16 @@ export class WorldGen {
     return t;
   }
 
+  /** Tiles held on to though far away (the map is drawing land from an earlier visit). */
+  private pinned = new Set<string>();
+  pin(tx: number, tz: number) { this.pinned.add(`${tx},${tz}`); }
+  unpinAll() { this.pinned.clear(); }
+
   /** Forget tiles far from a point (they're remade if you come back). */
   forget(x: number, z: number, keep: number) {
     this.clock++;
     for (const [key, t] of this.tiles) {
+      if (this.pinned.has(key)) continue;
       const cx = (t.d.tx + 0.5) * TILE, cz = (t.d.tz + 0.5) * TILE;
       if (Math.max(Math.abs(cx - x), Math.abs(cz - z)) > keep + TILE) this.tiles.delete(key);
     }

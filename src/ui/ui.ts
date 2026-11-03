@@ -4,6 +4,7 @@ import { isIdentified, ITEMS, itemDef, itemName, TOOL_NAMES, typeDesc, WEAR_SLOT
 import { RECIPES, STATION_NAMES, type Recipe } from '../data/recipes';
 import { SKILL_INFO, SKILLS, type SkillId } from '../data/skills';
 import { Tooltip } from './tooltip';
+import { MapView } from './mapview';
 import { drawIcons, itemIcon, onIconsReady } from './itemIcons';
 import { CharacterPreview } from './preview';
 import { BUILDABLE, STRUCTURES, totalMaterials } from '../data/structures';
@@ -18,7 +19,7 @@ import { CARRY_CAPACITY } from '../game/inventory';
 import { MAT_NAMES } from '../world/terrain';
 import { ANIMALS, cropKey, type PileObj, type StructureObj } from '../world/world';
 
-type WindowName = 'inventory' | 'character' | 'crafting' | 'skills' | 'build' | 'help' | 'container' | 'dev' | 'journal' | 'quests';
+type WindowName = 'inventory' | 'character' | 'crafting' | 'skills' | 'build' | 'help' | 'container' | 'dev' | 'journal' | 'quests' | 'map';
 
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, html?: string) => {
   const e = document.createElement(tag);
@@ -80,6 +81,9 @@ export class UI {
   cursor: VirtualCursor;
   /** Hover boxes for anything with a data-tip or title. */
   tooltip: Tooltip;
+  /** The world map (made when first opened). */
+  private _mapView: MapView | null = null;
+  get mapView(): MapView { return (this._mapView ??= new MapView(this.g, this.g.map)); }
   /** Your character, in the inventory window. */
   private preview = new CharacterPreview();
   /** Seconds to keep the pause screen hidden after asking to re-capture the mouse. */
@@ -121,7 +125,7 @@ export class UI {
       this.bars[k] = b.querySelector('.bar-fill')!;
     }
 
-    for (const name of ['inventory', 'character', 'crafting', 'skills', 'build', 'help', 'container', 'dev', 'journal', 'quests'] as WindowName[]) {
+    for (const name of ['inventory', 'character', 'crafting', 'skills', 'build', 'help', 'container', 'dev', 'journal', 'quests', 'map'] as WindowName[]) {
       const w = el('div', `window window-${name}`);
       w.style.display = 'none';
       w.addEventListener('mousedown', (e) => {
@@ -158,6 +162,7 @@ export class UI {
           <button data-act="export" title="Download your world as a file (a backup, or to move it to another browser)">Export save file</button>
           <button data-act="import" title="Load a world from a save file, replacing this one">Import save file</button>
           <button data-act="help" title="Controls and how the game works (H)">Controls &amp; guide</button>
+          <button data-act="sound" title="Turn the game's sound on or off">Sound: ${g.sound.muted ? 'off' : 'on'}</button>
           <button data-act="windows" title="Put every window and panel back where it started">Reset window positions</button>
           <button data-act="skip-tutorial" title="Turn the tutorial quest off for this world">Skip tutorial</button>
           <button data-act="new" title="Delete this world and start a new one" class="danger">Abandon world</button>
@@ -186,6 +191,11 @@ export class UI {
         return;
       }
       if (act === 'help') { this.toggle('help'); return; }
+      if (act === 'sound') {
+        g.sound.muted = !g.sound.muted;
+        (e.target as HTMLElement).textContent = `Sound: ${g.sound.muted ? 'off' : 'on'}`;
+        return;
+      }
       if (act === 'windows') { this.resetWindows(); this.log('Windows are back where they started.', 'info'); return; }
       if (act === 'skip-tutorial') {
         if (confirm('Turn the tutorial off for this world?')) { g.quests?.skip(); this.log('Tutorial off. Press H any time for the guide.', 'info'); }
@@ -252,8 +262,12 @@ export class UI {
     else this.show(name);
   }
 
+  /** Is this window open? */
+  isOpen(name: WindowName) { return this.open.has(name); }
+
   show(name: WindowName) {
     if (name === 'journal') this.g.quests?.note('journal');
+    if (name === 'map') { this.mapView.mount(this.windows.get('map')!); this.mapView.opened(); }
     this.open.add(name);
     this.windows.get(name)!.style.display = 'flex';
     const pos = this.windowPos[name];
@@ -571,6 +585,7 @@ export class UI {
     else if (g.input.locked) this.tooltip.reset();
     if (this.windowDrag) this.tooltip.reset();
     if (this.windowDrag && g.input.locked) this.dragWindowTo(this.cursor.x, this.cursor.y);
+    if (this.open.has('map')) this.mapView.frame();
     // Your character in the inventory window, as you are now.
     if (this.open.has('character')) {
       const held = g.activeItem();
@@ -701,6 +716,7 @@ export class UI {
       case 'dev': return this.renderDev();
       case 'journal': return this.renderJournal();
       case 'quests': return this.renderQuests();
+      case 'map': this.mapView.mount(this.windows.get('map')!); return;
     }
   }
 

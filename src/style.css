@@ -478,3 +478,23 @@ table.keys td:first-child { color: var(--accent); white-space: nowrap; font-fami
 
 .recipe-head .icon-img { width: 38px; height: 38px; }
 .recipe-head .icon { display: inline-flex; vertical-align: middle; margin-right: 4px; }
+
+/* The map: an old scroll between two wooden rollers. */
+.window-map { inset: 0; width: auto; max-height: none; background: rgba(12, 9, 6, 0.55); border: none; box-shadow: none; align-items: center; justify-content: center; padding: 18px 0; }
+.map-scroll { position: relative; display: flex; flex-direction: column; align-items: center; width: min(1180px, calc(100vw - 48px)); height: min(860px, calc(100vh - 36px)); filter: drop-shadow(0 18px 30px rgba(0,0,0,0.55)); }
+.map-sheet {
+  position: relative; flex: 1; width: calc(100% - 44px); margin: -10px 0; overflow: hidden; background-color: #e6d2a6; background-size: 512px 512px;
+  /* Ragged, worn sides. */
+  clip-path: polygon(0% 0%, 100% 0%, 99.4% 6%, 100% 13%, 99.2% 21%, 99.8% 30%, 99.1% 38%, 100% 47%, 99.3% 55%, 99.9% 63%, 99.2% 71%, 100% 80%, 99.4% 88%, 100% 94%, 100% 100%, 0% 100%, 0.6% 93%, 0% 86%, 0.8% 78%, 0.1% 70%, 0.9% 61%, 0% 53%, 0.7% 44%, 0.1% 36%, 0.9% 28%, 0% 19%, 0.6% 10%, 0% 4%);
+}
+.map-vignette { position: absolute; inset: 0; pointer-events: none; box-shadow: inset 0 0 60px 18px rgba(110, 70, 30, 0.45), inset 0 0 160px 40px rgba(140, 95, 45, 0.25); background: radial-gradient(ellipse at 50% 50%, rgba(0,0,0,0) 55%, rgba(120, 80, 35, 0.18) 100%); }
+.map-canvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: grab; }
+.map-roller { position: relative; z-index: 2; width: 100%; height: 26px; border-radius: 13px; background: linear-gradient(180deg, #8a5a32 0%, #c08a55 30%, #7a4a26 60%, #4e2e16 100%); box-shadow: 0 3px 8px rgba(0,0,0,0.5); }
+.map-roller::before, .map-roller::after { content: ''; position: absolute; top: -5px; width: 22px; height: 36px; border-radius: 9px; background: linear-gradient(90deg, #4a2c14, #a8743f 45%, #5a3418); }
+.map-roller::before { left: -14px; }
+.map-roller::after { right: -14px; }
+.map-roller span { position: absolute; inset: 0 24px; border-radius: 13px; background: repeating-linear-gradient(90deg, rgba(0,0,0,0.06) 0 2px, rgba(0,0,0,0) 2px 9px); }
+.map-buttons { position: absolute; top: 12px; right: 22px; display: flex; gap: 8px; }
+.map-buttons button { background: rgba(236, 220, 182, 0.9); color: #4a321e; border: 1px solid #4a321e; font: italic 13px Georgia, serif; padding: 4px 10px; border-radius: 3px; }
+.map-buttons button:hover, .map-buttons button.vhover { background: #f4e6c2; }
+.map-help { position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); color: rgba(74, 50, 30, 0.75); font: italic 12px Georgia, serif; pointer-events: none; }

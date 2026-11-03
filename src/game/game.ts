@@ -48,6 +48,7 @@ import { SMAAPass } from 'three/examples/jsm/postprocessing/SMAAPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { QuestLog } from './quests';
 import { Combat } from './combat';
+import { WorldMap } from '../ui/worldmap';
 
 const REACH = 4.5;
 /** Skill above a task's difficulty needed to do it the quick way. */
@@ -180,6 +181,8 @@ export class Game {
   tips = new Set<string>();
   /** Swinging, drawing a bow, arrows in flight; and whether you're in a fight. */
   readonly combat = new Combat(this);
+  /** The land you've explored, for the map (M). */
+  map!: WorldMap;
   /** The tutorial quest on a new world (null on worlds from before it, once it's over and saved as done it stays done). */
   /** Your quests (a world from before quests has an empty log, so later quests are still offered). */
   quests: QuestLog | null = null;
@@ -203,6 +206,7 @@ export class Game {
     this.input = new Input(canvas);
 
     this.world = world;
+    this.map = new WorldMap(world.terrain.gen);
     this.scene.add(world.terrain.group);
     this.view = new WorldView(world);
     this.knowledge.load(undefined);
@@ -1610,10 +1614,7 @@ export class Game {
     if (inp.hit('KeyH') || inp.hit('F1')) this.ui.toggle('help');
     if (inp.hit('KeyJ')) this.ui.toggle('journal');
     if (inp.hit('KeyL')) this.ui.toggle('quests');
-    if (inp.hit('KeyM')) {
-      this.sound.muted = !this.sound.muted;
-      this.msg(this.sound.muted ? 'Sound off.' : 'Sound on.', 'info');
-    }
+    if (inp.hit('KeyM')) this.ui.toggle('map');
     if (inp.hit('KeyG') && !this.placing) this.request(ACTION_MAP.survey, { g: this, t: { kind: 'none' } });
     if (inp.hit('KeyR')) this.repeatLast();
     if (inp.hit('KeyX')) { if (this.action) this.cancelAction('You stop what you are doing.'); }
@@ -1630,8 +1631,10 @@ export class Game {
 
     // While a window or menu is open the mouse drives the in-game cursor, not the camera.
     if (this.ui.cursorActive()) {
+      const wheel = inp.wheel;
       this.ui.cursor.setVisible(true);
       this.ui.cursor.move(inp.mouseDX, inp.mouseDY);
+      if (this.ui.isOpen('map')) this.ui.mapView.input(wheel, inp.held.has(0), this.ui.cursor.x, this.ui.cursor.y);
       inp.mouseDX = inp.mouseDY = inp.wheel = 0;
     }
 
@@ -1807,6 +1810,7 @@ export class Game {
     if (this.quests && !this.quests.onChange) this.quests.onChange = () => this.ui.refresh();
     this.quests?.update(this, dt);
     perf.time('animals', () => this.updateAnimals(dt));
+    perf.time('map', () => this.map.update(dt, p.pos.x, p.pos.z, this.ui.isOpen('map')));
     perf.time('terrain', () => this.world.terrain.update(p.pos.x, p.pos.y, p.pos.z, 6));
     this.world.focus = { x: p.pos.x, z: p.pos.z };
     perf.time('objects', () => this.world.stream(p.pos.x, p.pos.z, 1));
@@ -1931,6 +1935,7 @@ export class Game {
         nextUid: getNextUid(),
         quests: this.quests?.serialize() ?? null,
         tips: [...this.tips],
+        explored: this.map.serialize(),
       };
       await writeSave(SAVE_KEY, data);
     } catch (e) {
@@ -2077,6 +2082,7 @@ export class Game {
       g.activeUid = data.active;
       g.setActive(data.active);
       g.tips = new Set(data.tips ?? []);
+      g.map.load(data.explored);
       const quests = data.quests ?? data.onboarding;
       if (quests) g.quests = QuestLog.load(g.markerTex, quests);
       return g;
