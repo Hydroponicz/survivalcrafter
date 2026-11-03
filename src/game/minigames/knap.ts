@@ -112,7 +112,7 @@ export class KnapGame extends Minigame {
 
   constructor(ease: number, private kind: KnapShape, hits: number) {
     super(ease);
-    this.instructions = `Knap ${NAMES[kind]}: strike flakes off the edge of the stone until it matches the outline. Hold the button to put force behind the blow, let go to strike.`;
+    this.instructions = `Shape the stone into ${NAMES[kind]}: chip flakes off its edges until it matches the gold outline. Hold the mouse button to build up force, then let go to strike.`;
     this.band = [0.28, 0.72 + 0.15 * ease];
     this.doneWaste = 0.12 + 0.1 * ease;
 
