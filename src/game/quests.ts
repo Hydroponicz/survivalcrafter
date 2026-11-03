@@ -656,7 +656,8 @@ export class QuestLog {
       const a = g.world.animals.find((x) => x.id === t.id);
       if (a) { t.x = a.x; t.z = a.z; t.y = g.world.terrain.heightAt(a.x, a.z) + 1.9; }
     }
-    const first = this.targets[0];
+    // Hands-on work (building a piece, say) has the view to itself: no markers in the way.
+    const first = g.working ? undefined : this.targets[0];
     this.group.visible = !!first;
     const cam = g.camera.position;
     this.glows.forEach((s, i) => {

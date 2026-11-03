@@ -4,7 +4,8 @@ import { itemDef } from '../../data/items';
 import type { StructureObj } from '../../world/world';
 import { builtShare, fillsAcross, pieceBounds } from '../../world/pieceFill';
 import { surfaceMat, type Surface } from '../../world/surfaces';
-import { clamp01, Minigame, workTool, type Meter, type MgInput } from './core';
+import { clamp01, Minigame, type Meter, type MgInput } from './core';
+import { buildToolMesh } from '../tools';
 import { sfx } from './sfx';
 import type { Gesture } from './tutorials';
 
@@ -17,7 +18,21 @@ import type { Gesture } from './tutorials';
 
 type Phase = 'arrive' | 'place' | 'set' | 'fix' | 'done';
 
-interface Marker { pos: THREE.Vector3; mesh: THREE.Object3D; hits: number; need: number; bent: boolean }
+interface Marker {
+  /** Where it stands, in the piece's frame, and how far its head sits out along `out`. */
+  mesh: THREE.Object3D; top: number;
+  /** Out of the face (world), and the frame the hammer swings in: `handle` runs up the handle, from your hand to the head. */
+  out: THREE.Vector3; handle: THREE.Vector3; side: THREE.Vector3;
+  mat?: THREE.MeshStandardMaterial;
+  hits: number; need: number; bent: boolean;
+  /** How far it's been driven in. */
+  driven: number;
+}
+
+/** The raised, ready angle of the hammer (radians back from the strike). */
+const READY = 0.6;
+/** How long the down-stroke takes, and the recoil back up after it (s). */
+const DOWN = 0.09, RECOIL = 0.3;
 
 /** What a material looks like when you carry it in, sized to the slot it fills (local w × h × d). */
 function materialMesh(item: string, w: number, h: number, d: number): THREE.Object3D {
@@ -78,8 +93,20 @@ export class BuildGame extends Minigame {
   private ringT = 0;
   private period: number;
   private ring: THREE.Mesh;
+  /** Where the closing ring should be when you strike. */
+  private target: THREE.Mesh;
+  /** The tool, swinging about your grip (the pivot) onto the nail. */
+  private pivot = new THREE.Group();
   private tool: THREE.Object3D | null;
-  private swing = 0;
+  /** Head of the tool in its own frame: how far up the handle, and its striking face. */
+  private headY = 0.35;
+  private faceZ = -0.04;
+  /** Time into a strike (-1: not striking), and the blow waiting for the head to land. */
+  private swingT = -1;
+  private pending: number | null = null;
+  /** A warm light on the work, so the nails show at night (the game puts a light here). */
+  readonly workLight = new THREE.Vector3();
+  private camLook = new THREE.Vector3();
   private placeQ = 0;
   private strikeQ: number[] = [];
   private setFrom = new THREE.Vector3();
@@ -92,7 +119,7 @@ export class BuildGame extends Minigame {
     const matName = itemDef(material).name.toLowerCase();
     this.title = `Building: ${this.def.name}`;
     const fixes = this.fixKind();
-    this.instructions = `Move the ${matName} onto the glowing slot and click to set it.${fixes === 'nail' ? ' Then hammer each nail home: click as the ring closes on it.' : fixes === 'settle' ? ' Then settle it with your hatchet: strike as the ring closes.' : ''}`;
+    this.instructions = `Move the ${matName} onto the glowing slot and click to set it.${fixes === 'nail' ? ' Then drive each nail: a ring shrinks onto the nail head — click when it turns green and meets the small green circle. Two good blows drive a nail home; a perfect one does it in one.' : fixes === 'settle' ? ' Then settle it with your hatchet: click when the shrinking ring turns green.' : ''}`;
     void name;
     this.period = 1.25 + ease * 0.5;
 
@@ -128,8 +155,33 @@ export class BuildGame extends Minigame {
     this.ring.renderOrder = 9;
     this.ring.visible = false;
     this.overlay.add(this.ring);
-    this.tool = fixes ? workTool(toolType) : null;
-    if (this.tool) { this.tool.visible = false; this.overlay.add(this.tool); }
+    this.target = new THREE.Mesh(new THREE.RingGeometry(0.82, 1, 40), new THREE.MeshBasicMaterial({ color: 0x9fdc7c, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthTest: false, fog: false }));
+    this.target.renderOrder = 9;
+    this.target.visible = false;
+    this.overlay.add(this.target);
+    const kind = toolType ? itemDef(toolType).tool : undefined;
+    this.tool = fixes && kind ? buildToolMesh(kind, toolType) : null;
+    if (this.tool) {
+      // Find the head: the top of the tool, and its face on the -z side.
+      this.tool.updateMatrixWorld(true);
+      const top = new THREE.Box3().setFromObject(this.tool).max.y;
+      let minZ = 0;
+      const v = new THREE.Vector3();
+      this.tool.traverse((o) => {
+        const g = (o as THREE.Mesh).geometry as THREE.BufferGeometry | undefined;
+        if (!g) return;
+        const pos = g.attributes.position;
+        for (let k = 0; k < pos.count; k++) {
+          v.fromBufferAttribute(pos, k).applyMatrix4(o.matrixWorld);
+          if (v.y > top - 0.12) minZ = Math.min(minZ, v.z);
+        }
+      });
+      this.headY = top - 0.045;
+      this.faceZ = minZ;
+      this.pivot.add(this.tool);
+      this.pivot.visible = false;
+      this.overlay.add(this.pivot);
+    }
 
     // Where to look from: in front of the piece, on your side of it, far enough back to see it whole.
     const yaw = s.yaw;
@@ -151,6 +203,7 @@ export class BuildGame extends Minigame {
     const standAt = new THREE.Vector3(s.x, 0, s.z).addScaledVector(front, across ? 2.2 : 1.1 + pieceSize * 0.3);
     this.stand = { x: standAt.x, z: standAt.z, yaw: Math.atan2(front.x, front.z) };
     this.placeCarried(0.8);
+    this.workLight.copy(worldCentre).addScaledVector(front, 0.9).add(new THREE.Vector3(0, 0.6, 0));
   }
 
   /** How the step is fixed once placed: nailed (hammer), settled (hatchet), or just set (no tool). */
@@ -175,8 +228,10 @@ export class BuildGame extends Minigame {
       return { x: p.x + 30, y: p.y - 50, text: `move the ${itemDef(this.material).name.toLowerCase()} here and click` };
     }
     if (this.phase === 'fix' && this.markers[this.current]) {
-      const p = this.toScreen(this.markers[this.current].pos);
-      return { x: p.x + 30, y: p.y - 50, text: 'click as the ring closes', gesture: 'click' };
+      const p = this.toScreen(this.headAt(this.markers[this.current]));
+      const n = this.markers.length;
+      const what = this.fixKind() === 'nail' ? `nail ${this.current + 1} of ${n}` : `end ${this.current + 1} of ${n}`;
+      return { x: p.x + 40, y: p.y - 70, text: `${what}: click when the ring turns green`, gesture: 'click' };
     }
     return null;
   }
@@ -273,23 +328,38 @@ export class BuildGame extends Minigame {
     const across = fillsAcross(this.def);
     // On the face toward you (the top, for a floor).
     const faceZ = camLocal.z > c.z ? this.slot.max.z : this.slot.min.z;
+    const sgn = faceZ > c.z ? 1 : -1;
     const count = kind === 'settle' ? 2 : across ? 2 : Math.max(2, Math.min(4, Math.round(size.x / 0.6)));
+    // The frame the hammer swings in: out of the face, and across it as you see it.
+    const pq = this.piece.getWorldQuaternion(new THREE.Quaternion());
+    const out = (across ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(0, 0, sgn)).applyQuaternion(pq);
+    const look = new THREE.PerspectiveCamera();
+    look.position.copy(this.camTo.pos);
+    look.lookAt(this.camTo.look);
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(look.quaternion);
+    const camUp = new THREE.Vector3(0, 1, 0).applyQuaternion(look.quaternion);
+    const e1 = right.addScaledVector(out, -right.dot(out)).normalize();
+    const e2 = new THREE.Vector3().crossVectors(out, e1);
+    if (e2.dot(camUp) < 0) e2.negate();
+    // The hand is low and to the right; the view comes in from the side of the swing.
+    const handle = e2.clone().sub(e1).normalize();
+    const side = e1.clone().add(e2).normalize().multiplyScalar(across ? -1 : 1);
     for (let k = 0; k < count; k++) {
       const local = across
         ? new THREE.Vector3(c.x, this.slot.max.y + 0.005, this.slot.min.z + (k + 0.5) * (size.z / count))
-        : new THREE.Vector3(this.slot.min.x + (k + 0.5) * (size.x / count), c.y, faceZ + Math.sign(faceZ - c.z || 1) * 0.005);
-      let mesh: THREE.Object3D;
+        : new THREE.Vector3(this.slot.min.x + (k + 0.5) * (size.x / count), c.y, faceZ + sgn * 0.005);
+      let mesh: THREE.Object3D, top = 0, mat: THREE.MeshStandardMaterial | undefined;
       if (kind === 'nail') {
-        // A nail standing proud of the wood, its head toward you.
+        // A big iron nail standing proud of the wood, its head toward you; it catches the light.
         const nail = new THREE.Group();
-        const shank = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.07, 6), new THREE.MeshStandardMaterial({ color: 0x8a8a8e, metalness: 0.6, roughness: 0.4 }));
-        shank.position.y = 0.035;
-        const head = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.006, 10), shank.material);
-        head.position.y = 0.07;
+        mat = new THREE.MeshStandardMaterial({ color: 0xc8c8cc, metalness: 0.55, roughness: 0.3, emissive: 0x000000 });
+        const shank = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.006, 0.1, 8), mat);
+        shank.position.y = 0.05;
+        const head = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.022, 0.01, 14), mat);
+        head.position.y = 0.1;
         nail.add(shank, head);
-        // Point it out of the face.
-        if (across) nail.rotation.set(0, 0, 0);
-        else nail.rotation.set((faceZ > c.z ? 1 : -1) * Math.PI / 2, 0, 0);
+        top = 0.105;
+        if (!across) nail.rotation.set(sgn * Math.PI / 2, 0, 0);
         nail.position.copy(local);
         mesh = nail;
       } else {
@@ -297,69 +367,143 @@ export class BuildGame extends Minigame {
         mesh.position.copy(local);
       }
       this.piece.add(mesh);
-      this.markers.push({ pos: this.piece.localToWorld(local.clone()), mesh, hits: 0, need: kind === 'nail' ? 2 : 1, bent: false });
+      this.markers.push({ mesh, top, out, handle, side, mat, hits: 0, need: kind === 'nail' ? 2 : 1, bent: false, driven: 0 });
     }
     this.current = 0;
     this.ringT = 0;
     this.ring.visible = true;
-    if (this.tool) this.tool.visible = true;
+    this.target.visible = true;
+    this.camLook.copy(this.camTo.look);
+    if (this.tool) {
+      this.pivot.visible = true;
+      this.pivot.position.copy(this.gripFor(this.markers[0]));
+    }
+  }
+
+  /** The head of a nail (or the spot to settle), in the world. */
+  private headAt(m: Marker): THREE.Vector3 {
+    m.mesh.updateWorldMatrix(true, false);
+    return m.mesh.localToWorld(new THREE.Vector3(0, m.top, 0));
+  }
+
+  /** Where your grip is, for the head to come down square on this nail. */
+  private gripFor(m: Marker): THREE.Vector3 {
+    return this.headAt(m).addScaledVector(m.handle, -this.headY).addScaledVector(m.out, -this.faceZ);
   }
 
   private fix(dt: number, i: MgInput) {
     const m = this.markers[this.current];
     if (!m) return;
-    // The ring closes on the nail; strike as it meets the head.
+    const head = this.headAt(m);
+    const smooth = (rate: number) => 1 - Math.exp(-dt * rate);
+    // The view closes in on the nail, from the side the hammer swings across.
+    const camAt = head.clone().addScaledVector(m.out, 0.75).addScaledVector(m.side, 0.6);
+    this.camera.position.lerp(camAt, smooth(4));
+    this.camLook.lerp(head, smooth(6));
+    this.camera.lookAt(this.camLook);
+    this.camera.updateMatrixWorld();
+    this.workLight.copy(head).addScaledVector(m.out, 0.55).addScaledVector(m.side, 0.25).add(new THREE.Vector3(0, 0.3, 0));
+    // The nail being worked glows faintly; the rest wait, a little lit.
+    const pulse = 0.5 + Math.sin(this.time * 7) * 0.5;
+    this.markers.forEach((o, k) => {
+      if (!o.mat) return;
+      if (k === this.current) o.mat.emissive.setRGB(0.35 + pulse * 0.3, 0.27 + pulse * 0.22, 0.1);
+      else if (k > this.current) o.mat.emissive.setRGB(0.12, 0.12, 0.13);
+      else o.mat.emissive.setRGB(0, 0, 0);
+    });
+
+    // The ring closes on the nail; strike as it meets the green circle.
     this.ringT = (this.ringT + dt / this.period) % 1;
-    const r = 0.03 + (1 - this.ringT) * 0.16;
-    this.ring.position.copy(m.pos);
+    const r = 0.04 + (1 - this.ringT) * 0.2;
+    const at = head.clone().addScaledVector(m.out, 0.006);
+    this.ring.position.copy(at);
     this.ring.lookAt(this.camera.position);
     this.ring.scale.setScalar(r);
+    this.target.position.copy(at);
+    this.target.quaternion.copy(this.ring.quaternion);
+    this.target.scale.setScalar(0.04 + 0.15 * 0.2);
     const close = Math.abs(this.ringT - 0.85);
     (this.ring.material as THREE.MeshBasicMaterial).color.set(close < 0.06 ? 0x9fdc7c : 0xffffff);
-    // The tool hangs ready by the nail, and swings down onto it.
-    if (this.tool) {
-      this.swing = Math.max(0, this.swing - dt * 5);
-      const up = new THREE.Vector3(0, 0.25 + 0.25 * this.swing, 0);
-      this.tool.position.copy(m.pos).add(up).add(this.camera.getWorldDirection(new THREE.Vector3()).multiplyScalar(-0.12));
-      this.tool.rotation.set(0, Math.atan2(this.camera.position.x - m.pos.x, this.camera.position.z - m.pos.z) + Math.PI / 2, -0.3 - this.swing * 0.9);
+    (this.target.material as THREE.MeshBasicMaterial).opacity = close < 0.06 ? 0.9 : 0.45;
+
+    this.swingTool(dt, m);
+    if (!i.pressed || this.swingT >= 0) return;
+    const p = this.toScreen(head);
+    if (Math.hypot(i.x - p.x, i.y - p.y) > 90) { this.say('Aim at the nail.', false, 0.6); return; }
+    // The blow is timed now; it lands when the head comes down.
+    this.pending = clamp01(1 - close / 0.22);
+    this.swingT = 0;
+  }
+
+  /** The hammer: held up ready over the nail, a fast down-stroke on a click, a bounce, and back up. */
+  private swingTool(dt: number, m: Marker) {
+    let angle = READY + Math.sin(this.time * 2.2) * 0.04;
+    if (this.swingT >= 0) {
+      this.swingT += dt;
+      const t = this.swingT;
+      if (t < DOWN) {
+        const k = t / DOWN;
+        angle = READY * (1 - k * k); // speeding up into the blow
+      } else {
+        if (this.pending !== null) { const q = this.pending; this.pending = null; this.land(q); }
+        const k = Math.min(1, (t - DOWN) / RECOIL);
+        // A little kick off the head, then lifted back up to the ready.
+        angle = READY * (k * k * (3 - 2 * k)) + Math.sin(Math.min(1, k * 3) * Math.PI) * 0.12;
+        if (k >= 1) this.swingT = -1;
+      }
     }
-    if (!i.pressed) return;
-    const p = this.toScreen(m.pos);
-    if (Math.hypot(i.x - p.x, i.y - p.y) > 60) { this.say('Aim at the nail.', false, 0.6); return; }
-    this.swing = 1;
-    const q = clamp01(1 - close / 0.22);
+    if (!this.tool) return;
+    // Square to the work: handle along `handle`, face along -out, swinging back about the grip.
+    const z = m.out, y = m.handle.clone();
+    const x = new THREE.Vector3().crossVectors(y, z);
+    this.pivot.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, y, z));
+    // Between nails, the hand moves across (smoothly; held still mid-blow).
+    if (this.swingT < 0) this.pivot.position.lerp(this.gripFor(m), 1 - Math.exp(-dt * 12));
+    this.tool.rotation.x = angle;
+  }
+
+  /** The blow lands. */
+  private land(q: number) {
+    const m = this.markers[this.current];
+    if (!m) return;
+    const head = this.headAt(m);
     this.strikeQ.push(q);
     this.sample(q, 1);
     if (q > 0.55) {
       m.hits++;
       sfx.tick(m.hits + this.current);
-      this.dust(m.pos, 5);
-      // Driven in a little more; home on the last blow.
+      this.dust(head, 6);
       if (this.fixKind() === 'nail') {
-        const shank = m.mesh;
-        shank.translateY(-0.035 * (q > 0.85 ? 1.3 : 1));
+        // Driven in a little more; home (its head on the wood) on the last blow.
+        const home = m.hits >= m.need || q > 0.9;
+        const to = home ? m.top - 0.006 : Math.min(m.top - 0.03, m.driven + 0.045);
+        m.mesh.translateY(-(to - m.driven));
+        m.driven = to;
       } else {
         sfx.thud();
       }
       if (q > 0.9) this.say('Perfect!', true, 0.5);
-      if (m.hits >= m.need || (q > 0.9 && this.fixKind() === 'nail' && m.hits >= 1)) {
+      else if (q > 0.75) this.say('Good blow.', true, 0.4);
+      if (m.hits >= m.need || (q > 0.9 && this.fixKind() === 'nail')) {
         if (this.fixKind() !== 'nail') m.mesh.visible = false;
+        m.mat?.emissive.setRGB(0, 0, 0);
         this.current++;
         this.ringT = 0;
         if (this.current >= this.markers.length) this.finish();
-      }
+      } else this.ringT = 0;
     } else {
       sfx.slip();
-      this.say(this.fixKind() === 'nail' ? 'Glanced off — it bent!' : 'Glanced off!', false, 0.6);
+      this.say(this.fixKind() === 'nail' ? (q > 0.3 ? 'Glanced off — it bent! Wait for the green.' : 'Too early or late — it bent!') : 'Glanced off!', false, 0.8);
       if (this.fixKind() === 'nail' && !m.bent) { m.bent = true; m.mesh.rotateZ(0.35); }
       m.need = Math.min(m.need + 1, 4);
+      this.ringT = 0;
     }
   }
 
   private finish() {
     this.phase = 'done';
     this.ring.visible = false;
-    if (this.tool) this.tool.visible = false;
+    this.target.visible = false;
     this.slotGlow.visible = false;
     this.slotFill.visible = false;
     sfx.done();
@@ -394,7 +538,7 @@ export class BuildGame extends Minigame {
   dispose() {
     this.overlay.removeFromParent();
     // (The tool's model is shared with the rest of the game: leave it be.)
-    if (this.tool) this.overlay.remove(this.tool);
+    if (this.tool) this.pivot.remove(this.tool);
     this.overlay.traverse((o) => {
       if (o instanceof THREE.Mesh || o instanceof THREE.LineSegments) {
         o.geometry.dispose();

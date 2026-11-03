@@ -1850,6 +1850,9 @@ export class Game {
   /** A torch in hand lights the ground around you, flickering. */
   private updateTorchLight() {
     const p = this.player, l = this.torchLight;
+    // Building by hand: a warm light on the work, so the nails show at night.
+    const work = this.working ? (this.working.session.mg as { workLight?: THREE.Vector3 }).workLight : undefined;
+    if (work) { l.position.copy(work); l.intensity = 1.6; return; }
     if (this.activeItem()?.type !== 'torch' || this.tour) { l.intensity = 0; return; }
     // At the flame (in first person, a little ahead of you and to the right).
     p.heldItem.getWorldPosition(l.position);
