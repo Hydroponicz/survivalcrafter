@@ -5,7 +5,8 @@ import { RECIPES, STATION_NAMES, type Recipe } from '../data/recipes';
 import { SKILL_INFO, SKILLS, type SkillId } from '../data/skills';
 import { Tooltip } from './tooltip';
 import { MapView } from './mapview';
-import { drawIcons, itemIcon, onIconsReady } from './itemIcons';
+import { drawIcons, itemIcon, onIconsReady, pieceIcon } from './itemIcons';
+import { pieceBounds } from '../world/pieceFill';
 import { CharacterPreview } from './preview';
 import { BUILDABLE, STRUCTURES, totalMaterials } from '../data/structures';
 import { ACTION_MAP, craftProblem, forageName, type ActionDef, type Ctx, type Target } from '../game/actions';
@@ -1016,30 +1017,44 @@ export class UI {
     const cats = [...new Set(BUILDABLE.map((d) => d.category))];
     for (const cat of cats) {
       body.appendChild(el('h3', '', cat));
+      const grid = el('div', 'build-grid');
       for (const def of BUILDABLE.filter((d) => d.category === cat)) {
-        const row = el('div', 'recipe');
-        row.dataset.tip = `<b>${def.name}</b><br>${esc(def.desc)}<br><span class="tip-facts">${SKILLS[def.skill]} · difficulty ${def.difficulty}${def.tool ? ` · needs a ${def.tool}` : ''}. Plan it, then build it a material at a time.</span>`;
+        const card = el('div', 'build-card');
+        // What it needs, as pictures: green when you have enough, red when you don't.
+        let ready = true;
         const mats = def.materials.map((m) => {
           const have = g.inv.count(m.item);
-          return `<span class="${have >= m.count ? 'ok' : 'no'}">${itemDef(m.item).icon} ${m.count} ${esc(itemDef(m.item).name.toLowerCase())} (${have})</span>`;
-        }).join(' ');
+          if (have < m.count) ready = false;
+          return `<span class="mat-chip ${have >= m.count ? 'ok' : 'no'}" data-tip="${escAttr(`<b>${itemDef(m.item).name}</b>: you have ${have}, need ${m.count}`)}">${itemIcon(m.item, 'chip-img')}<b>${m.count}</b> ${esc(itemDef(m.item).name.toLowerCase())}</span>`;
+        }).join('');
         const tool = def.tool ? g.toolFor(def.tool) : undefined;
-        row.innerHTML = `
-          <div class="recipe-head"><span class="icon">${def.icon}</span><b>${def.name}</b>
-            <small>${SKILLS[def.skill]} · difficulty ${def.difficulty} · ${def.snap ? 'snaps to other pieces' : 'placed on the ground'}</small></div>
-          <div class="recipe-desc">${esc(def.desc)}</div>
-          <div class="recipe-in">${mats}</div>
-          ${def.tool ? `<div class="recipe-req"><span class="${tool ? 'ok' : 'no'}">tool: ${def.tool}</span></div>` : ''}`;
-        const b = el('button', '', 'Plan');
+        if (def.tool && !tool) ready = false;
+        const { min, max } = pieceBounds(def);
+        const size = `${(max.x - min.x).toFixed(1)} × ${(max.z - min.z).toFixed(1)} m, ${(max.y - min.y).toFixed(1)} m tall`.replace(/\.0/g, '');
+        const lvl = g.skills.get(def.skill);
+        card.innerHTML = `
+          <div class="build-pic">${pieceIcon(def.id, def.icon)}</div>
+          <div class="build-info">
+            <div class="build-name">${def.name}${ready ? '<span class="build-ready">Ready to build</span>' : ''}</div>
+            <div class="build-desc">${esc(def.desc)}</div>
+            <div class="build-mats">${mats}</div>
+            <div class="build-meta">
+              ${def.tool ? `<span class="${tool ? 'ok' : 'no'}">Tool: ${def.tool}${tool ? '' : ' (you have none)'}</span>` : '<span class="ok">No tool needed</span>'}
+              <span data-tip="Your ${SKILLS[def.skill]} skill against how hard this is to build. Below the difficulty, the work is less forgiving.">${SKILLS[def.skill]} ${Math.floor(lvl)} · difficulty ${def.difficulty}</span>
+              <span>${size}</span>
+              <span>${def.snap ? 'Snaps to other pieces' : 'Freestanding'}</span>
+            </div>
+          </div>`;
+        const b = el('button', 'build-place', 'Place');
+        b.dataset.tip = 'Pick it up as an outline to place in the world. Then build it with the materials above.';
         b.addEventListener('click', () => {
           g.startPlacing(def);
           this.close('build');
         });
-        const btns = el('div', 'btns');
-        btns.appendChild(b);
-        row.appendChild(btns);
-        body.appendChild(row);
+        card.appendChild(b);
+        grid.appendChild(card);
       }
+      body.appendChild(grid);
     }
     this.frame('build', 'Build', body);
   }

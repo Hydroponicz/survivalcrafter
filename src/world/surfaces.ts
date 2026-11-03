@@ -47,6 +47,11 @@ function load(s: Surface) {
   }, (e) => console.warn('Could not load surface', s, e));
 }
 
+/** Whether any surface's textures are still on their way (pictures drawn now would come out plain). */
+export function surfacesLoading(): boolean {
+  return waiting.size > 0;
+}
+
 const mats = new Map<string, THREE.MeshStandardMaterial>();
 /**
  * The material for a surface, tinted (shared: don't change it). Until its

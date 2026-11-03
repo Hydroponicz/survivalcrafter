@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { itemDef } from '../data/items';
 import { buildToolMesh } from '../game/tools';
 import { buildPieceMesh } from '../world/view';
+import { surfacesLoading } from '../world/surfaces';
 
 // Item portraits: each kind of item drawn once as a little 3D picture (its
 // tool model where it has one, else a simple model of the thing), kept as an
@@ -54,12 +55,29 @@ export function itemIcon(type: string, cls = 'icon-img'): string {
   return itemDef(type).icon;
 }
 
+/**
+ * HTML for a building piece's picture (its model as built, textured), or
+ * its emoji until that's drawn.
+ */
+export function pieceIcon(type: string, fallback: string, cls = 'piece-img'): string {
+  const key = `piece:${type}`;
+  const url = urls.get(key);
+  if (url) return `<img class="${cls}" src="${url}" alt="" draggable="false">`;
+  if (!queued.includes(key) && !failed) queued.push(key);
+  return `<span class="${cls} piece-placeholder">${fallback}</span>`;
+}
+
 /** Draw a few waiting portraits (call once a frame). */
 export function drawIcons(max = 3) {
   if (!queued.length || !setup()) return;
   let drew = false;
   for (let n = 0; n < max && queued.length; n++) {
     const type = queued.shift()!;
+    // A building piece wears textures: wait until they've loaded, or it'd come out plain.
+    if (type.startsWith('piece:')) {
+      if (!pieceModels.has(type)) pieceModels.set(type, buildPieceMesh(type.slice(6)));
+      if (surfacesLoading()) { queued.push(type); break; }
+    }
     try {
       urls.set(type, portrait(type));
       drew = true;
@@ -151,7 +169,11 @@ const herb = (leaf: number, flower?: number) => {
   return g;
 };
 
+/** Building pieces' models, made when first asked for (which starts their textures loading). */
+const pieceModels = new Map<string, THREE.Object3D>();
+
 function model(type: string): THREE.Object3D {
+  if (type.startsWith('piece:')) return pieceModels.get(type) ?? buildPieceMesh(type.slice(6));
   const def = itemDef(type);
   if (def.tool) {
     // Tools as held in the hand (their model where there is one), laid at an angle.
