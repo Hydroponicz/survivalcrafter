@@ -384,7 +384,8 @@ export class QuestLog {
   private edge: HTMLElement | null = null;
   private group = new THREE.Group();
   private arrow: THREE.Mesh;
-  private glows: THREE.Sprite[] = [];
+  /** A ring on the ground round each thing to go for (with a ripple spreading out of it). */
+  private glows: THREE.Group[] = [];
   private targets: Target[] = [];
   private timer = 0;
   private time = 0;
@@ -396,7 +397,9 @@ export class QuestLog {
   onChange?: () => void;
 
   constructor(glow: THREE.Texture) {
-    const arrowMat = new THREE.MeshBasicMaterial({ color: 0xffc94a, transparent: true, opacity: 0.95, depthTest: false, depthWrite: false, fog: false });
+    // Quest markers are a cool blue, and lie on the ground: nothing like the
+    // warm floating glow of fireflies, campfires or torches.
+    const arrowMat = new THREE.MeshBasicMaterial({ color: MARKER, transparent: true, opacity: 0.95, depthTest: false, depthWrite: false, fog: false });
     // A downward arrow: a cone tip under a short shaft.
     const geo = new THREE.ConeGeometry(0.32, 0.6, 16).rotateX(Math.PI).translate(0, 0.3, 0);
     const shaft = new THREE.CylinderGeometry(0.11, 0.11, 0.55, 10).translate(0, 0.85, 0);
@@ -404,11 +407,18 @@ export class QuestLog {
     this.arrow.add(new THREE.Mesh(shaft, arrowMat));
     this.arrow.renderOrder = 8;
     this.group.add(this.arrow);
+    void glow;
+    const ringMat = () => new THREE.MeshBasicMaterial({ color: MARKER, transparent: true, depthTest: false, depthWrite: false, blending: THREE.AdditiveBlending, fog: false, side: THREE.DoubleSide });
     for (let i = 0; i < 6; i++) {
-      const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: glow, color: 0xffd36a, transparent: true, depthTest: false, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }));
-      s.renderOrder = 7;
-      this.glows.push(s);
-      this.group.add(s);
+      const g = new THREE.Group();
+      const ring = new THREE.Mesh(new THREE.RingGeometry(0.36, 0.5, 40).rotateX(-Math.PI / 2), ringMat());
+      const ripple = new THREE.Mesh(new THREE.RingGeometry(0.45, 0.5, 40).rotateX(-Math.PI / 2), ringMat());
+      // A faint column of light standing up out of it, to find it by from further off.
+      const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.06, 3, 8, 1, true).translate(0, 1.5, 0), ringMat());
+      ring.renderOrder = ripple.renderOrder = beam.renderOrder = 7;
+      g.add(ring, ripple, beam);
+      this.glows.push(g);
+      this.group.add(g);
     }
     this.group.visible = false;
   }
@@ -657,11 +667,20 @@ export class QuestLog {
       s.visible = !!t;
       if (!t) return;
       const d = Math.hypot(t.x - cam.x, t.z - cam.z);
-      s.position.set(t.x, t.y, t.z);
-      // A soft halo, not a blaze: you should still see what it is. Fainter
-      // still up close, where the arrow over it is enough.
-      s.scale.setScalar(Math.max(0.5, d / 22) * (0.8 + Math.sin(this.time * 3 + i) * 0.08));
-      (s.material as THREE.SpriteMaterial).opacity = (i === 0 ? 0.32 : 0.2) * Math.min(1, Math.max(0.35, d / 6));
+      // On the ground under it (or on the water, for a place to drink).
+      const ter = g.world.terrain, below = ter.groundBelow(t.x, t.y, t.z);
+      s.position.set(t.x, Math.max(Number.isFinite(below) ? below : ter.heightAt(t.x, t.z), ter.waterAt(t.x, t.z)) + 0.04, t.z);
+      // A steady ring round it, with a ripple spreading out every couple of seconds.
+      // It doesn't cover the thing itself, so you can always see what it is.
+      const size = Math.max(1, d / 12);
+      s.scale.setScalar(size);
+      const [ring, ripple, beam] = s.children as THREE.Mesh[];
+      (beam.material as THREE.MeshBasicMaterial).opacity = (i === 0 ? 0.35 : 0.2) * Math.min(1, Math.max(0.15, (d - 3) / 10));
+      const fade = Math.min(1, Math.max(0.4, d / 6));
+      (ring.material as THREE.MeshBasicMaterial).opacity = (i === 0 ? 0.75 : 0.45) * fade;
+      const k = ((this.time * 0.6 + i * 0.37) % 1);
+      ripple.scale.setScalar(1 + k * 1.2);
+      (ripple.material as THREE.MeshBasicMaterial).opacity = (1 - k) * (i === 0 ? 0.6 : 0.35) * fade;
     });
     if (!this.edge) return;
     if (!first) { this.edge.style.display = 'none'; return; }
@@ -690,6 +709,9 @@ export class QuestLog {
     (this.edge.lastElementChild as HTMLElement).textContent = `${Math.round(d)} m`;
   }
 }
+
+/** The colour of quest markers (rings and arrow): a cool sky blue. */
+const MARKER = 0x7fd8ff;
 
 const isDone = (p: [number, number] | boolean) => (Array.isArray(p) ? p[0] >= p[1] : p);
 
