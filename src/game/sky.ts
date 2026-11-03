@@ -77,7 +77,9 @@ function patchFog() {
     // Haze glows toward the sun (light scattered forward by the air), only in
     // that direction: the rest of the view keeps the plain sky colour.
     vec3 hazeColor = fogColor;
-    #if NUM_DIR_LIGHTS > 0
+    // Only lit materials have the sun's light to hand (unlit ones, like the
+    // building ghost or markers, keep the plain haze).
+    #if NUM_DIR_LIGHTS > 0 && ( defined( STANDARD ) || defined( LAMBERT ) || defined( PHONG ) || defined( TOON ) )
       vec3 viewDir = normalize( mat3( viewMatrix ) * ( vFogWorld - cameraPosition ) );
       float toSun = max( dot( viewDir, directionalLights[ 0 ].direction ), 0.0 );
       vec3 sunTint = directionalLights[ 0 ].color / max( max( directionalLights[ 0 ].color.r, directionalLights[ 0 ].color.g ), 1e-4 );
