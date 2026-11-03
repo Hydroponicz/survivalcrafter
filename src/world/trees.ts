@@ -5,6 +5,8 @@ import { mulberry32, Simplex } from './noise';
 import { BaseLand } from './worldgen';
 import { BIRCH } from './models/birch';
 import { MAPLE } from './models/maple';
+import { BEECH } from './models/beech';
+import { WILLOW } from './models/willow';
 import { OAK } from './models/oak';
 import { PINE } from './models/pine';
 import { SPRUCE } from './models/spruce';
@@ -35,11 +37,11 @@ export const TREES: Record<Species, TreeKind> = {
   // Tall, narrow and dark: the deep conifer woods and the slopes up to the tree line.
   spruce: { bark: 0x3d2c22, leaf: 0x1d4632, grown: 3.6, trunk: SPRUCE.trunk, hardness: 0.85, difficulty: 8 },
   // Smooth grey trunks under a dense, high canopy.
-  beech: { bark: 0x8b8a82, leaf: 0x4d8a2c, grown: 2.9, trunk: { r0: 0.32, r1: 0.22, h: 4.2 }, hardness: 1.3, difficulty: 15 },
+  beech: { bark: 0x8b8a82, leaf: 0x4d8a2c, grown: 2.9, trunk: BEECH.trunk, hardness: 1.3, difficulty: 15 },
   // A broad round crown, yellower green.
   maple: { bark: 0x6b5848, leaf: 0x7d9a2a, grown: 2.5, trunk: MAPLE.trunk, hardness: 1.2, difficulty: 13 },
   // Short and thick, with a drooping curtain of leaves, beside water.
-  willow: { bark: 0x5b4a36, leaf: 0x8aa64a, grown: 2.3, trunk: { r0: 0.38, r1: 0.25, h: 2.8 }, hardness: 0.8, difficulty: 6 },
+  willow: { bark: 0x5b4a36, leaf: 0x8aa64a, grown: 2.3, trunk: WILLOW.trunk, hardness: 0.8, difficulty: 6 },
 };
 
 /**
@@ -89,7 +91,7 @@ export function treeGeometries(species: Species, detail: 0 | 1 = 1, standIn = fa
 }
 
 /** Kinds whose trunk and branches come from a model (rather than a plain tapering trunk). */
-export const MODEL_TRUNK: Partial<Record<Species, true>> = { birch: true, oak: true, maple: true, pine: true, spruce: true };
+export const MODEL_TRUNK: Partial<Record<Species, true>> = { birch: true, oak: true, maple: true, pine: true, spruce: true, beech: true, willow: true };
 
 /** A tree made from a model (see scripts/bake-trees.mjs). */
 interface TreeModel {
@@ -100,11 +102,11 @@ interface TreeModel {
   profile: number[][];
   trunk: { r0: number; r1: number; h: number };
 }
-const MODELS: Partial<Record<Species, TreeModel>> = { birch: BIRCH, oak: OAK, maple: MAPLE, pine: PINE, spruce: SPRUCE };
+const MODELS: Partial<Record<Species, TreeModel>> = { birch: BIRCH, oak: OAK, maple: MAPLE, pine: PINE, spruce: SPRUCE, beech: BEECH, willow: WILLOW };
 
 /** How each kind's foliage grows: leaves per clump (relative), or a conifer's branches (droop: how far they bow down; tufts: needles only toward the tips). */
-const FOLIAGE: Partial<Record<Species, { leafy?: number; droop?: number; tufts?: boolean }>> = {
-  birch: { leafy: 1 }, oak: { leafy: 0.62 }, maple: { leafy: 0.45 },
+const FOLIAGE: Partial<Record<Species, { leafy?: number; droop?: number; tufts?: boolean; weep?: boolean }>> = {
+  birch: { leafy: 1 }, oak: { leafy: 0.62 }, maple: { leafy: 0.45 }, beech: { leafy: 0.55 }, willow: { leafy: 0.6, weep: true },
   spruce: { droop: 0.32, tufts: false }, pine: { droop: -0.12, tufts: true },
 };
 
@@ -152,7 +154,7 @@ function modelGeometries(species: Species, M: TreeModel, detail: 0 | 1, standIn:
   const radii = (rx: number, ry: number, rz: number) => [rx * F, ry * F, Math.max(rz, rx * 0.85) * F];
   if (!detail && !standIn) {
     // Further off: the same kind of crown, in fewer twigs of bigger leaves.
-    return { trunk, leaves: leafClusters(clumps.map(([x, y, z, rx, ry, rz]) => [x, y, z, ...radii(rx, ry, rz)]), seed, 0.3 * leafy) };
+    return { trunk, leaves: leafClusters(clumps.map(([x, y, z, rx, ry, rz]) => [x, y, z, ...radii(rx, ry, rz)]), seed, 0.3 * leafy, !!fol.weep) };
   }
   if (!detail) {
     // Far off (the distant forests), plain clumps: the leaves are too small to make out.
@@ -162,7 +164,7 @@ function modelGeometries(species: Species, M: TreeModel, detail: 0 | 1, standIn:
     });
     return { trunk, leaves: withColour(mergeGeometries(parts)!, 1) };
   }
-  return { trunk, leaves: leafClusters(clumps.map(([x, y, z, rx, ry, rz]) => [x, y, z, ...radii(rx, ry, rz)]), seed, leafy) };
+  return { trunk, leaves: leafClusters(clumps.map(([x, y, z, rx, ry, rz]) => [x, y, z, ...radii(rx, ry, rz)]), seed, leafy, !!fol.weep) };
 }
 
 /**
@@ -195,7 +197,8 @@ function withColour(g: THREE.BufferGeometry, v: number): THREE.BufferGeometry {
  * the crown keeps a sunny and a shaded side without looking flat; each spray
  * and each leaf is a slightly different shade.
  */
-function leafClusters(clumps: number[][], seed: number, fewer = 1): THREE.BufferGeometry {
+/** `weep`: strands hanging from each clump (a willow) instead of twigs reaching out. */
+function leafClusters(clumps: number[][], seed: number, fewer = 1, weep = false): THREE.BufferGeometry {
   const rnd = mulberry32(seed);
   const pos: number[] = [], nor: number[] = [], col: number[] = [];
   const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
@@ -212,10 +215,19 @@ function leafClusters(clumps: number[][], seed: number, fewer = 1): THREE.Buffer
     for (let s = 0; s < sprays; s++) {
       const dir = V(rnd() * 2 - 1, rnd() * 2 - 1, rnd() * 2 - 1);
       if (dir.lengthSq() > 1 || dir.lengthSq() < 0.02) { s--; continue; }
-      dir.normalize().addScaledVector(up, 0.35).addScaledVector(out, 0.4).normalize();
-      const reach = 0.85 + 0.3 * rnd();
-      const start = c.clone().addScaledVector(V(dir.x * rx, dir.y * ry, dir.z * rz), 0.12);
-      const end = c.clone().add(V(dir.x * rx, dir.y * ry, dir.z * rz).multiplyScalar(reach));
+      let start: THREE.Vector3, end: THREE.Vector3;
+      if (weep) {
+        // A strand hanging from high in the clump, swaying a little outward.
+        const hx = dir.x * rx * 0.9, hz = dir.z * rz * 0.9;
+        start = c.clone().add(V(hx, ry * (0.25 + 0.35 * rnd()), hz));
+        dir.set(hx * 0.15 + out.x * 0.12, -1, hz * 0.15 + out.z * 0.12).normalize();
+        end = start.clone().addScaledVector(dir, ry * (1.3 + 0.9 * rnd()) + 0.4);
+      } else {
+        dir.normalize().addScaledVector(up, 0.35).addScaledVector(out, 0.4).normalize();
+        const reach = 0.85 + 0.3 * rnd();
+        start = c.clone().addScaledVector(V(dir.x * rx, dir.y * ry, dir.z * rz), 0.12);
+        end = c.clone().add(V(dir.x * rx, dir.y * ry, dir.z * rz).multiplyScalar(reach));
+      }
       const along = end.clone().sub(start), len = along.length();
       along.normalize();
       const side0 = V().crossVectors(along, up);
@@ -227,7 +239,7 @@ function leafClusters(clumps: number[][], seed: number, fewer = 1): THREE.Buffer
       push([start.clone().addScaledVector(side0, -tw), start.clone().addScaledVector(side0, tw), end.clone(),
       ], [up, up, up], [0.32, 0.3, 0.28]);
       // Its leaves, alternating sides, with a few clustered at the tip.
-      const n = Math.max(3, Math.round(Math.max(7, Math.round(len / 0.055)) * fewer));
+      const n = Math.max(3, Math.round(Math.max(7, Math.round(len / (weep ? 0.04 : 0.055))) * fewer));
       for (let k = 0; k < n + 3; k++) {
         const t = k < n ? 0.22 + 0.78 * (k / n) : 1;
         const sideSign = k % 2 ? 1 : -1;
@@ -235,12 +247,13 @@ function leafClusters(clumps: number[][], seed: number, fewer = 1): THREE.Buffer
         // Out from the twig at an angle, drooping a little.
         const spin = (rnd() - 0.5) * 1.2 + (k >= n ? (k - n) * 2.1 : 0);
         const side = side0.clone().applyAxisAngle(along, spin).multiplyScalar(sideSign);
-        const a = along.clone().multiplyScalar(0.55).add(side).addScaledVector(up, -0.15).normalize();
-        // Facing up and out, toward the light.
-        const face = up.clone().multiplyScalar(0.75).addScaledVector(dir, 0.45).add(V(rnd() - 0.5, rnd() - 0.5, rnd() - 0.5).multiplyScalar(0.5)).normalize();
+        // (A willow's leaves hang along the strand; others reach out from the twig.)
+        const a = weep ? along.clone().multiplyScalar(1.6).add(side.multiplyScalar(0.35)).normalize() : along.clone().multiplyScalar(0.55).add(side).addScaledVector(up, -0.15).normalize();
+        // Facing up and out, toward the light (a willow's, out to the side).
+        const face = (weep ? V(out.x + side0.x * 0.5, 0.2, out.z + side0.z * 0.5) : up.clone().multiplyScalar(0.75).addScaledVector(dir, 0.45)).add(V(rnd() - 0.5, rnd() - 0.5, rnd() - 0.5).multiplyScalar(0.5)).normalize();
         const b = V().crossVectors(face, a).normalize();
         a.crossVectors(b, face).normalize();
-        const L = (0.12 + 0.06 * rnd()) / Math.sqrt(fewer), W = L * (0.52 + 0.12 * rnd());
+        const L = (0.12 + 0.06 * rnd()) / Math.sqrt(fewer) * (weep ? 1.15 : 1), W = L * (weep ? 0.2 + 0.06 * rnd() : 0.52 + 0.12 * rnd());
         const base = p, tip = p.clone().addScaledVector(a, L);
         const mid = p.clone().addScaledVector(a, L * 0.42).addScaledVector(face, -W * 0.15);
         const e1 = mid.clone().addScaledVector(b, W / 2), e2 = mid.clone().addScaledVector(b, -W / 2);

@@ -29,6 +29,9 @@ const TREES = {
   maple: { wood: 'crease', crease: 45, trim: { r: 0.03, flat: 0.08, from: 0.35 }, trunkTris: 900, foliage: 'clumps', clumps: 12, crownFrom: 0.3 },
   spruce: { wood: 'crease', crease: 45, trunkTris: 300, foliage: 'profile' },
   pine: { wood: 'crease', crease: 45, trunkTris: 120, foliage: 'profile' },
+  beech: { wood: 'crease', crease: 45, trim: { r: 0.03, flat: 0.08, from: 0.3 }, trunkTris: 1000, foliage: 'clumps', clumps: 13, crownFrom: 0.3 },
+  // Its trunk is faceted (sharp edges everywhere), so take the one big piece instead; the strands hang from it.
+  willow: { wood: 'biggest', trim: { r: 0.04, flat: 0.12, from: 0.3 }, trunkTris: 1400, foliage: 'clumps', clumps: 16, crownFrom: 0.3 },
 };
 
 await MeshoptSimplifier.ready;
