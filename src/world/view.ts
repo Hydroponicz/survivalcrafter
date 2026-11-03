@@ -20,7 +20,7 @@ const mat = (color: number, extra: THREE.MeshStandardMaterialParameters = {}) =>
   new THREE.MeshStandardMaterial({ color, roughness: 0.9, metalness: 0, ...extra });
 
 /** Trees within this distance (metres) are drawn with full crowns. */
-const TREE_DETAIL = 75;
+const TREE_DETAIL = 55;
 
 /**
  * An instanced mesh that draws only the instances in (or casting a shadow
@@ -40,6 +40,9 @@ class CulledInstances {
   private gc: THREE.Vector3;
   private gr: number;
   private gh: number;
+  /** Instances packed first that the shadow map draws (the rest are only in view). */
+  private shadowCount = 0;
+  private viewOnly = new Int32Array(0);
 
   constructor(geo: THREE.BufferGeometry, material: THREE.Material, readonly capacity: number, shadow: boolean) {
     this.mesh = new THREE.InstancedMesh(geo, material, capacity);
@@ -59,6 +62,12 @@ class CulledInstances {
     this.gc = geo.boundingSphere!.center.clone();
     this.gr = geo.boundingSphere!.radius;
     this.gh = geo.boundingBox!.max.y;
+    if (shadow) {
+      // The shadow map draws only the instances in its box (packed first).
+      let all = 0;
+      this.mesh.onBeforeShadow = () => { all = this.mesh.count; this.mesh.count = this.shadowCount; };
+      this.mesh.onAfterShadow = () => { this.mesh.count = all; };
+    }
   }
 
   protected put(i: number, m: THREE.Matrix4, color?: THREE.Color) {
@@ -88,7 +97,9 @@ class CulledInstances {
     this.seen = view.version;
     const S = this.src, C = this.srcCol, M = this.mesh.instanceMatrix.array as Float32Array, MC = this.mesh.instanceColor!.array as Float32Array;
     const gx = this.gc.x, gy = this.gc.y, gz = this.gc.z, shadow = this.mesh.castShadow;
-    let n = 0;
+    let n = 0, nv = 0;
+    if (shadow && this.viewOnly.length < this.top) this.viewOnly = new Int32Array(this.capacity);
+    const V = this.viewOnly;
     for (let i = 0; i < this.top; i++) {
       if (!this.live[i]) continue;
       const o = i * 16;
@@ -99,7 +110,21 @@ class CulledInstances {
       const cx = S[o] * gx + S[o + 4] * gy + S[o + 8] * gz + S[o + 12];
       const cy = S[o + 1] * gx + S[o + 5] * gy + S[o + 9] * gz + S[o + 13];
       const cz = S[o + 2] * gx + S[o + 6] * gy + S[o + 10] * gz + S[o + 14];
-      if (!(shadow ? view.caster(cx, cy, cz, r, this.gh * sy) : view.sphere(cx, cy, cz, r))) continue;
+      if (shadow) {
+        if (!view.inShadowMap(cx, cy, cz, r)) {
+          // Outside the shadow map: drawn only if it's in view, after the casters.
+          if (view.sphere(cx, cy, cz, r)) V[nv++] = i;
+          continue;
+        }
+        if (!view.caster(cx, cy, cz, r, this.gh * sy)) continue;
+      } else if (!view.sphere(cx, cy, cz, r)) continue;
+      M.set(S.subarray(o, o + 16), n * 16);
+      MC.set(C.subarray(i * 3, i * 3 + 3), n * 3);
+      n++;
+    }
+    this.shadowCount = n;
+    for (let k = 0; k < nv; k++) {
+      const i = V[k], o = i * 16;
       M.set(S.subarray(o, o + 16), n * 16);
       MC.set(C.subarray(i * 3, i * 3 + 3), n * 3);
       n++;

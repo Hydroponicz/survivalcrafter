@@ -20,16 +20,24 @@ export class ViewCull {
   private sinTurn: number;
   /** Where shadows fall from a point (ground metres per metre of height), so things just out of view still cast into it. */
   readonly shadow = new THREE.Vector3();
+  /** The sun's shadow map: what's outside its box can't cast a shadow anyone sees. */
+  private lightCam = new THREE.OrthographicCamera();
+  private lightView: number[] | null = null;
+  private sunAt = new THREE.Vector3();
+  private shadowHalf = 0;
 
   /** Degrees the view may turn, and metres it may move, before sets are redone. */
   constructor(readonly turn = 5, readonly step = 2) {
     this.sinTurn = Math.sin((turn * Math.PI) / 180) * 1.2;
   }
 
-  update(cam: THREE.PerspectiveCamera, sunDir?: THREE.Vector3) {
+  update(cam: THREE.PerspectiveCamera, sunDir?: THREE.Vector3, sun?: THREE.DirectionalLight) {
     const d = cam.getWorldDirection(new THREE.Vector3());
     const p = cam.getWorldPosition(new THREE.Vector3());
-    if (p.distanceTo(this.at) < this.step && d.dot(this.dir) > Math.cos((this.turn * Math.PI) / 180)) return;
+    // (Redone too as the sun moves on: shadows and the shadow map's box follow it.)
+    const sunStill = !sunDir || sunDir.dot(this.sunAt) > 0.9994;
+    if (sunStill && p.distanceTo(this.at) < this.step && d.dot(this.dir) > Math.cos((this.turn * Math.PI) / 180)) return;
+    if (sunDir) this.sunAt.copy(sunDir);
     this.at.copy(p);
     this.dir.copy(d);
     cam.updateMatrixWorld();
@@ -40,6 +48,16 @@ export class ViewCull {
       const k = Math.min(3, Math.sqrt(1 - sunDir.y * sunDir.y) / sunDir.y);
       this.shadow.set(-sunDir.x, 0, -sunDir.z).normalize().multiplyScalar(k);
     } else this.shadow.set(0, 0, 0);
+    if (sun?.castShadow) {
+      // Where the shadow map will be drawn from (it follows you; see Sky).
+      const lc = this.lightCam;
+      lc.position.copy(sun.position);
+      lc.lookAt(sun.target.position);
+      lc.updateMatrixWorld();
+      this.lightView = lc.matrixWorldInverse.elements.slice();
+      const sc = sun.shadow.camera;
+      this.shadowHalf = Math.max(sc.right, -sc.left, sc.top, -sc.bottom);
+    } else this.lightView = null;
     this.version++;
   }
 
@@ -67,5 +85,16 @@ export class ViewCull {
     const L = height;
     return this.sphere(x + s.x * L * 0.5, y - height * 0.25, z + s.z * L * 0.5, r + L * 0.3)
       || this.sphere(x + s.x * L, y - height * 0.5, z + s.z * L, r + L * 0.3);
+  }
+
+  /** Whether a sphere could be drawn into the sun's shadow map (anywhere in its box). */
+  inShadowMap(x: number, y: number, z: number, r: number): boolean {
+    const e = this.lightView;
+    if (!e) return false;
+    // Room for the step allowed before the next redo (the box moves with you).
+    const lim = this.shadowHalf + r + this.step * 2;
+    const vx = e[0] * x + e[4] * y + e[8] * z + e[12];
+    const vy = e[1] * x + e[5] * y + e[9] * z + e[13];
+    return Math.abs(vx) < lim && Math.abs(vy) < lim;
   }
 }

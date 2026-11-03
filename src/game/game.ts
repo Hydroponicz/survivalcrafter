@@ -1124,7 +1124,14 @@ export class Game {
     const third = this.player.cameraMode === 'third';
     const maxD = third ? this.player.camDist + maxReach + 1 : maxReach;
     const t = this.world.terrain;
-    const objs = this.world.near(origin.x, origin.z, maxD + 3);
+    // Only things standing near the line of sight can be hit (a tree crown is the widest, 1.5 m × size).
+    const flat = Math.hypot(dir.x, dir.z), ux = flat > 1e-6 ? dir.x / flat : 0, uz = flat > 1e-6 ? dir.z / flat : 0;
+    const objs = this.world.near(origin.x, origin.z, maxD + 3).filter((o) => {
+      const ox = o.x - origin.x, oz = o.z - origin.z;
+      const along = Math.max(0, Math.min(maxD * flat, ox * ux + oz * uz));
+      const off = Math.hypot(ox - ux * along, oz - uz * along);
+      return off < reachOf(o) + 0.3;
+    });
     const animals = this.world.animals.filter((a) => Math.hypot(a.x - origin.x, a.z - origin.z) < maxD + 2);
     const rocks = this.groundCover.bouldersNear(origin.x, origin.z, maxD + 1);
     const p = new THREE.Vector3();
@@ -1734,7 +1741,7 @@ export class Game {
     if (this.ambTimer <= 0) { this.ambTimer = 0.5; this.surroundings(); }
     // What's in view: the near trees, plants and grass hand only that to be drawn.
     perf.time('culling', () => {
-      this.viewCull.update(this.camera, this.sky.sunDir);
+      this.viewCull.update(this.camera, this.sky.sunDir, this.sky.sun);
       this.view.cull(this.viewCull);
       this.grassCull.update(this.camera);
     });
@@ -1977,4 +1984,23 @@ function makeGlowTexture(): THREE.Texture {
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
+}
+
+/** How far from its anchor an object can be hit (in plan): a tree's crown, a piece's furthest corner. */
+const pieceReach = new Map<string, number>();
+function reachOf(o: WorldObj): number {
+  switch (o.kind) {
+    case 'tree': return Math.max(0.2 + 0.3 * treeScale(o).s, 1.5 * treeScale(o).s);
+    case 'structure': {
+      let r = pieceReach.get(o.type);
+      if (r === undefined) {
+        const def = STRUCTURES[o.type];
+        r = 0;
+        for (const b of [...def.boxes, ...(def.openBoxes ?? [])]) r = Math.max(r, Math.hypot(Math.abs(b.c[0]) + b.h[0], Math.abs(b.c[2]) + b.h[2]));
+        pieceReach.set(o.type, r);
+      }
+      return r + 0.05;
+    }
+    default: return 0.8;
+  }
 }
