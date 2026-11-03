@@ -101,6 +101,8 @@ export class KnapGame extends Minigame {
   private flakes: { mesh: THREE.Mesh; vel: THREE.Vector3; spin: THREE.Vector3; rest: boolean }[] = [];
   private aim = new THREE.Vector3();
   private strikes = 0;
+  /** The flake you'd take: its outline on the stone (pale, or red where it would bite the shape). */
+  private preview = new THREE.Group();
   private noiseSeed = Math.random() * 100;
   /** The force band that breaks clean flakes, and how much waste may be left. */
   private band: [number, number];
@@ -139,6 +141,13 @@ export class KnapGame extends Minigame {
     line.computeLineDistances();
     line.renderOrder = 10;
     this.scene.add(line);
+
+    // Where the next flake will come off: its outline on the stone, and the spot the hammerstone meets the edge.
+    const pm = (c: number, o: number) => new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: o, depthTest: false, depthWrite: false, side: THREE.DoubleSide });
+    const dot = new THREE.Mesh(new THREE.RingGeometry(0.004, 0.0065, 20).rotateX(-Math.PI / 2), pm(0xffffff, 0.95));
+    dot.renderOrder = 11;
+    this.preview.add(dot);
+    this.scene.add(this.preview);
 
     this.hammer = new THREE.Mesh(new THREE.DodecahedronGeometry(0.022, 1).scale(1.25, 0.9, 1), mat(0x8a857c, { flatShading: true }));
     this.hammer.castShadow = true;
@@ -220,6 +229,8 @@ export class KnapGame extends Minigame {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    this.baseCol = col.slice();
+    this.tinted = [];
     g.setIndex(index);
     g.computeVertexNormals();
     this.stoneMesh.geometry.dispose();
@@ -258,6 +269,7 @@ export class KnapGame extends Minigame {
     const p = this.toScreen(this.aim.clone().setY(TOP + THICK));
     if (this.charging) {
       const [lo, hi] = this.band;
+      if (this.previewBites) return { x: p.x + 40, y: p.y - 30, text: 'the red flake would bite into the shape: ease off, or aim further out', gesture: 'release' };
       return { x: p.x + 40, y: p.y - 30, text: this.power < lo ? 'more force…' : this.power > hi ? 'too hard!' : 'let go to strike', gesture: 'release' };
     }
     const e = this.nearestEdge(this.aim.x, this.aim.z);
@@ -304,28 +316,97 @@ export class KnapGame extends Minigame {
       this.charging = false;
       this.blow = { at: this.aim.clone().setY(TOP + THICK * 0.6), t: 0, power: this.power };
     }
+    this.showPreview();
   }
 
-  /** The blow lands: break a flake off where it struck (or not). */
-  private strike(at: THREE.Vector3, power: number) {
-    const e = this.nearestEdge(at.x, at.z);
-    if (!e) return;
+  /**
+   * Show the flake a blow here would take: before you gather force, about how
+   * big a good blow's flake is (faint); while you hold the button, the flake at
+   * this force (bright). Red where it would bite into the shape.
+   */
+  private showPreview() {
     const [lo, hi] = this.band;
-    // Too far off the stone, or too far in from its edge, and nothing comes away.
-    if (e.inside < -0.014) { this.say('You strike the leather.', false); this.sample(0.3, 0.3); return; }
-    const deepest = 0.03 + 0.012 * this.ease;
-    if (e.inside > deepest) { this.say('Too far in: the blow just bruises the stone. Strike nearer the edge.', false, 1.6); this.sample(0.25, 0.5); this.burst(at, 0x9e9a92, 4, 0.4); return; }
-    if (power < lo * 0.6) { this.say('Too soft: nothing comes away.', false); this.sample(0.4, 0.3); return; }
+    const power = this.charging ? Math.max(this.power, lo * 0.6) : (lo + hi) / 2;
+    const f = this.flakeAt(this.aim.x, this.aim.z, power);
+    this.untint();
+    this.preview.visible = f.ok && !this.blow;
+    this.previewBites = false;
+    if (!f.ok || this.blow) return;
+    // Tint the stone that would break away: pale where it's waste, red where it's the shape.
+    const geo = this.stoneMesh.geometry, pos = geo.getAttribute('position') as THREE.BufferAttribute, col = geo.getAttribute('color') as THREE.BufferAttribute;
+    const C = col.array as Float32Array, V = N + 1, strong = this.charging ? 1 : 0.55;
+    const r0 = Math.ceil((f.R * 1.05) / CELL) + 1;
+    const ci = Math.round((f.centre.x + SIZE / 2) / CELL), cj = Math.round((f.centre.y + SIZE / 2) / CELL);
+    for (let b = -r0; b <= r0; b++) for (let a = -r0; a <= r0; a++) {
+      const i = ci + a, j = cj + b;
+      if (i < 0 || j < 0 || i > N || j > N) continue;
+      const v = j * V + i;
+      if (Math.hypot(pos.getX(v) - f.centre.x, pos.getZ(v) - f.centre.y) > f.R) continue;
+      const cell = idx(Math.min(N - 1, i), Math.min(N - 1, j));
+      if (!this.stone[cell]) continue;
+      const bite = !!this.shape[cell];
+      if (bite) this.previewBites = true;
+      const [tr, tg, tb] = bite ? [1.0, 0.25, 0.18] : f.hard ? [1.0, 0.8, 0.45] : [0.85, 0.92, 1.0];
+      const k = (bite ? 0.75 : 0.5) * strong;
+      C[v * 3] += (tr - C[v * 3]) * k; C[v * 3 + 1] += (tg - C[v * 3 + 1]) * k; C[v * 3 + 2] += (tb - C[v * 3 + 2]) * k;
+      this.tinted.push(v);
+    }
+    col.needsUpdate = true;
+    // And the spot the hammerstone meets the edge.
+    const [dot] = this.preview.children as THREE.Mesh[];
+    (dot.material as THREE.MeshBasicMaterial).color.setHex(this.previewBites ? 0xff5a4a : 0xffffff);
+    dot.position.set(f.edge.x, TOP + 0.006, f.edge.y);
+  }
 
-    this.strikes++;
+  /** Put back the stone's own colours where the last preview tinted it. */
+  private untint() {
+    if (!this.tinted.length) return;
+    const col = this.stoneMesh.geometry.getAttribute('color') as THREE.BufferAttribute, C = col.array as Float32Array;
+    for (const v of this.tinted) { C[v * 3] = this.baseCol[v * 3]; C[v * 3 + 1] = this.baseCol[v * 3 + 1]; C[v * 3 + 2] = this.baseCol[v * 3 + 2]; }
+    this.tinted = [];
+    col.needsUpdate = true;
+  }
+  private previewBites = false;
+  /** The stone's own colours, and the corners tinted to show the next flake. */
+  private baseCol = new Float32Array(0);
+  private tinted: number[] = [];
+
+  /**
+   * The flake a blow at this spot and force would take: where it meets the
+   * edge, which way is out, and the circle of stone it breaks away (`luck`
+   * 0..1 varies its size a little, 0.5 for the expected flake). Or why
+   * nothing would come away.
+   */
+  private flakeAt(x: number, z: number, power: number, luck = 0.5):
+    { ok: true; edge: THREE.Vector2; out: THREE.Vector2; R: number; centre: THREE.Vector2; hard: boolean; inside: number } | { ok: false; why: 'off' | 'deep' | 'soft' | 'none' } {
+    const e = this.nearestEdge(x, z);
+    if (!e) return { ok: false, why: 'none' };
+    const [lo, hi] = this.band;
+    if (e.inside < -0.014) return { ok: false, why: 'off' };
+    if (e.inside > 0.03 + 0.012 * this.ease) return { ok: false, why: 'deep' };
+    if (power < lo * 0.6) return { ok: false, why: 'soft' };
     const out = this.outward(e.i, e.j);
     const edge = new THREE.Vector2(cx(e.i), cx(e.j));
     const hard = power > hi;
     // A bigger flake for a harder blow and one landed further in from the edge.
-    let R = (0.018 + 0.04 * Math.min(1, power) + Math.max(0, e.inside) * 0.5) * (0.85 + Math.random() * 0.3) * (1.15 - 0.2 * this.ease);
+    let R = (0.018 + 0.04 * Math.min(1, power) + Math.max(0, e.inside) * 0.5) * (0.85 + luck * 0.3) * (1.15 - 0.2 * this.ease);
     if (hard) R *= 1.55;
     const bite = R * (0.5 + (hard ? 0.25 : 0)) + Math.max(0, e.inside) * 0.6;
-    const centre = edge.clone().addScaledVector(out, R - bite);
+    return { ok: true, edge, out, R, centre: edge.clone().addScaledVector(out, R - bite), hard, inside: e.inside };
+  }
+
+  /** The blow lands: break a flake off where it struck (or not). */
+  private strike(at: THREE.Vector3, power: number) {
+    const f = this.flakeAt(at.x, at.z, power, Math.random());
+    if (!f.ok) {
+      // Too far off the stone, or too far in from its edge, or too soft: nothing comes away.
+      if (f.why === 'off') { this.say('You strike the leather.', false); this.sample(0.3, 0.3); }
+      else if (f.why === 'deep') { this.say('Too far in: the blow just bruises the stone. Strike nearer the edge.', false, 1.6); this.sample(0.25, 0.5); this.burst(at, 0x9e9a92, 4, 0.4); }
+      else if (f.why === 'soft') { this.say('Too soft: nothing comes away.', false); this.sample(0.4, 0.3); }
+      return;
+    }
+    this.strikes++;
+    const { out, edge, R, centre, hard } = f;
     const seed = Math.random() * 10;
     let removed = 0, removedShape = 0;
     const r0 = Math.ceil((R * 1.4) / CELL);
@@ -374,9 +455,58 @@ export class KnapGame extends Minigame {
     } else if (waste <= this.doneWaste) {
       // The finished piece: as good as it matches the outline.
       this.sample(Math.pow(kept, 4) * (1 - waste * 0.6), 4);
-      this.say(`Done: it has the shape of ${NAMES[this.kind]}.`, true, 2);
+      this.dress();
+      this.say(kept > 0.97 ? `Done: you dress the edges, and it's ${NAMES[this.kind]}.` : `Done: you dress the edges. It's ${NAMES[this.kind]}, a little short where you cut too deep.`, true, 2.4);
       this.done = true;
     }
+  }
+
+  /**
+   * The finishing touches: the last of the waste is pressed off to the line,
+   * nicks into the shape are worked into smooth curves (a bitten edge stays a
+   * little short, but it's a tool's edge, not a ragged hole), and a row of
+   * small retouch scars runs round the edge.
+   */
+  private dress() {
+    const S = this.stone, T = this.shape, n = N * N;
+    // What's left of the shape.
+    const keep = new Uint8Array(n);
+    for (let k = 0; k < n; k++) keep[k] = S[k] & T[k];
+    const grow = (src: Uint8Array, r: number, on: boolean) => {
+      // Dilate (on) or erode (off) by a disc of radius r cells.
+      const out = new Uint8Array(n);
+      for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+        let hit = !on;
+        for (let b = -r; b <= r && hit !== on; b++) for (let a = -r; a <= r; a++) {
+          if (a * a + b * b > r * r) continue;
+          const p = i + a, q = j + b;
+          const v = p >= 0 && q >= 0 && p < N && q < N ? src[idx(p, q)] : 0;
+          if (on && v) { hit = true; break; }
+          if (!on && !v) { hit = false; break; }
+        }
+        out[idx(i, j)] = hit ? 1 : 0;
+      }
+      return out;
+    };
+    // Close small bites (grow then shrink), round off spikes (shrink then grow), never past the outline.
+    let m = grow(grow(keep, 3, true), 3, false);
+    m = grow(grow(m, 1, false), 1, true);
+    for (let k = 0; k < n; k++) S[k] = m[k] & T[k];
+    this.dropLoose();
+    this.measure();
+    // Fine retouch scars all round the edge: small scallops, close together.
+    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+      const k = idx(i, j);
+      if (!S[k] || this.depth[k] > 3.5) continue;
+      const x = cx(i), z = cx(j);
+      const ripple = 0.5 + 0.5 * Math.sin(Math.atan2(z, x) * 46 + this.noiseSeed);
+      const v = j * (N + 1) + i;
+      this.scar[v] += 0.0025 * ripple * (1 - this.depth[k] / 3.5);
+      this.fresh[v] = Math.max(this.fresh[v], 0.6);
+    }
+    this.rebuild();
+    this.preview.visible = false;
+    this.tinted = [];
   }
 
   /** Any stone no longer joined to the main piece falls away. Returns how much of the shape went with it. */
