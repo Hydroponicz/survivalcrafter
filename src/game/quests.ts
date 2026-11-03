@@ -53,6 +53,8 @@ export interface QuestState {
   anchor: { x: number; z: number } | null;
   /** Where you were when the quest began. */
   start: { x: number; z: number };
+  /** Things you've done that a step waits for (e.g. 'felled': a tree you cut has come down). */
+  flags?: string[];
 }
 
 export interface QuestSave { quests: QuestState[]; off: boolean }
@@ -93,6 +95,15 @@ function trees(g: Game, needBranches = false): Target[] {
   for (const o of g.world.near(p.x, p.z, SEARCH)) {
     if (o.kind !== 'tree' || o.age < 0.45 || (needBranches && o.branches <= 0)) continue;
     out.push({ x: o.x, y: g.world.terrain.heightAt(o.x, o.z) + 2.2, z: o.z, id: o.id });
+  }
+  return out;
+}
+
+/** Piles with logs in them (where felled trees lie). */
+function logPiles(g: Game): Target[] {
+  const p = g.player.pos, out: Target[] = [];
+  for (const o of g.world.near(p.x, p.z, SEARCH)) {
+    if (o.kind === 'pile' && o.items.some((i) => i.type === 'log')) out.push({ x: o.x, y: o.y + 0.6, z: o.z, id: o.id });
   }
   return out;
 }
@@ -154,12 +165,15 @@ const HOME_STEPS: Step[] = [
     progress: (g) => hasTool(g, 'hammer') },
   { id: 'fell', title: 'Fell a tree',
     text: `Put the hatchet in your hand from the hotbar (${KEY('1')}-${KEY('9')}), aim at a grown tree and ${KEY('Left click')} to chop. Keep at it until it falls. Logs are heavy: they land on the ground, and you pick them up from the pile.`,
-    progress: (g) => has(g, 'log', 2),
+    // Done once your first tree is down and its logs are lying in a pile.
+    progress: (g, q) => !!q.flags?.includes('felled') || g.inv.count('log') > 0 || g.inv.count('plank') > 0,
     targets: (g) => trees(g),
     far: 'No grown trees close by: head for the woods.' },
   { id: 'planks', title: 'Split planks',
-    text: `In crafting (${KEY('C')}), under <b>Woodworking</b>, <b>Split log into planks</b> with your hatchet: 2 planks a log. The first floor needs 4.`,
-    progress: (g) => has(g, 'plank', 4) },
+    text: `Pick up the logs from the pile where your tree fell (aim at it, ${KEY('Right click')} → <b>Take all</b>). Then, in crafting (${KEY('C')}), under <b>Woodworking</b>, <b>Split log into planks</b> with your hatchet: 2 planks a log. The first floor needs 4.`,
+    progress: (g) => has(g, 'plank', 4),
+    // The logs still lying about, until you've picked them up.
+    targets: (g) => (g.inv.count('log') > 0 ? [] : logPiles(g)) },
   { id: 'floor', title: 'Lay the floor',
     text: `Press ${KEY('B')} to build and pick <b>Wooden floor</b>. Find level ground, ${KEY('Left click')} to place the plan, then hold your hammer, aim at the plan and ${KEY('Left click')} to build it, one plank at a time. Your house is four floors in a square (4 × 4 m): aim at the edge of a built floor and the next plan snaps beside it. Each floor takes 4 planks.`,
     progress: (g, q) => [Math.min(4, builtNear(g, q, ['floor'], 4)), 4],
@@ -348,6 +362,16 @@ export class QuestLog {
     this.quests.unshift(q);
     this.timer = 0;
     this.changed();
+  }
+
+  /** Record something you've done that a quest step may be waiting for. */
+  note(flag: string) {
+    for (const q of this.quests) {
+      if (q.status === 'done') continue;
+      q.flags ??= [];
+      if (!q.flags.includes(flag)) q.flags.push(flag);
+    }
+    this.timer = 0;
   }
 
   /** The quest the world arrows are for: the first tracked one under way. */

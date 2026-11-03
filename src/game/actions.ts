@@ -528,7 +528,10 @@ export const ACTIONS: ActionDef[] = [
       for (let i = 0; i < 1 + Math.floor(Math.random() * 3); i++) items.push(makeItem('branch', ql));
       if (Math.random() < 0.35) items.push(makeItem('sprout', ql, `${t.species} sprout`));
       g.msg('Timber! The tree creaks and starts to fall.', 'good');
-      g.fellTree(t, items, () => g.msg(`The ${t.species} crashes down, leaving ${logs} log${logs > 1 ? 's' : ''} and some branches.`, 'good'));
+      g.fellTree(t, items, () => {
+        g.msg(`The ${t.species} crashes down, leaving ${logs} log${logs > 1 ? 's' : ''} and some branches.`, 'good');
+        g.quests?.note('felled');
+      });
     },
   },
   {
