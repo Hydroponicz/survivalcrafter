@@ -56,10 +56,10 @@ export const RECIPES: Recipe[] = [
     tool: 'knife', inputs: [{ item: 'branch', count: 1 }], output: { item: 'shaft', count: 1 } },
   { id: 'kindling_log', name: 'Kindling (from log)', category: 'Woodworking', skill: 'woodcutting', difficulty: 3, time: 6,
     tool: 'hatchet', inputs: [{ item: 'log', count: 1 }], output: { item: 'kindling', count: 6 } },
-  { id: 'split_planks', name: 'Split log into planks', category: 'Woodworking', skill: 'carpentry', difficulty: 6, time: 12,
+  { id: 'split_planks', name: 'Split log into rough planks', category: 'Woodworking', skill: 'carpentry', difficulty: 6, time: 12,
     tool: 'hatchet', inputs: [{ item: 'log', count: 1 }], output: { item: 'plank', count: 2 } },
-  { id: 'saw_planks', name: 'Saw log into planks', category: 'Woodworking', skill: 'carpentry', difficulty: 10, time: 10,
-    tool: 'saw', inputs: [{ item: 'log', count: 1 }], output: { item: 'plank', count: 5 } },
+  { id: 'saw_planks', name: 'Saw log into refined planks', category: 'Woodworking', skill: 'carpentry', difficulty: 10, time: 10,
+    tool: 'saw', inputs: [{ item: 'log', count: 1 }], output: { item: 'refined_plank', count: 5 } },
   { id: 'wooden_shovel', name: 'Wooden shovel', category: 'Woodworking', skill: 'carpentry', difficulty: 8, time: 12,
     tool: 'knife', inputs: [{ item: 'plank', count: 1 }, { item: 'shaft', count: 1 }], output: { item: 'wooden_shovel', count: 1 } },
 

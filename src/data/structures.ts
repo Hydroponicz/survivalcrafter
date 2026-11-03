@@ -29,6 +29,8 @@ export interface StructureDef {
   container?: number; // storage capacity in kg
   opens?: boolean;
   bed?: boolean;
+  /** Fine furniture: makes the room comfortable. Sleeping in a bed near it, you wake rested (see Game, sleep). */
+  comfort?: number;
   /**
    * Equipment crafted as an item and set down whole (no plan to build): the
    * item it is placed from and picked back up as. Its quality is the item's.
@@ -129,8 +131,8 @@ const defs: StructureDef[] = [
     station: 'quern', desc: 'Grinds grain into flour.' },
   { id: 'workbench', name: 'Workbench', icon: '🪑', category: 'Crafting', snap: false,
     boxes: [box(0, 0.45, 0, 0.8, 0.45, 0.4)], snaps: [],
-    materials: [{ item: 'plank', count: 6 }, { item: 'shaft', count: 4 }], tool: 'hammer', skill: 'carpentry', difficulty: 8, stepTime: 3,
-    station: 'workbench', desc: 'A sturdy table for fine work.' },
+    materials: [{ item: 'refined_plank', count: 6 }, { item: 'shaft', count: 4 }], tool: 'hammer', skill: 'carpentry', difficulty: 8, stepTime: 3,
+    station: 'workbench', desc: 'A sturdy bench of sawn planks for fine work.' },
 
   // --- smithy equipment: crafted as items, then placed (never planned)
   { id: 'bellows', name: 'Bellows', icon: '🪗', category: 'Smithy', snap: false, item: 'bellows', attach: 'forge',
@@ -154,7 +156,25 @@ const defs: StructureDef[] = [
   { id: 'bed', name: 'Bed', icon: '🛏️', category: 'Furniture', snap: false,
     boxes: [box(0, 0.24, 0, 0.5, 0.24, 0.95)], snaps: [],
     materials: [{ item: 'plank', count: 6 }, { item: 'hide', count: 2 }], tool: 'hammer', skill: 'carpentry', difficulty: 12, stepTime: 3,
-    bed: true, desc: 'Sleep to set your respawn point.' },
+    bed: true, desc: 'Sleep to set your respawn point. Fine furniture near it makes you wake rested.' },
+
+  // --- fine furniture: refined (sawn) planks; a bed near it is a comfortable place to sleep
+  { id: 'table', name: 'Table', icon: '🪵', category: 'Furniture', snap: false,
+    boxes: [box(0, 0.4, 0, 0.7, 0.4, 0.45)], snaps: [],
+    materials: [{ item: 'refined_plank', count: 6 }, { item: 'shaft', count: 4 }], tool: 'hammer', skill: 'carpentry', difficulty: 14, stepTime: 3,
+    comfort: 1, desc: 'A sawn-plank table. Comfort 1: sleep in a bed near it to wake rested.' },
+  { id: 'chair', name: 'Chair', icon: '🪑', category: 'Furniture', snap: false,
+    boxes: [box(0, 0.45, 0, 0.24, 0.45, 0.24)], snaps: [],
+    materials: [{ item: 'refined_plank', count: 3 }, { item: 'shaft', count: 2 }], tool: 'hammer', skill: 'carpentry', difficulty: 12, stepTime: 2.5,
+    comfort: 1, desc: 'A sawn-plank chair. Comfort 1.' },
+  { id: 'shelf', name: 'Shelf', icon: '📚', category: 'Furniture', snap: false,
+    boxes: [box(0, 0.75, 0, 0.6, 0.75, 0.16)], snaps: [],
+    materials: [{ item: 'refined_plank', count: 4 }, { item: 'shaft', count: 2 }], tool: 'hammer', skill: 'carpentry', difficulty: 13, stepTime: 2.5,
+    comfort: 1, desc: 'Open shelves to set things out on. Comfort 1.' },
+  { id: 'cupboard', name: 'Cupboard', icon: '🗄️', category: 'Furniture', snap: false,
+    boxes: [box(0, 0.9, 0, 0.55, 0.9, 0.28)], snaps: [],
+    materials: [{ item: 'refined_plank', count: 8 }, { item: 'shaft', count: 2 }, { item: 'cordage', count: 1 }], tool: 'hammer', skill: 'carpentry', difficulty: 16, stepTime: 3,
+    comfort: 2, desc: 'A tall cupboard with doors, sawn and fitted. Comfort 2.' },
 ];
 
 export const STRUCTURES: Record<string, StructureDef> = Object.fromEntries(defs.map((d) => [d.id, d]));

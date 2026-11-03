@@ -1705,6 +1705,7 @@ export class Game {
       let regen = p.food > 5 && p.water > 5 ? 9 : 2.5;
       if (fx.nauseous) regen *= 0.3;
       if (fx.refreshed) regen *= 2;
+      if (fx.rested) regen *= 1 + 0.25 * fx.rested.rate;
       p.stamina = Math.min(100, p.stamina + dt * regen);
     }
     if (fx.poisoned) p.health -= dt * fx.poisoned.rate;
@@ -1712,7 +1713,7 @@ export class Game {
       e.t -= dt;
       if (e.t <= 0) {
         delete fx[k];
-        this.msg(k === 'poisoned' ? 'The poison has run its course.' : k === 'nauseous' ? 'Your stomach settles.' : 'The tea wears off.', 'info');
+        this.msg(k === 'poisoned' ? 'The poison has run its course.' : k === 'nauseous' ? 'Your stomach settles.' : k === 'rested' ? 'The rested feeling wears off.' : 'The tea wears off.', 'info');
       }
     }
     if (p.food <= 0 || p.water <= 0) {

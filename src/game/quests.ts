@@ -169,8 +169,8 @@ const HOME_STEPS: Step[] = [
     progress: (g, q) => !!q.flags?.includes('felled') || g.inv.count('log') > 0 || g.inv.count('plank') > 0,
     targets: (g) => trees(g),
     far: 'No grown trees close by: head for the woods.' },
-  { id: 'planks', title: 'Split planks',
-    text: `Pick up the logs from the pile where your tree fell (aim at it, ${KEY('Right click')} → <b>Take all</b>). Then, in crafting (${KEY('C')}), under <b>Woodworking</b>, <b>Split log into planks</b> with your hatchet: 2 planks a log. The first floor needs 4.`,
+  { id: 'planks', title: 'Split rough planks',
+    text: `Pick up the logs from the pile where your tree fell (aim at it, ${KEY('Right click')} → <b>Take all</b>). Then, in crafting (${KEY('C')}), under <b>Woodworking</b>, <b>Split log into rough planks</b> with your hatchet: 2 a log. Rough planks are what you build with; the first floor needs 4. (Later, an iron saw cuts <b>refined planks</b> for fine furniture.)`,
     progress: (g) => has(g, 'plank', 4),
     // The logs still lying about, until you've picked them up.
     targets: (g) => (g.inv.count('log') > 0 ? [] : logPiles(g)) },

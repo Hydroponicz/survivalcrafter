@@ -817,6 +817,18 @@ export const ACTIONS: ActionDef[] = [
       const g = c.g;
       g.world.spawn = { x: s.x, z: s.z };
       g.player.stamina = 100;
+      // Fine furniture round the bed makes for a better night: you wake rested.
+      let comfort = 0;
+      for (const o of g.world.near(s.x, s.z, COMFORT_RANGE)) {
+        if (o.kind === 'structure' && o.built && Math.hypot(o.x - s.x, o.z - s.z) <= COMFORT_RANGE) comfort += STRUCTURES[o.type].comfort ?? 0;
+      }
+      comfort = Math.min(MAX_COMFORT, comfort);
+      if (comfort > 0) {
+        g.player.effects.rested = { t: 240 + 90 * comfort, rate: comfort };
+        g.msg(`Comfort ${comfort}: you wake well rested. Your stamina comes back ${Math.round(comfort * 25)}% faster for a while.${comfort < MAX_COMFORT ? ' More fine furniture near the bed would help.' : ''}`, 'good');
+      } else {
+        g.msg('A bare room: fine furniture near the bed (a table, chairs, shelves, a cupboard) would help you wake rested.', 'info');
+      }
       const f = g.world.dayFraction;
       if (f > 0.75 || f < 0.22) {
         const DAY = 1200;
@@ -985,7 +997,10 @@ export function nextMaterial(def: StructureDef, s: StructureObj): string | undef
 }
 
 // Burn big fuel first and keep the last kindling for lighting.
-const FUEL_ORDER = ['log', 'plank', 'branch', 'shaft', 'kindling'];
+const FUEL_ORDER = ['log', 'plank', 'refined_plank', 'branch', 'shaft', 'kindling'];
+/** Fine furniture within this many metres of a bed counts toward a good night's sleep, up to this much. */
+const COMFORT_RANGE = 6;
+const MAX_COMFORT = 6;
 function fuelItem(c: Ctx): Item | undefined {
   if (c.tool && itemDef(c.tool.type).fuel) return c.tool;
   for (const t of FUEL_ORDER) {

@@ -500,6 +500,7 @@ export class UI {
     if (p.effects.poisoned) status.push(`<span class="bad" data-tip="Losing health until it wears off. A yarrow poultice draws poison out.">Poisoned ${Math.ceil(p.effects.poisoned.t)}s</span>`);
     if (p.effects.nauseous) status.push('<span class="warn" data-tip="You recover stamina slowly for a while.">Nauseous</span>');
     if (p.effects.refreshed) status.push('<span class="good-text" data-tip="Mint tea: stamina comes back twice as fast for a while.">Refreshed</span>');
+    if (p.effects.rested) status.push(`<span class="good-text" data-tip="You slept in comfort (${p.effects.rested.rate}): stamina comes back ${Math.round(p.effects.rested.rate * 25)}% faster for a while.">Well rested</span>`);
     if (g.placing) status.push(`${g.placingItem ? 'Placing' : 'Planning'}: ${g.placing.name} — LMB place · ${g.placing.attach ? 'aim at a forge side' : 'wheel or Q/E rotate'} · RMB stop${g.placement?.snapped ? ' · snapped' : ''}`);
     if (g.placement && !g.placement.valid) status.push(`<span class="warn">${esc(g.placement.reason)}</span>`);
     setHTML(this.statusEl, status.join(' · '));

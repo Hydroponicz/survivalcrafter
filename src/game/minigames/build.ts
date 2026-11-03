@@ -48,7 +48,8 @@ function materialMesh(item: string, w: number, h: number, d: number): THREE.Obje
       add(new THREE.TorusGeometry(0.1, 0.02, 6, 20), new THREE.MeshStandardMaterial({ color: 0xc8a96e }));
       break;
     default:
-      add(new THREE.BoxGeometry(w, h, d), mat('planks'));
+      // Rough planks are weathered and uneven; sawn ones clean.
+      add(new THREE.BoxGeometry(w, h, d), mat(item === 'refined_plank' ? 'planks' : 'dark_planks'));
   }
   return g;
 }
