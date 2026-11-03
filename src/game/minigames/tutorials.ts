@@ -18,7 +18,7 @@ export interface Tutorial {
 const T: Record<string, Tutorial> = {
   saw: {
     title: 'Sawing planks',
-    what: 'You saw the log lengthways, along each chalk line on top, and every cut gives you a board.',
+    what: 'Saw the log lengthways along each chalk line. Every cut gives you a plank.',
     steps: [
       { gesture: 'leftright', text: 'Hold the left button and sweep the mouse left and right, like working a saw. The cut runs along the red line.' },
       { gesture: 'wait', text: 'Keep the Stroke speed in its green zone. Rush it and the blade binds until you slow down.' },
@@ -43,7 +43,7 @@ const T: Record<string, Tutorial> = {
       { gesture: 'up', text: 'Move the mouse back up (or let go) to refill them.' },
       { gesture: 'wait', text: 'Keep the Heat in the green band until the ore has melted. Too hot burns the iron.' },
     ],
-    quality: 'Time spent in the green band makes better iron. Better bellows blow harder and hold the heat steadier, and limit how good the iron can get.',
+    quality: 'The longer you keep the heat in the green band, the better the iron. Better bellows make this easier.',
   },
   pour: {
     title: 'Casting iron',
@@ -94,7 +94,7 @@ const T: Record<string, Tutorial> = {
   },
   'strike:split': {
     title: 'Splitting wood',
-    what: 'Strike the log in the right spots to split it cleanly along the grain.',
+    what: 'Hit the log in the right spots to split it cleanly.',
     steps: [
       { gesture: 'hold', text: 'Aim at the yellow mark. A white ring shrinks toward it.' },
       { gesture: 'click', text: 'Click the moment the white ring meets the yellow mark.' },
@@ -103,35 +103,35 @@ const T: Record<string, Tutorial> = {
   },
   knap: {
     title: 'Knapping stone',
-    what: 'Strike flakes off the edge of the stone until what is left has the shape of the tool, outlined in gold.',
+    what: 'Chip flakes off the stone until it matches the tool shape outlined in gold.',
     steps: [
-      { gesture: 'hold', text: 'Aim at the edge of the stone, on the waste outside the gold line. Hold the button to put force behind the blow.' },
-      { gesture: 'release', text: 'Let go to strike: a flake breaks off where you hit. A harder blow, or one further in from the edge, takes a bigger flake.' },
-      { gesture: 'wait', text: 'Work your way round. Keep the force in its band: too hard and a flake can bite into the shape, and bite too much and the stone is spoiled.' },
+      { gesture: 'hold', text: 'Aim at the edge of the stone, outside the gold line. Hold the mouse button to build up force.' },
+      { gesture: 'release', text: 'Let go to strike and a flake breaks off. Harder hits, or hits further from the edge, take bigger flakes.' },
+      { gesture: 'wait', text: 'Work your way around. Keep the force in the green band: hit too hard and you\'ll chip into the shape, and chip too much and the stone breaks.' },
     ],
     quality: 'The closer the finished stone matches the outline, the better the tool.',
   },
   'strike:haft': {
     title: 'Hafting a mallet',
-    what: 'Drive the handle down into the mallet head with a rock, blow by blow, until it sits tight.',
+    what: 'Hammer the handle into the mallet head with a rock until it\'s tight.',
     steps: [
       { gesture: 'hold', text: 'Aim at the top of the handle (the yellow mark). A white ring shrinks toward it.' },
       { gesture: 'click', text: 'Strike as the ring meets the mark: each clean blow drives the handle further in.' },
     ],
-    quality: 'Square, well-timed blows seat the head tight: a better hammer.',
+    quality: 'Well-timed hits fit the head tighter and make a better hammer.',
   },
   'strike:knap': {
     title: 'Knapping stone',
-    what: 'Strike flakes off the stone to shape a sharp edge.',
+    what: 'Chip flakes off the stone to make a sharp edge.',
     steps: [
       { gesture: 'hold', text: 'Aim at the yellow mark on the stone. A white ring shrinks toward it.' },
       { gesture: 'click', text: 'Click as the white ring meets the mark to knock off a flake.' },
     ],
-    quality: 'Precise strikes make a keener, stronger tool.',
+    quality: 'Precise hits make a sharper, stronger tool.',
   },
   'strike:forge': {
     title: 'Smithing',
-    what: 'Hammer the glowing iron on the anvil to shape it before it cools. A better anvil gives you more time to land each blow; better bellows keep the metal hot for longer.',
+    what: 'Hammer the glowing iron on the anvil before it cools. A better anvil gives you more time per hit, and better bellows keep the metal hot longer.',
     steps: [
       { gesture: 'hold', text: 'Aim at the yellow mark on the hot metal. A white ring shrinks toward it.' },
       { gesture: 'click', text: 'Strike as the ring meets the mark.' },
@@ -141,7 +141,7 @@ const T: Record<string, Tutorial> = {
   },
   'strike:nail': {
     title: 'Nailing',
-    what: 'Drive the nails to fix the piece in place.',
+    what: 'Hammer in the nails to fix the piece in place.',
     steps: [
       { gesture: 'hold', text: 'Aim at the yellow mark on the nail head.' },
       { gesture: 'click', text: 'Strike as the white ring meets it.' },
@@ -150,28 +150,28 @@ const T: Record<string, Tutorial> = {
   },
   chop: {
     title: 'Splitting on the block',
-    what: 'Wood is split on your chopping block: the log (or plank) stands on end, and gold lines show where to split it.',
+    what: 'Split wood on your chopping block. The log (or plank) stands on end, and gold lines show where to chop.',
     steps: [
-      { gesture: 'click', text: 'A ring closes on the gold line. Click when it turns green and meets the small green circle: the hatchet comes down and splits a piece off.' },
-      { gesture: 'click', text: 'Split each line in turn. A log loses a bark slab off each side, then splits into two rough planks; a plank splits into four sticks of kindling.' },
+      { gesture: 'click', text: 'A ring shrinks onto the gold line. Click when it turns green to swing the hatchet and split a piece off.' },
+      { gesture: 'click', text: 'Split each line in turn. A log gives two rough planks (plus bark scraps); a plank gives four sticks of kindling.' },
     ],
     quality: 'Clean, well-timed blows make better planks and kindling.',
   },
   build: {
     title: 'Building',
-    what: 'You build each piece where it stands, a course at a time: carry the material in, set it in place, and fix it there.',
+    what: 'Build each piece right where it stands, one layer at a time: set the material in place, then fix it there.',
     steps: [
-      { gesture: 'click', text: 'Move the plank (or log, or stone) onto the glowing slot on the piece and click to set it. The closer the fit, the better.' },
-      { gesture: 'click', text: 'Then hammer each nail home (or settle a log with your hatchet): click as the ring closes on it. A glancing blow bends the nail.' },
+      { gesture: 'click', text: 'Move the plank (or log, or stone) onto the glowing outline. It snaps in when you\'re close, and the fit % shows how well it lines up. Click to set it.' },
+      { gesture: 'click', text: 'Then hammer in each nail (or settle a log with your hatchet): click when the shrinking ring turns green. A bad hit bends the nail.' },
     ],
     quality: 'A snug fit and clean strikes make a sturdier piece.',
   },
   carve: {
     title: 'Carving',
-    what: 'Knife work: whittle a branch down, or cut a shape out of a plank or hide, by drawing the knife along the dashed line.',
+    what: 'Carve with your knife: whittle a branch, or cut a shape out of a plank or hide, by following the dashed line.',
     steps: [
-      { gesture: 'right', text: 'Hold the left button and draw the knife along the line: left to right on a branch (each pass peels and pares it), round the outline on a plank or hide.' },
-      { gesture: 'hold', text: 'Stay on the line at a steady pace. Rushing doesn’t cut faster, and slipping off gouges the work.' },
+      { gesture: 'right', text: 'Hold the left button and drag the knife along the line: left to right on a branch, or around the outline on a plank or hide.' },
+      { gesture: 'hold', text: 'Stay on the line at a steady pace. Rushing won\'t cut faster, and slipping off damages the piece.' },
     ],
     quality: 'The cleaner and steadier your cuts, the better the piece.',
   },
@@ -192,7 +192,7 @@ const T: Record<string, Tutorial> = {
       { gesture: 'updown', text: 'Move the mouse up and down to raise or lower the bread. Lower is hotter.' },
       { gesture: 'click', text: 'Click to take it off when Done is in the green band.' },
     ],
-    quality: 'Golden, not burnt, is best.',
+    quality: 'Golden brown, not burnt, is best.',
   },
   'heat:fire': {
     title: 'Firing pottery',
@@ -201,7 +201,7 @@ const T: Record<string, Tutorial> = {
       { gesture: 'updown', text: 'Move the mouse up and down to push the pot into or out of the heat.' },
       { gesture: 'click', text: 'Click to pull it out when Done is in the green band. Too much heat cracks it.' },
     ],
-    quality: 'Even firing makes a sound pot.',
+    quality: 'Even heating makes a stronger pot.',
   },
   'heat:brew': {
     title: 'Brewing',
@@ -210,7 +210,7 @@ const T: Record<string, Tutorial> = {
       { gesture: 'updown', text: 'Move the mouse up and down to set the pot over the flame.' },
       { gesture: 'click', text: 'Click to take it off when Done is in the green band.' },
     ],
-    quality: 'Just steeped, never boiled dry.',
+    quality: 'Take it off before it boils dry.',
   },
   place: {
     title: 'Building',
@@ -232,13 +232,13 @@ const T: Record<string, Tutorial> = {
   },
   cord: {
     title: 'Making cordage',
-    what: 'You make cord by twisting two strands of fibre and wrapping them around each other, over and over. The twist in each strand is what holds the cord together.',
+    what: 'Make cord by twisting two strands of fiber and wrapping them around each other, over and over.',
     steps: [
       { gesture: 'right', text: 'Twist: hold the left button and drag right to twist the upper strand. Stop when the gauge is in the green.' },
       { gesture: 'down', text: 'Lay over: hold and drag down to cross that strand over the other one. They swap places, and the cord grows by one wrap.' },
-      { gesture: 'click', text: 'Splice: when a strand runs thin and flashes, click the fibre bundle to add more.' },
+      { gesture: 'click', text: 'Add fiber: when a strand runs thin and flashes, click the fiber bundle to add more.' },
     ],
-    quality: 'Each twist in the green band makes strong cord. Overtwisting kinks it and leaves weak spots.',
+    quality: 'Keep each twist in the green band for strong cord. Over-twisting makes weak spots.',
   },
 };
 

@@ -5,11 +5,11 @@ import type { Gesture } from './tutorials';
 export type StrikeVariant = 'split' | 'knap' | 'forge' | 'nail' | 'haft';
 
 const TEXT: Record<StrikeVariant, { title: string; how: string }> = {
-  split: { title: 'Splitting', how: 'Aim at the mark and click when the closing ring meets it. Clean strikes split clean wood.' },
-  knap: { title: 'Knapping', how: 'Aim at the glowing spot on the stone and click as the ring closes to strike off a flake.' },
-  forge: { title: 'Smithing', how: 'Aim at the mark and strike as the ring closes. Work fast — the metal cools!' },
-  nail: { title: 'Nailing', how: 'Aim at the nail head and strike as the ring closes.' },
-  haft: { title: 'Hafting the mallet', how: 'Strike the top of the handle with a rock as the ring closes, driving it down into the mallet head.' },
+  split: { title: 'Splitting', how: 'Aim at the mark and click when the shrinking ring meets it.' },
+  knap: { title: 'Knapping', how: 'Aim at the glowing spot and click when the ring closes to chip off a flake.' },
+  forge: { title: 'Smithing', how: 'Aim at the mark and click when the ring closes. Work fast before the metal cools!' },
+  nail: { title: 'Nailing', how: 'Aim at the nail head and click when the ring closes.' },
+  haft: { title: 'Hafting the mallet', how: 'Hit the top of the handle when the ring closes to hammer it into the mallet head.' },
 };
 
 /**
@@ -177,7 +177,7 @@ export class StrikeGame extends Minigame {
     const close = Math.abs(this.ringScale() - 1) < 0.35;
     return close
       ? { x: p.x + 50, y: p.y - 20, text: 'NOW: click!', gesture: 'click' }
-      : { x: p.x + 50, y: p.y - 20, text: 'aim at the yellow mark, wait for the ring', gesture: 'hold' };
+      : { x: p.x + 50, y: p.y - 20, text: 'aim at the yellow mark and wait for the ring', gesture: 'hold' };
   }
 
   update(dt: number, i: MgInput) {
