@@ -1,4 +1,7 @@
 import './style.css';
+import { telemetry } from './game/telemetry';
+// First: catch errors and keep a log from the very start (see game/telemetry).
+telemetry.install();
 import { itemName, typeName } from './data/items';
 import { RECIPES } from './data/recipes';
 import { ACTION_MAP } from './game/actions';
@@ -104,7 +107,9 @@ function launch(make: () => Game | null | Promise<Game | null>) {
     });
     game.input.lock();
     // Handy for debugging from the browser console.
-    Object.assign(window, { game, __recipes: RECIPES, __data: { STRUCTURES }, __World: World, __WorldGen: WorldGen, __perf: perf, __ACTIONS: ACTION_MAP, __createMinigame: createMinigame, __typeName: typeName, __itemName: itemName });
+    telemetry.meta = { seed: game.world.terrain.seed, gpu: gpuName(game.renderer.getContext()), build: location.hostname === 'localhost' ? 'local' : location.hostname };
+    telemetry.info('session', 'World loaded', telemetry.meta);
+    Object.assign(window, { __debug: telemetry, game, __recipes: RECIPES, __data: { STRUCTURES }, __World: World, __WorldGen: WorldGen, __perf: perf, __ACTIONS: ACTION_MAP, __createMinigame: createMinigame, __typeName: typeName, __itemName: itemName });
   }, 30);
 }
 
@@ -219,4 +224,12 @@ else {
 /** Whether a game is about to start (the page is reloading into it). */
 function takeLaunchPending(): boolean {
   try { return !!sessionStorage.getItem(LAUNCH); } catch { return false; }
+}
+
+/** The graphics card's name, for the debug report (when the browser will say). */
+function gpuName(gl: WebGLRenderingContext | WebGL2RenderingContext): string {
+  try {
+    const ext = gl.getExtension('WEBGL_debug_renderer_info');
+    return ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : String(gl.getParameter(gl.RENDERER));
+  } catch { return 'unknown'; }
 }

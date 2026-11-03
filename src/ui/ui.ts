@@ -1,5 +1,6 @@
 import { GUIDE_HTML } from './guide';
 import { perf } from '../game/perf';
+import { telemetry } from '../game/telemetry';
 import { isIdentified, ITEMS, itemDef, itemName, TOOL_NAMES, typeDesc, WEAR_SLOT_NAMES, WEAR_SLOTS, type Item } from '../data/items';
 import { RECIPES, STATION_NAMES, type Recipe } from '../data/recipes';
 import { SKILL_INFO, SKILLS, type SkillId } from '../data/skills';
@@ -1063,6 +1064,27 @@ export class UI {
     const g = this.g;
     const body = el('div', 'dev');
     body.appendChild(el('div', 'hint', 'Cheats for testing. Toggles are remembered in this browser and apply to every world. Press <b>`</b> or <b>F2</b> to open or close.'));
+
+    // The debug report: what the game logged, repaired and counted, this session and last.
+    body.appendChild(el('h3', '', 'Debug report'));
+    const errs = telemetry.errors, heals = [...telemetry.counters].filter(([k]) => k.startsWith('heal:')).reduce((n, [, v]) => n + v, 0);
+    body.appendChild(el('div', 'hint', `This session: ${telemetry.entries.length} log entries, <b>${errs}</b> error(s), <b>${heals}</b> automatic repair(s).${telemetry.previous ? ` Previous session ${telemetry.previous.cleanExit ? 'ended normally' : '<b>ended unexpectedly</b>'}.` : ''} Send the report along with any bug you hit.`));
+    const recent = telemetry.entries.filter((e) => e.level !== 'event' || e.cat === 'quest').slice(-8).reverse();
+    if (recent.length) body.appendChild(el('div', 'dev-log', recent.map((e) => `<div class="dev-log-${e.level}"><span>${e.t.toFixed(0)}s</span> <b>${e.level}</b> ${esc(e.cat)}: ${esc(e.msg)}</div>`).join('')));
+    const report = () => JSON.stringify(telemetry.report({ player: { pos: g.player.pos.toArray().map((v) => +v.toFixed(2)), riding: !!g.riding, working: g.working?.def.id ?? null, action: g.action?.def.id ?? null }, perf: { fps: perf.fps, worst: Math.round(perf.worst), average: perf.average.slice(0, 8) } }), null, 1);
+    const repRow = el('div', 'dev-time');
+    repRow.append(
+      this.devButton('Download report', () => {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(new Blob([report()], { type: 'application/json' }));
+        a.download = `survivalcrafter-debug-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.json`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+      }),
+      this.devButton('Copy report', () => { navigator.clipboard?.writeText(report()).then(() => this.log('Debug report copied.', 'info'), () => this.log('Couldn\'t copy: use Download instead.', 'fail')); }),
+      this.devButton('Run repairs now', () => { const n = g.selfHeal('asked from the dev console', true); this.log(n ? `Repaired ${n} problem(s): see the report.` : 'Nothing needed repairing.', 'info'); this.refresh(); }),
+    );
+    body.appendChild(repRow);
 
     body.appendChild(el('h3', '', 'Toggles'));
     const grid = el('div', 'dev-toggles');

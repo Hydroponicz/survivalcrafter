@@ -19,6 +19,7 @@ import { seaFloor } from '../world/water';
 import { prepareTiles, WorkerTiles } from '../world/tilesource';
 import { ViewCull } from '../world/cull';
 import { perf } from './perf';
+import { telemetry } from './telemetry';
 import { TILE, tileOf, WorldGen } from '../world/worldgen';
 import {
   ANIMALS, DAY_LENGTH, pointInPiece, toLocal, toWorld, World, type AnimalObj, type ForageObj, type PileObj, type StructureObj, type TreeObj, type WorldObj,
@@ -860,7 +861,7 @@ export class Game {
     if (stamina > 0 && this.player.stamina < stamina) { this.msg('You\'re too exhausted. Rest for a moment.', 'fail'); return false; }
     const base = typeof def.time === 'function' ? def.time(ctx) : def.time;
     if (base <= 0) {
-      def.run(ctx, { success: true, ql: 0, toolQl: 0 });
+      this.runAction(def, ctx, { success: true, ql: 0, toolQl: 0 });
       return true;
     }
     const instant = this.dev.on('instantActions') || (this.dev.on('instantCraft') && def.id === 'craft');
@@ -921,10 +922,24 @@ export class Game {
     if (runs > 0) this.msg(`You set to work (${minigameVerb(spec)}). Right-click to stop.`, 'info');
   }
 
+  /** Do an action's work; if it throws, say so, log it, and leave the game in a sound state. */
+  private runAction(def: ActionDef, ctx: Ctx, o: Parameters<ActionDef['run']>[1]) {
+    try {
+      def.run(ctx, o);
+      telemetry.count(`action:${def.id}`);
+    } catch (e) {
+      telemetry.error('action', `${def.id} failed: ${(e as Error)?.message ?? e}`, { stack: (e as Error)?.stack?.split('\n').slice(0, 8).join('\n'), target: ctx.t.kind, tool: ctx.tool?.type, recipe: ctx.recipe?.id });
+      this.msg('Something went wrong with that, so it was cancelled. (It\'s in the debug report.)', 'fail');
+      this.cancelAction();
+      this.selfHeal('an action failed', true);
+    }
+  }
+
   private endWork(perf: number | null, seconds: number) {
     const w = this.working;
     this.working = null;
     if (!w) return;
+    telemetry.event('work', perf === null ? `Stopped ${w.def.id}` : `Finished ${w.def.id}`, { recipe: w.ctx.recipe?.id, perf: perf === null ? null : +perf.toFixed(2), seconds: +seconds.toFixed(1) });
     if (perf === null) {
       this.msg('You stop working.', 'info');
       this.queue = [];
@@ -996,6 +1011,7 @@ export class Game {
       const before = this.skills.get(skill);
       const gain = this.skills.gain(skill, diff, success, seconds);
       if (Math.floor(before) !== Math.floor(before + gain)) {
+        telemetry.event('skill', `${skill} reached ${Math.floor(before + gain)}`);
         this.msg(`${skillName(skill)} increased to ${Math.floor(before + gain)}.`, 'skill');
       }
     }
@@ -1005,7 +1021,7 @@ export class Game {
     const cap = def.qualityCap?.(ctx);
     if (cap !== undefined) ql = Math.min(ql, cap);
     if (!atImpact) this.action = null;
-    def.run(ctx, { success, ql, toolQl, perf, cap });
+    this.runAction(def, ctx, { success, ql, toolQl, perf, cap });
     this.ui?.refresh();
     if (!atImpact) this.afterAction(def, ctx);
   }
@@ -1161,6 +1177,7 @@ export class Game {
     this.player.pos.set(a.x, this.world.terrain.heightAt(a.x, a.z) + 0.05, a.z);
     this.player.vel.set(0, 0, 0);
     a.state = 'idle'; a.speed = 0;
+    telemetry.event('riding', 'Mounted a horse', { id: a.id });
     this.msg('You swing up into the saddle. Hold Shift to gallop; press X to get off.', 'good');
   }
 
@@ -1176,6 +1193,7 @@ export class Game {
     const x = a.x + side.x * 1.1, z = a.z + side.z * 1.1;
     const y = this.player.groundAt(this.world, x, this.world.terrain.heightAt(x, z) + 1, z).y;
     if (Number.isFinite(y) && this.player.penetration(this.world, x, y + 0.02, z) === 0) this.player.pos.set(x, y + 0.02, z);
+    telemetry.event('riding', 'Dismounted', { at: [Math.round(a.x), Math.round(a.z)] });
     if (!quiet) this.msg('You climb down from the horse.', 'info');
   }
 
@@ -1719,19 +1737,94 @@ export class Game {
     }
     perf.begin();
     this.timer.update(timestamp);
-    const dt = Math.min(0.05, this.timer.getDelta());
+    const raw = this.timer.getDelta();
+    const dt = Math.min(0.05, raw);
     this.renderDt = dt;
     this.elapsed += dt;
-    if (this.tour) this.tourStep(dt);
-    else if (!this.paused) perf.time('update', () => this.update(dt));
-    this.render();
+    // A frame that throws mustn't stop the game: log it, repair what we can, and carry on.
+    try {
+      if (this.tour) this.tourStep(dt);
+      else if (!this.paused) perf.time('update', () => this.update(dt));
+      this.render();
+      this.frameErrors = 0;
+    } catch (e) {
+      this.frameErrors++;
+      telemetry.error('frame', `A frame failed: ${(e as Error)?.message ?? e}`, { stack: (e as Error)?.stack?.split('\n').slice(0, 8).join('\n'), working: this.working?.def.id, action: this.action?.def.id });
+      this.selfHeal('a frame failed', true);
+      if (this.frameErrors === 30) this.msg('Something keeps going wrong. Your game is saved; a debug report is in the dev console (` or F2).', 'warn');
+    }
     this.input.endFrame();
     perf.end();
+    // Stutters worth knowing about (not while paused or loading), with where the time went.
+    if (raw > 0.25 && !this.paused && this.elapsed > 10 && this.elapsed - this.lastHitchLog > 15) {
+      this.lastHitchLog = this.elapsed;
+      telemetry.log('perf', 'frame', `Slow frame: ${Math.round(raw * 1000)} ms`, { parts: perf.worstParts.slice(0, 5).map(([k, v]) => `${k} ${v.toFixed(1)}`), fps: perf.fps });
+    }
+  }
+
+  /** Frames in a row that threw, and when a slow frame was last logged. */
+  private frameErrors = 0;
+  private lastHitchLog = -99;
+  /** Where you last stood safely (for repairs), and when the watchdog last looked. */
+  private lastGood = new THREE.Vector3(NaN, NaN, NaN);
+  private healTimer = 0;
+
+  /**
+   * The watchdog: look for states the game should never be in and put them
+   * right (logging each repair), rather than leave the player stuck. Runs every
+   * couple of seconds, and straight away after an error.
+   */
+  selfHeal(why = 'routine check', force = false): number {
+    if (!force && (this.healTimer -= this.renderDt) > 0) return 0;
+    this.healTimer = 2;
+    let fixed = 0;
+    const fix = (cat: string, msg: string, data?: unknown) => { fixed++; telemetry.heal(cat, msg, { why, ...(data as object ?? {}) }); };
+    const p = this.player, t = this.world.terrain;
+    try {
+      const finite = (v: THREE.Vector3) => Number.isFinite(v.x) && Number.isFinite(v.y) && Number.isFinite(v.z);
+      // Position or speed gone to NaN: back to the last safe spot (or home).
+      if (!finite(p.pos) || !finite(p.vel)) {
+        fix('player', 'Position or velocity was not a number; moved back to safety.', { pos: p.pos.toArray(), vel: p.vel.toArray() });
+        p.vel.set(0, 0, 0);
+        if (finite(this.lastGood)) p.pos.copy(this.lastGood);
+        else { const s = this.world.spawn; p.pos.set(s.x, t.heightAt(s.x, s.z) + 0.2, s.z); }
+      }
+      // Fallen through the ground, or stuck inside it.
+      const ground = t.heightAt(p.pos.x, p.pos.z);
+      if (!this.dev.on('fly') && (p.pos.y < ground - 6 || (p.penetration(this.world, p.pos.x, p.pos.y, p.pos.z) > 0.35 && !p.swimming))) {
+        fix('player', 'Fell through or got stuck in the ground; freed.', { y: p.pos.y, ground });
+        this.unstuck();
+      }
+      // Vitals out of range.
+      for (const k of ['health', 'food', 'water', 'stamina'] as const) {
+        if (!Number.isFinite(p[k]) || p[k] < 0 || p[k] > 100) { fix('player', `${k} was ${p[k]}; clamped.`); p[k] = Number.isFinite(p[k]) ? Math.max(0, Math.min(100, p[k])) : 50; }
+      }
+      // Riding a horse that's gone, or riding flag without a horse.
+      if (this.riding && !this.world.animals.includes(this.riding)) { fix('riding', 'The ridden horse no longer exists; dismounted.'); this.riding = null; p.riding = false; }
+      if (!this.riding && p.riding) { fix('riding', 'Rider flag set without a horse; cleared.'); p.riding = false; }
+      // Holding something you no longer have.
+      if (this.activeUid !== null && !this.inv.find(this.activeUid)) { fix('inventory', 'The active item was no longer in the pack; put away.', { uid: this.activeUid }); this.setActive(null); }
+      // Items with broken numbers.
+      for (const it of this.inv.items) {
+        if (!Number.isFinite(it.ql) || !Number.isFinite(it.dmg)) { fix('inventory', `An item had a broken quality or damage (${it.type}); repaired.`); it.ql = Number.isFinite(it.ql) ? it.ql : 10; it.dmg = Number.isFinite(it.dmg) ? it.dmg : 0; }
+      }
+      // An action that has run far longer than any should.
+      if (this.action && this.action.elapsed > Math.max(60, this.action.total * 4)) { fix('action', `The action "${this.action.def.id}" was stuck; cancelled.`, { elapsed: this.action.elapsed }); this.cancelAction(); }
+      // Animals that have wandered off the number line.
+      const before = this.world.animals.length;
+      this.world.animals = this.world.animals.filter((a) => Number.isFinite(a.x) && Number.isFinite(a.z));
+      if (this.world.animals.length < before) fix('animals', `${before - this.world.animals.length} animal(s) had broken positions; removed.`);
+      if (finite(p.pos) && p.onGround && !p.swimming) this.lastGood.copy(p.pos);
+    } catch (e) {
+      telemetry.error('heal', `The watchdog itself failed: ${(e as Error)?.message ?? e}`);
+    }
+    return fixed;
   }
 
   private update(dt: number) {
     const inp = this.input;
     const p = this.player;
+    this.selfHeal();
     this.ui.root.classList.toggle('working', !!this.working);
 
     if (this.working) {
@@ -2000,6 +2093,7 @@ export class Game {
 
   private die() {
     const p = this.player;
+    telemetry.event('player', 'Died', { pos: p.pos.toArray().map(Math.round), food: Math.round(p.food), water: Math.round(p.water) });
     this.dismount(true);
     this.msg('You died. Your items were left where you fell.', 'warn');
     if (this.inv.items.length) {
@@ -2097,8 +2191,10 @@ export class Game {
         explored: this.map.serialize(),
       };
       await writeSave(SAVE_KEY, data);
+      telemetry.count('save:ok');
     } catch (e) {
       console.warn('Save failed', e);
+      telemetry.error('save', `Saving failed: ${(e as Error)?.message ?? e}`);
     }
   }
 

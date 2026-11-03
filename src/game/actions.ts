@@ -4,6 +4,7 @@ import { RECIPES, STATION_NAMES, type Recipe } from '../data/recipes';
 import { STRUCTURES, totalMaterials, type StructureDef } from '../data/structures';
 import type { SkillId } from '../data/skills';
 import { isRock, isSoft, Mat, MAT_NAMES, Y_MIN } from '../world/terrain';
+import { telemetry } from './telemetry';
 import {
   ANIMALS, APPLE_AGE, APPLES, CROP_STAGES, cropKey, type AnimalObj, type BushObj, type Crop, type ForageObj, type PileObj, type StructureObj, type TreeObj, type WorldObj,
 } from '../world/world';
@@ -958,6 +959,7 @@ export const ACTIONS: ActionDef[] = [
       // It stops to take the apple, turned toward you.
       a.state = 'idle'; a.timer = 3; a.speed = 0;
       a.rot = Math.atan2(g.player.pos.x - a.x, g.player.pos.z - a.z);
+      telemetry.count('taming:apple');
       if (a.tamed) return g.msg('Your horse crunches the apple happily and nuzzles your shoulder.', 'good');
       // The better you are with animals, the sooner it trusts you: 20% at first, up to 70%.
       const lvl = g.skills.get('taming');
@@ -965,6 +967,7 @@ export const ACTIONS: ActionDef[] = [
       if (Math.random() < chance) {
         a.tamed = true;
         a.hp = a.maxHp;
+        telemetry.event('taming', 'Tamed a horse', { apples: telemetry.counters.get('taming:apple'), skill: +lvl.toFixed(2), chance: +chance.toFixed(2) });
         g.msg('The horse lowers its head and nuzzles your hand. It trusts you now: it\'s your horse! Aim at it and choose Ride.', 'good');
       } else {
         g.msg(`The horse takes the apple, but it's still wary of you. Keep trying (about a ${Math.round(chance * 100)}% chance each apple).`, 'info');
@@ -1061,6 +1064,7 @@ export const ACTIONS: ActionDef[] = [
       // (Some things don't take an s: kindling, flour, dough...)
       const plural = r.output.count > 1 && !name.endsWith('s') && !/kindling|flour|dough|meat|bread|cordage/.test(name) ? 's' : '';
       g.msg(`You made ${article}${name}${plural} (QL ${ql.toFixed(1)}).`, 'good');
+      telemetry.event('craft', `Made ${r.output.count} ${r.output.item}`, { recipe: r.id, ql: +ql.toFixed(1), success: o.success });
       if (hot) g.msg(g.smithy().trough
         ? 'It\'s still glowing hot! Dip it in the quench trough now to harden it.'
         : 'It is still glowing. Quench it in a water trough before it cools to harden it.', 'info');

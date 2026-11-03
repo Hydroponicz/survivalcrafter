@@ -1,3 +1,4 @@
+import { telemetry } from './telemetry';
 import * as THREE from 'three';
 import { isIdentified, itemDef } from '../data/items';
 import { FORAGE_SPECIES } from '../data/forage';
@@ -589,6 +590,7 @@ export class QuestLog {
       const p = g.player.pos;
       this.quests.push({ id: d.id, status: 'offered', step: 0, tracked: false, anchor: null, start: { x: p.x, z: p.z } });
       this.offered.set(d.id, this.time);
+      telemetry.event('quest', `${d.id} offered`);
       g.msg(`New quest: ${d.title}. Open your quests (L) to take it up.`, 'good');
       // The first one: stop and show how quests work (once you're not in the middle of something).
       if (!g.tips.has('quest_intro')) this.introFor ??= d.id;
@@ -613,12 +615,14 @@ export class QuestLog {
       const d = this.def(q);
       while (q.step < d.steps.length && isDone(d.steps[q.step].progress(g, q))) {
         g.msg(`${d.title}: ${d.steps[q.step].title} — done!`, 'good');
+        telemetry.event('quest', `${q.id}: ${d.steps[q.step].id} done`, { step: q.step + 1, of: d.steps.length });
         q.step++;
         flash = true;
         this.changed();
       }
       if (q.step >= d.steps.length) {
         q.status = 'done';
+        telemetry.event('quest', `${q.id} complete`);
         this.finished.set(q.id, this.time);
         g.msg(d.outro.msg, 'good');
         this.changed();
