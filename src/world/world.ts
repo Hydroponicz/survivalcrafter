@@ -6,7 +6,7 @@ import { TreeCover, VEGETATION, type Species } from './trees';
 import type { WorldGen } from './worldgen';
 
 export type { Species } from './trees';
-export type AnimalSpecies = 'deer' | 'boar';
+export type AnimalSpecies = 'deer' | 'boar' | 'horse';
 
 export interface TreeObj {
   kind: 'tree'; id: number; species: Species; x: number; z: number;
@@ -18,6 +18,8 @@ export interface TreeObj {
   chopQl?: number;
   /** Planted by you: grows up over time (wild trees stay the size they are). */
   growing?: boolean;
+  /** Apples on an apple tree within reach (regrow slowly; unset: a full crop). */
+  apples?: number;
 }
 
 /** What's left after felling a tree. Scenery only. */
@@ -65,6 +67,8 @@ export interface AnimalObj {
   hurt?: number;
   /** When an animal stranded in water next re-aims for the shore. */
   shoreAt?: number;
+  /** Tamed by you (a horse): it trusts you, stays where you leave it, and can be ridden. */
+  tamed?: boolean;
 }
 
 /** Crops grow on 1 m cells of tilled ground. */
@@ -87,9 +91,25 @@ const CELL = 2; // spatial hash cell size in metres
 const GOFF = 2 ** 24, GSPAN = 2 ** 25;
 const cellKey = (cx: number, cz: number) => (cz + GOFF) * GSPAN + cx + GOFF;
 
+/** Apple trees bear fruit once this grown, this many apples within reach at most. */
+export const APPLE_AGE = 0.6, APPLES = 5;
+
+/** An apple dropped on the ground under a tree (unless a few already lie there). */
+export function dropApple(w: World, t: TreeObj, rnd: () => number, id?: number) {
+  let lying = 0;
+  for (const o of w.near(t.x, t.z, 4)) if (o.kind === 'forage' && o.species === 'fallen_apple') lying++;
+  if (lying >= 3) return;
+  const a = rnd() * Math.PI * 2, r = 0.8 + rnd() * 1.8;
+  const x = t.x + Math.cos(a) * r, z = t.z + Math.sin(a) * r;
+  const y = w.terrain.heightAt(x, z);
+  if (y < w.terrain.waterAt(x, z) + 0.1) return;
+  w.add<ForageObj>({ id, kind: 'forage', species: 'fallen_apple', x, y, z, rot: rnd() * Math.PI * 2 });
+}
+
 export const ANIMALS: Record<AnimalSpecies, { name: string; hp: number; speed: number; aggressive: boolean; meat: number; damage: number }> = {
   deer: { name: 'Deer', hp: 35, speed: 4.5, aggressive: false, meat: 3, damage: 0 },
   boar: { name: 'Wild boar', hp: 40, speed: 3.6, aggressive: true, meat: 4, damage: 4 },
+  horse: { name: 'Wild horse', hp: 70, speed: 7, aggressive: false, meat: 6, damage: 0 },
 };
 
 export const cropKey = (x: number, z: number) => cellKey(Math.floor(x), Math.floor(z));
@@ -447,14 +467,20 @@ export class World {
 
   /** Keep a few animals about: new ones appear out of sight around you, far-off ones wander away. */
   keepAnimals(px: number, pz: number, want = 24) {
-    this.animals = this.animals.filter((a) => Math.hypot(a.x - px, a.z - pz) < 320);
+    // (Your own animals stay where you left them, however far you go.)
+    this.animals = this.animals.filter((a) => a.tamed || Math.hypot(a.x - px, a.z - pz) < 320);
     const g = this.terrain.gen;
-    for (let tries = 0; tries < 6 && this.animals.length < want; tries++) {
+    const wild = () => this.animals.filter((a) => !a.tamed).length;
+    for (let tries = 0; tries < 6 && wild() < want; tries++) {
       const a = Math.random() * Math.PI * 2, r = 70 + Math.random() * 150;
       const x = px + Math.cos(a) * r, z = pz + Math.sin(a) * r;
       const h = g.height(x, z);
       if (h < 1 || !Number.isNaN(g.water(x, z, h)) || g.temperature(x, h, z) < 0.25) continue;
-      this.spawnAnimal(Math.random() < 0.65 ? 'deer' : 'boar', x, z);
+      // Wild horses roam the open grassland in small herds; deer and boar keep nearer the woods.
+      const zone = this.terrain.zoneAt(x, z), open = zone === 'meadow' || zone === 'heath';
+      const r2 = Math.random();
+      if (open && r2 < 0.35) { for (let k = 0, n = 1 + Math.floor(Math.random() * 3); k < n; k++) this.spawnAnimal('horse', x + (Math.random() - 0.5) * 8, z + (Math.random() - 0.5) * 8); continue; }
+      this.spawnAnimal(r2 < 0.65 ? 'deer' : 'boar', x, z);
     }
   }
 
@@ -522,6 +548,11 @@ export class World {
           if (Math.random() < dt) this.changed(o);
         }
         if (o.branches < 3 && Math.random() < dt / 240) o.branches++;
+        if (o.species === 'apple' && o.age >= APPLE_AGE) {
+          // Apples ripen again in time, and now and then one drops to the ground under the tree.
+          if ((o.apples ?? APPLES) < APPLES && Math.random() < dt / 200) { o.apples = (o.apples ?? 0) + 1; this.changed(o); }
+          if (Math.random() < dt / 500) dropApple(this, o, Math.random);
+        }
       } else if (o.kind === 'bush') {
         if (!o.ripe && this.time >= o.regrowAt) { o.ripe = true; this.changed(o); }
       } else if (o.kind === 'structure' && o.lit) {
@@ -549,7 +580,7 @@ export class World {
         .filter(([, st]) => st.removed.size || st.changed.size)
         .map(([r, st]) => [r, [...st.removed], [...st.changed.values()]] as [number, number[], WorldObj[]]),
       crops: [...this.crops.entries()].map(([k, c]) => [k, { planted: c.planted, ql: c.ql, tended: c.tended }]),
-      animals: this.animals.map((a) => ({ species: a.species, x: a.x, z: a.z, hp: a.hp })),
+      animals: this.animals.map((a) => ({ species: a.species, x: a.x, z: a.z, hp: a.hp, rot: a.rot, tamed: a.tamed })),
       time: this.time,
       spawn: this.spawn,
       stumps: this.stumps,
@@ -574,6 +605,8 @@ export class World {
     for (const a of data.animals) {
       const an = w.spawnAnimal(a.species, a.x, a.z);
       an.hp = a.hp;
+      if (a.rot !== undefined) an.rot = a.rot;
+      if (a.tamed) an.tamed = true;
     }
     w.time = data.time;
     w.spawn = data.spawn;

@@ -5,7 +5,7 @@ import { STRUCTURES, totalMaterials, type StructureDef } from '../data/structure
 import type { SkillId } from '../data/skills';
 import { isRock, isSoft, Mat, MAT_NAMES, Y_MIN } from '../world/terrain';
 import {
-  ANIMALS, CROP_STAGES, cropKey, type AnimalObj, type BushObj, type Crop, type ForageObj, type PileObj, type StructureObj, type TreeObj, type WorldObj,
+  ANIMALS, APPLE_AGE, APPLES, CROP_STAGES, cropKey, type AnimalObj, type BushObj, type Crop, type ForageObj, type PileObj, type StructureObj, type TreeObj, type WorldObj,
 } from '../world/world';
 import { FORAGE, IDENTIFY } from '../data/forage';
 import type { Boulder } from '../world/groundcover';
@@ -583,6 +583,21 @@ export const ACTIONS: ActionDef[] = [
     },
   },
   {
+    id: 'pick_apples', label: 'Pick apples',
+    show: (c) => { const t = obj(c, 'tree'); return !!t && t.species === 'apple' && t.age >= APPLE_AGE && !c.tool; },
+    check: (c) => ((obj(c, 'tree')!.apples ?? APPLES) <= 0 ? 'No apples within reach. More will ripen in time.' : null),
+    time: 3, skill: 'foraging', difficulty: 2, stamina: 1,
+    run: (c, o) => {
+      const t = obj(c, 'tree') as TreeObj;
+      const left = t.apples ?? APPLES;
+      const n = Math.min(left, o.success ? 1 + Math.floor(Math.random() * 3) : 1);
+      t.apples = left - n;
+      c.g.world.changed(t);
+      c.g.give('apple', o.ql, n);
+      c.g.msg(`You pick ${n > 1 ? `${n} apples` : 'an apple'}.`, 'good');
+    },
+  },
+  {
     id: 'collect_branch', label: 'Collect branch',
     show: (c) => !!obj(c, 'tree') && !c.tool,
     check: (c) => (obj(c, 'tree')!.branches <= 0 ? 'No branches within reach. They grow back in time.' : null),
@@ -931,12 +946,49 @@ export const ACTIONS: ActionDef[] = [
 
   // ===== animals
   {
+    id: 'feed_horse', label: (c) => (c.t.kind === 'animal' && c.t.animal.tamed ? 'Feed apple' : 'Offer apple'),
+    show: (c) => c.t.kind === 'animal' && c.t.animal.species === 'horse' && c.tool?.type === 'apple' && c.t.animal !== c.g.riding,
+    time: 2.5, skill: 'taming', difficulty: 10, stamina: 0,
+    run: (c) => {
+      if (c.t.kind !== 'animal' || !c.tool) return;
+      const a = c.t.animal, g = c.g;
+      if (!g.world.animals.includes(a)) return;
+      g.consumeActive();
+      g.inventoryChanged();
+      // It stops to take the apple, turned toward you.
+      a.state = 'idle'; a.timer = 3; a.speed = 0;
+      a.rot = Math.atan2(g.player.pos.x - a.x, g.player.pos.z - a.z);
+      if (a.tamed) return g.msg('Your horse crunches the apple happily and nuzzles your shoulder.', 'good');
+      // The better you are with animals, the sooner it trusts you: 20% at first, up to 70%.
+      const lvl = g.skills.get('taming');
+      const chance = 0.2 + 0.5 * Math.min(1, Math.max(0, (lvl - 1) / 99));
+      if (Math.random() < chance) {
+        a.tamed = true;
+        a.hp = a.maxHp;
+        g.msg('The horse lowers its head and nuzzles your hand. It trusts you now: it\'s your horse! Aim at it and choose Ride.', 'good');
+      } else {
+        g.msg(`The horse takes the apple, but it's still wary of you. Keep trying (about a ${Math.round(chance * 100)}% chance each apple).`, 'info');
+      }
+    },
+  },
+  {
+    id: 'ride_horse', label: 'Ride',
+    show: (c) => c.t.kind === 'animal' && !!c.t.animal.tamed && !c.g.riding,
+    time: 0.6, fixedTime: true,
+    run: (c) => { if (c.t.kind === 'animal' && c.g.world.animals.includes(c.t.animal)) c.g.mount(c.t.animal); },
+  },
+  {
     id: 'examine_animal', label: 'Examine', show: (c) => c.t.kind === 'animal', time: 0,
     run: (c) => {
       if (c.t.kind !== 'animal') return;
       const a = c.t.animal;
       const d = ANIMALS[a.species];
       const hp = a.hp / a.maxHp;
+      const an = c.t.animal;
+      if (an.species === 'horse') {
+        c.g.msg(an.tamed ? 'Your horse. Aim at it and choose Ride, or feed it an apple.' : 'A wild horse. It keeps its distance, but hold out an apple and it may let you close enough to feed it. Feed it apples to tame it.', 'info');
+        return;
+      }
       c.g.msg(`A ${d.name.toLowerCase()}. ${hp > 0.8 ? 'It looks healthy.' : hp > 0.4 ? 'It is wounded.' : 'It is badly hurt.'}${d.aggressive ? ' It looks aggressive.' : ''}`, 'info');
     },
   },

@@ -70,6 +70,8 @@ export class Player {
   pose: Pose | null = null;
   poseBlend = 0.2;
   crouching = false;
+  /** On horseback: faster, higher up, no crouching or jumping. */
+  riding = false;
   /** Seconds since leaving the ground (jumping or falling), since landing, and since being hurt. */
   private airT = -1;
   private landT = -1;
@@ -195,7 +197,7 @@ export class Player {
   }
 
   get eye(): THREE.Vector3 {
-    return new THREE.Vector3(this.pos.x, this.pos.y + (this.swimming ? 1.2 : this.crouching ? CROUCH_EYE : EYE), this.pos.z);
+    return new THREE.Vector3(this.pos.x, this.pos.y + (this.swimming ? 1.2 : this.riding ? EYE + 0.95 : this.crouching ? CROUCH_EYE : EYE), this.pos.z);
   }
 
   forward(): THREE.Vector3 {
@@ -313,10 +315,10 @@ export class Player {
     }
     const len = Math.hypot(mx, mz);
     this.moving = len > 0;
-    if (allowMove && input.hit('KeyZ')) this.crouching = !this.crouching;
+    if (allowMove && input.hit('KeyZ') && !this.riding) this.crouching = !this.crouching;
     this.sprinting = this.moving && k.has('ShiftLeft') && this.stamina > 5 && !this.swimming;
     if (this.sprinting || this.swimming) this.crouching = false;
-    let speed = this.swimming ? 2.2 : this.sprinting ? 6.5 : this.crouching ? 1.5 : 3.6;
+    let speed = this.swimming ? 2.2 : this.riding ? (this.sprinting ? 13 : 7.5) : this.sprinting ? 6.5 : this.crouching ? 1.5 : 3.6;
     if (this.wading) speed *= 0.6;
     if (overweight > 0) speed *= Math.max(0.15, 1 - overweight / 40);
     if (this.stamina <= 0) speed *= 0.6;
@@ -419,7 +421,7 @@ export class Player {
       this.onGround = false;
       this.stamina -= dt * 1.5;
     } else {
-      if (this.onGround && allowMove && input.hit('Space') && this.stamina > 3) {
+      if (this.onGround && allowMove && input.hit('Space') && this.stamina > 3 && !this.riding) {
         this.crouching = false;
         this.vel.y = 6.5;
         this.stamina -= 3;
@@ -444,7 +446,8 @@ export class Player {
       if (this.pos.y < swimLevel && ground < swimLevel) this.pos.y = swimLevel;
     }
 
-    if (this.sprinting) this.stamina -= dt * 9;
+    // (A gallop tires you far less than running yourself.)
+    if (this.sprinting) this.stamina -= dt * (this.riding ? 2.5 : 9);
     this.stamina = Math.max(0, this.stamina);
     this.animate(dt);
   }
@@ -567,7 +570,12 @@ export class Player {
     let pose: Pose;
     const w = this.work, look = { x: -Math.sin(this.yaw), z: -Math.cos(this.yaw) };
     const fwd = vx * look.x + vz * look.z, side = vx * -look.z + vz * look.x;
-    if (w) {
+    if (this.riding) {
+      // Sitting astride: knees bent, facing the way the horse goes.
+      pose = { kind: 'loop', clip: 'crouch_idle' };
+      // Facing the way the horse goes; standing still, it keeps facing where it was.
+      face = speed > 0.5 ? Math.atan2(vx, vz) : this.modelYaw;
+    } else if (w) {
       const seg = SEGMENTS[w.clip];
       pose = seg && w.phase !== undefined ? { kind: 'scrub', clip: w.clip, time: segmentTime(seg, w.phase, w.impactAt ?? 0.6) } : { kind: 'loop', clip: w.clip };
     } else if (this.hurtT >= 0) {
@@ -602,8 +610,14 @@ export class Player {
     rig.update(dt, pose, this.poseBlend);
 
     this.model.position.copy(this.pos);
-    // Swimming: in the water to the chest.
+    // Swimming: in the water to the chest. Riding: up in the saddle.
     if (this.swimming) this.model.position.y -= 0.3;
+    if (this.riding) {
+      // In the saddle (a little behind the middle of the horse), bobbing with its stride.
+      this.model.position.y += 1.2 + Math.abs(Math.sin(this.walkPhase * 0.9)) * Math.min(1, speed / 8) * 0.08;
+      this.model.position.x -= Math.sin(this.modelYaw) * 0.32;
+      this.model.position.z -= Math.cos(this.modelYaw) * 0.32;
+    }
     // The jump clip lifts the body itself: don't add that to the real jump.
     if (pose.kind === 'scrub' && pose.clip === 'jump' && air) this.model.position.y -= 0.18;
     const want = this.faceYaw ?? face;

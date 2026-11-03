@@ -214,6 +214,7 @@ function model(type: string): THREE.Object3D {
     case 'clay_jar': return jar(0xc0703c);
     case 'crucible': { const j = jar(0x8a4a2a); j.scale.set(1.15, 0.7, 1.15); return j; }
     case 'jar_of_water': return group(jar(0xc0703c), at(mesh(new THREE.CircleGeometry(0.19, 16), 0x4a8ab0, { metalness: 0.2, roughness: 0.2 }), 0, 0.7, 0, -Math.PI / 2));
+    case 'apple': return group(mesh(new THREE.SphereGeometry(0.38, 18, 14).scale(1, 0.92, 1), 0xc0281e, { roughness: 0.4 }), at(stick(0.18, 0.025, 0x5a3a20), 0.02, 0.4, 0, 0, 0, -0.2), at(mesh(new THREE.SphereGeometry(0.13, 8, 5).scale(1.7, 0.25, 0.8), 0x4f8a2e), 0.14, 0.42, 0, 0, 0, 0.3));
     case 'berries': return heap(() => mesh(new THREE.SphereGeometry(0.1, 10, 8), 0x3a3a8a, { roughness: 0.4 }), 9, 0.2, 15);
     case 'mushroom': return mushroom(0x8a5a32, 0xe8dcc4);
     case 'chanterelle': return mushroom(0xe0a030, 0xe8b850, true);

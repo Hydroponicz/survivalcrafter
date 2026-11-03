@@ -1,7 +1,7 @@
 import { FORAGE, FORAGE_SPECIES, LEARN_BY_HANDLING, type Biome } from '../data/forage';
 import { isIdentified, knownSpecies, learnSpecies, setKnownSpecies } from '../data/items';
 import { Mat } from '../world/terrain';
-import { REGION, type ForageObj, type RegionHook, type World } from '../world/world';
+import { APPLE_AGE, dropApple, REGION, type ForageObj, type RegionHook, type World } from '../world/world';
 
 // Foraging reads the land: plants, fungi, branches and pebbles lie on the ground
 // where they would really grow. Picking one removes it; new ones sprout over
@@ -98,6 +98,11 @@ export const forageRegion: RegionHook = (world, x0, z0, rnd, id) => {
       const slot = id();
       if (slot >= 0) trySpawn(world, x + ox, z + oz, rnd, slot);
     }
+  }
+  // Windfalls: a few apples lying under the grown apple trees.
+  for (const o of world.near(x0 + REGION / 2, z0 + REGION / 2, REGION)) {
+    if (o.kind !== 'tree' || o.species !== 'apple' || o.age < APPLE_AGE || o.x < x0 || o.x >= x0 + REGION || o.z < z0 || o.z >= z0 + REGION) continue;
+    for (let k = 0, n = Math.floor(rnd() * 3); k < n; k++) { const slot = id(); if (slot >= 0) dropApple(world, o, rnd, slot); }
   }
 };
 

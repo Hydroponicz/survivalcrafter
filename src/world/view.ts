@@ -14,7 +14,7 @@ import { builtShare, fillPlanes } from './pieceFill';
 import { furnitureMesh } from './furnitureMesh';
 import { STRUCTURES } from '../data/structures';
 import {
-  CROP_STAGES, cropPos, type AnimalObj, type BushObj, type ForageObj, type PileObj, type Species, type StructureObj,
+  APPLE_AGE, APPLES, CROP_STAGES, cropPos, type AnimalObj, type BushObj, type ForageObj, type PileObj, type Species, type StructureObj,
   type TreeObj, type World, type WorldListener, type WorldObj,
 } from './world';
 
@@ -225,6 +225,9 @@ export class WorldView implements WorldListener {
   private lodAt = { x: NaN, z: NaN };
   private bushPool: InstancePool;
   private berryPool: InstancePool;
+  private fruitPool!: InstancePool;
+  /** Apple trees' slots in the fruit pool. */
+  private fruitSlots = new Map<number, number>();
   private slots = new Map<number, number>();
   private meshes = new Map<number, THREE.Object3D>();
   private cropMeshes = new Map<number, THREE.Mesh>();
@@ -265,6 +268,14 @@ export class WorldView implements WorldListener {
     }
     this.berryPool = new InstancePool(mergeGeometries(berries)!, mat(0x3a3a9a, { emissive: 0x111133 }), 2000, false);
     this.group.add(this.bushPool.mesh, this.berryPool.mesh);
+    // Apples hanging round the lower edge of an apple tree's crown (in the tree's own frame).
+    const apples = [];
+    for (let i = 0; i < 14; i++) {
+      const a = (i / 14) * Math.PI * 2 + (i % 3) * 0.4, r = 1.55 + (i % 4) * 0.12, y = 2.55 + ((i * 7) % 5) * 0.16;
+      apples.push(new THREE.SphereGeometry(0.11, 7, 5).translate(Math.cos(a) * r, y, Math.sin(a) * r));
+    }
+    this.fruitPool = new InstancePool(mergeGeometries(apples)!, mat(0xc0281e, { roughness: 0.45, emissive: 0x2a0402 }), 2000, false);
+    this.group.add(this.fruitPool.mesh);
 
     const stalks = [];
     for (let i = 0; i < 9; i++) {
@@ -308,6 +319,7 @@ export class WorldView implements WorldListener {
       this.trunksLo[o.species].alloc(); // kept in step: the same slot in both
       this.slots.set(o.id, slot);
       this.trees.set(o.id, o);
+      if (o.species === 'apple') this.fruitSlots.set(o.id, this.fruitPool.alloc());
       if (Math.hypot(o.x - this.lodAt.x, o.z - this.lodAt.z) > TREE_DETAIL) this.far.add(o.id);
       this.updateTree(o);
     } else if (o.kind === 'bush') {
@@ -338,6 +350,8 @@ export class WorldView implements WorldListener {
       this.trees.delete(o.id);
       this.far.delete(o.id);
       this.treeFx.remove(o.id);
+      const fs = this.fruitSlots.get(o.id);
+      if (fs !== undefined) { this.fruitPool.release(fs); this.fruitSlots.delete(o.id); }
     } else if (o.kind === 'bush') {
       const s = this.slots.get(o.id)!;
       this.bushPool.release(s);
@@ -385,7 +399,9 @@ export class WorldView implements WorldListener {
   private updateTree(o: TreeObj) {
     const slot = this.slots.get(o.id)!;
     // A tree that's been chopped into is drawn on its own, notch and all.
+    const fs = this.fruitSlots.get(o.id);
     if ((o.chop ?? 0) > 0 || this.treeFx.has(o.id)) {
+      if (fs !== undefined) this.fruitPool.hide(fs);
       this.trunks[o.species].hide(slot);
       this.trunksLo[o.species].hide(slot);
       this.leaves[o.species].remove(o.id);
@@ -403,6 +419,11 @@ export class WorldView implements WorldListener {
     (lo ? this.trunks : this.trunksLo)[o.species].hide(slot);
     (lo ? this.leavesLo : this.leaves)[o.species].set(o.id, this.m4, this.leafColor(o));
     (lo ? this.leaves : this.leavesLo)[o.species].remove(o.id);
+    // Apples, while it bears any.
+    if (fs !== undefined) {
+      if (o.age >= APPLE_AGE && (o.apples ?? APPLES) > 0) this.fruitPool.set(fs, this.m4);
+      else this.fruitPool.hide(fs);
+    }
   }
 
   /**
@@ -417,6 +438,7 @@ export class WorldView implements WorldListener {
     }
     this.bushPool.cull(view);
     this.berryPool.cull(view);
+    this.fruitPool.cull(view);
     for (const p of this.foragePools.values()) p.cull(view);
   }
 
@@ -565,8 +587,10 @@ export class WorldView implements WorldListener {
     for (const a of this.world.animals) {
       live.add(a.id);
       let m = this.animalMeshes.get(a.id);
+      // (A horse gets its saddle when it's tamed.)
+      if (m && m.userData.tamed !== undefined && m.userData.tamed !== !!a.tamed) { this.group.remove(m); this.animalMeshes.delete(a.id); m = undefined; }
       if (!m) {
-        m = animalModel(a.species);
+        m = animalModel(a.species, a.id, !!a.tamed);
         this.animalMeshes.set(a.id, m);
         this.group.add(m);
       }
@@ -606,7 +630,57 @@ export class WorldView implements WorldListener {
   }
 }
 
-export function animalModel(species: 'deer' | 'boar'): THREE.Group {
+/** Coat and mane colours for horses (picked by the animal's id). */
+const HORSE_COATS: [number, number][] = [[0x7a4426, 0x2a1a12], [0x5a3420, 0x1e140e], [0x2c2420, 0x161210], [0x9a948c, 0x5a5650], [0xc09a5a, 0xe8dcc0], [0x8a5a34, 0x3a2416]];
+
+/** A horse: long legs, a deep body, an arched neck and a long head; tamed, a blanket and saddle. */
+function horseModel(seed: number, tamed: boolean): THREE.Group {
+  const g = new THREE.Group();
+  const [coat, mane] = HORSE_COATS[Math.abs(seed) % HORSE_COATS.length];
+  const part = (geo: THREE.BufferGeometry, c: number, x: number, y: number, z: number, rx = 0, parent: THREE.Object3D = g) => {
+    const m = new THREE.Mesh(geo, mat(c));
+    m.position.set(x, y, z); m.rotation.x = rx; m.castShadow = true; parent.add(m); return m;
+  };
+  part(new THREE.BoxGeometry(0.56, 0.68, 1.55), coat, 0, 1.26, 0);
+  part(new THREE.SphereGeometry(0.36, 10, 8).scale(0.85, 0.95, 0.9), coat, 0, 1.3, 0.62); // chest
+  part(new THREE.SphereGeometry(0.36, 10, 8).scale(0.85, 0.95, 0.9), coat, 0, 1.3, -0.62); // rump
+  // Neck rising forward, the head hanging from its top.
+  const neck = part(new THREE.BoxGeometry(0.3, 0.8, 0.38), coat, 0, 1.75, 0.82, 0.62);
+  part(new THREE.BoxGeometry(0.08, 0.82, 0.12), mane, 0, 0.02, -0.22, 0, neck); // mane along the crest
+  const head = new THREE.Group();
+  head.position.set(0, 2.05, 1.12);
+  head.rotation.x = 0.9;
+  g.add(head);
+  part(new THREE.BoxGeometry(0.24, 0.62, 0.3), coat, 0, 0.18, 0, 0, head);
+  part(new THREE.BoxGeometry(0.2, 0.18, 0.26), 0x1e1814, 0, 0.5, 0.01, 0, head); // muzzle
+  for (const x of [-0.08, 0.08]) part(new THREE.ConeGeometry(0.045, 0.14, 4), coat, x, -0.17, -0.05, -0.3, head); // ears
+  // The tail, hanging from the rump.
+  part(new THREE.BoxGeometry(0.12, 0.75, 0.12).translate(0, -0.37, 0), mane, 0, 1.5, -0.95, -0.35);
+  const legH = 0.95;
+  const legs: THREE.Mesh[] = [];
+  for (const [x, z] of [[-0.17, 0.58], [0.17, 0.58], [-0.17, -0.6], [0.17, -0.6]]) {
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.13, legH, 0.14).translate(0, -legH / 2, 0), mat(coat));
+    leg.position.set(x, legH, z);
+    leg.castShadow = true;
+    const hoof = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.1, 0.17), mat(0x1c1612));
+    hoof.position.y = -legH + 0.05;
+    leg.add(hoof);
+    legs.push(leg);
+    g.add(leg);
+  }
+  if (tamed) {
+    // A woven blanket and a leather saddle: this one's yours.
+    part(new THREE.BoxGeometry(0.62, 0.05, 0.72), 0x8a2a24, 0, 1.62, -0.02);
+    part(new THREE.BoxGeometry(0.46, 0.12, 0.52), 0x5a3a22, 0, 1.69, -0.02);
+    part(new THREE.BoxGeometry(0.4, 0.14, 0.06), 0x5a3a22, 0, 1.78, 0.22);
+  }
+  g.userData.legs = legs;
+  g.userData.tamed = tamed;
+  return g;
+}
+
+export function animalModel(species: 'deer' | 'boar' | 'horse', seed = 0, tamed = false): THREE.Group {
+  if (species === 'horse') return horseModel(seed, tamed);
   const g = new THREE.Group();
   const boar = species === 'boar';
   const c = boar ? 0x4a3a30 : 0x8a5a34;

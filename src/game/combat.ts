@@ -83,7 +83,7 @@ export class Combat {
   /** Whether a left click should fight rather than do the usual job: a weapon or bow in hand, or an animal under your aim. */
   wantsClick(): boolean {
     const g = this.g, it = g.activeItem(), tool = it ? itemDef(it.type).tool : undefined;
-    return tool === 'weapon' || tool === 'bow' || g.target?.kind === 'animal';
+    return tool === 'weapon' || tool === 'bow' || (g.target?.kind === 'animal' && !g.friendlyTo(g.target.animal));
   }
 
   update(dt: number) {

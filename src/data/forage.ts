@@ -35,6 +35,9 @@ export const FORAGE_SPECIES: ForageSpecies[] = [
     item: 'branch', count: [1, 2], notice: 0, difficulty: 1 },
   { id: 'pebbles', name: 'Small rocks', category: 'material', biomes: { shore: 26, rocky: 40, meadow: 3 },
     item: 'rock_shard', count: [1, 2], notice: 0, difficulty: 2 },
+  // Only under apple trees (dropped there), never by itself.
+  { id: 'fallen_apple', name: 'Apple', category: 'food', biomes: {},
+    item: 'apple', count: [1, 1], notice: 0, difficulty: 1 },
   { id: 'wild_wheat', name: 'Wild wheat', category: 'food', biomes: { meadow: 10 },
     item: 'wheat_seeds', count: [1, 2], notice: 4, difficulty: 4 },
   { id: 'penny_bun', name: 'Brown-capped mushroom', category: 'mushroom', biomes: { forest: 18, wetland: 5 },

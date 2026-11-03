@@ -15,8 +15,8 @@ import { SPRUCE } from './models/spruce';
 // that draws, fells or places trees reads it from here, so a new kind is
 // added in this one place.
 
-export type Species = 'oak' | 'birch' | 'pine' | 'spruce' | 'beech' | 'maple' | 'willow';
-export const SPECIES: Species[] = ['oak', 'birch', 'pine', 'spruce', 'beech', 'maple', 'willow'];
+export type Species = 'oak' | 'birch' | 'pine' | 'spruce' | 'beech' | 'maple' | 'willow' | 'apple';
+export const SPECIES: Species[] = ['oak', 'birch', 'pine', 'spruce', 'beech', 'maple', 'willow', 'apple'];
 
 export interface TreeKind {
   /** Bark and leaf colours (sRGB hex). */
@@ -42,6 +42,8 @@ export const TREES: Record<Species, TreeKind> = {
   maple: { bark: 0x6b5848, leaf: 0x7d9a2a, grown: 2.5, trunk: MAPLE.trunk, hardness: 1.2, difficulty: 13 },
   // Short and thick, with a drooping curtain of leaves, beside water.
   willow: { bark: 0x5b4a36, leaf: 0x8aa64a, grown: 2.3, trunk: WILLOW.trunk, hardness: 0.8, difficulty: 6 },
+  // A small orchard tree: a short crooked trunk and a low, round crown. Apples grow on it.
+  apple: { bark: 0x5e4636, leaf: 0x4f8a2e, grown: 1.05, trunk: { r0: 0.26, r1: 0.18, h: 2.4 }, hardness: 1.0, difficulty: 9 },
 };
 
 /**
@@ -75,6 +77,11 @@ export function treeGeometries(species: Species, detail: 0 | 1 = 1, standIn = fa
       break;
     case 'maple':
       parts = detail ? [blob(1.9, 0, 3.9, 0, 1.15, 0.95), blob(1.2, 0.1, 5.1, -0.1)] : [blob(2.1, 0, 4.1, 0, 1.15, 1.0)];
+      break;
+    case 'apple':
+      parts = detail
+        ? [blob(1.55, 0, 3.15, 0, 1.25, 0.8), blob(1.0, 0.95, 2.85, 0.35), blob(0.95, -0.85, 2.95, -0.45), blob(0.9, 0.1, 3.75, 0.2)]
+        : [blob(1.75, 0, 3.15, 0, 1.25, 0.82)];
       break;
     case 'willow': {
       // A low crown over a hanging curtain of leaves.
@@ -274,9 +281,9 @@ function leafClusters(clumps: number[][], seed: number, fewer = 1, weep = false)
 
 /** What grows in each climate zone: tree density per 4 m², species mix, stature, berry bushes. */
 export const VEGETATION: Record<Zone, { trees: number; mix: Partial<Record<Species, number>>; stature: number; bushes: number }> = {
-  broadleaf: { trees: 0.16, mix: { oak: 4, beech: 3, maple: 2, birch: 2, pine: 0.5 }, stature: 1, bushes: 0.04 },
+  broadleaf: { trees: 0.16, mix: { oak: 4, beech: 3, maple: 2, birch: 2, pine: 0.5, apple: 0.5 }, stature: 1, bushes: 0.04 },
   conifer: { trees: 0.19, mix: { pine: 5, spruce: 5, birch: 1.5, oak: 0.3 }, stature: 1, bushes: 0.02 },
-  meadow: { trees: 0.012, mix: { oak: 4, maple: 2, birch: 2, pine: 1, willow: 0.5 }, stature: 1, bushes: 0.05 },
+  meadow: { trees: 0.012, mix: { oak: 4, maple: 2, birch: 2, pine: 1, willow: 0.5, apple: 2.5 }, stature: 1, bushes: 0.05 },
   heath: { trees: 0.008, mix: { pine: 6, birch: 3, oak: 1, spruce: 1 }, stature: 0.8, bushes: 0.03 },
   marsh: { trees: 0.03, mix: { willow: 6, birch: 4, spruce: 1 }, stature: 0.85, bushes: 0.02 },
   alpine: { trees: 0.03, mix: { spruce: 6, pine: 4, birch: 1 }, stature: 0.6, bushes: 0.01 },

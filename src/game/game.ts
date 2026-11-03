@@ -1149,11 +1149,63 @@ export class Game {
     this.queue = this.queue.filter((q) => !(q.ctx.t.kind === 'animal' && q.ctx.t.animal === a));
   }
 
+  /** The horse you're riding, if any. */
+  riding: AnimalObj | null = null;
+
+  /** Climb onto a tamed horse. */
+  mount(a: AnimalObj) {
+    if (this.riding) return;
+    this.riding = a;
+    this.player.riding = true;
+    this.player.crouching = false;
+    this.player.pos.set(a.x, this.world.terrain.heightAt(a.x, a.z) + 0.05, a.z);
+    this.player.vel.set(0, 0, 0);
+    a.state = 'idle'; a.speed = 0;
+    this.msg('You swing up into the saddle. Hold Shift to gallop; press X to get off.', 'good');
+  }
+
+  /** Get down from the horse: it stays where you leave it. */
+  dismount(quiet = false) {
+    const a = this.riding;
+    if (!a) return;
+    this.riding = null;
+    this.player.riding = false;
+    a.x = this.player.pos.x; a.z = this.player.pos.z; a.speed = 0; a.state = 'idle'; a.timer = 4;
+    // Step down beside it (on its left), if there's room.
+    const side = { x: -Math.cos(a.rot), z: Math.sin(a.rot) };
+    const x = a.x + side.x * 1.1, z = a.z + side.z * 1.1;
+    const y = this.player.groundAt(this.world, x, this.world.terrain.heightAt(x, z) + 1, z).y;
+    if (Number.isFinite(y) && this.player.penetration(this.world, x, y + 0.02, z) === 0) this.player.pos.set(x, y + 0.02, z);
+    if (!quiet) this.msg('You climb down from the horse.', 'info');
+  }
+
+  /** Whether a click on this animal should be friendly (feed or ride it) rather than a blow. */
+  friendlyTo(a: AnimalObj): boolean {
+    return a.species === 'horse' && (!!a.tamed || this.activeItem()?.type === 'apple');
+  }
+
   private updateAnimals(dt: number) {
     const w = this.world, t = w.terrain, p = this.player.pos;
+    // Off the horse if you end up swimming.
+    if (this.riding && (this.player.swimming || !w.animals.includes(this.riding))) this.dismount();
     for (const a of w.animals) {
       const d = ANIMALS[a.species];
       const toP = Math.hypot(p.x - a.x, p.z - a.z);
+      // The horse under you goes where you go.
+      if (a === this.riding) {
+        const v = this.player.vel, sp = Math.hypot(v.x, v.z);
+        a.x = p.x; a.z = p.z; a.speed = sp;
+        if (sp > 0.3) a.rot = Math.atan2(v.x, v.z);
+        continue;
+      }
+      // Your own horse waits where you left it, grazing.
+      if (a.tamed) {
+        a.speed = 0; a.state = 'idle';
+        if (a.hurt) a.hurt = Math.max(0, a.hurt - dt);
+        continue;
+      }
+      // Wild horses keep their distance, unless you're holding out an apple.
+      if (a.species === 'horse' && a.state !== 'flee' && ((toP < 6 && this.activeItem()?.type !== 'apple') || (toP < 10 && this.player.sprinting))) { a.state = 'flee'; a.timer = 3; }
       a.timer -= dt;
       a.attackCooldown -= dt;
       if (a.hurt) a.hurt = Math.max(0, a.hurt - dt);
@@ -1278,7 +1330,7 @@ export class Game {
       const off = Math.hypot(ox - ux * along, oz - uz * along);
       return off < reachOf(o) + 0.3;
     });
-    const animals = this.world.animals.filter((a) => Math.hypot(a.x - origin.x, a.z - origin.z) < maxD + 2);
+    const animals = this.world.animals.filter((a) => a !== this.riding && Math.hypot(a.x - origin.x, a.z - origin.z) < maxD + 2);
     const rocks = this.groundCover.bouldersNear(origin.x, origin.z, maxD + 1);
     const p = new THREE.Vector3();
     for (let d = 0.1; d <= maxD; d += 0.05) {
@@ -1288,8 +1340,15 @@ export class Game {
       if (!tooFar) {
         for (const a of animals) {
           const g = t.heightAt(a.x, a.z);
-          const tall = a.species === 'deer' ? 1.6 : 1.0;
-          if (Math.hypot(p.x - a.x, p.z - a.z) < 0.6 && p.y > g && p.y < g + tall) return { kind: 'animal', animal: a, point: p.clone() };
+          const tall = a.species === 'horse' ? 2.2 : a.species === 'deer' ? 1.6 : 1.0;
+          // A horse is long: test along its body, not just round its middle.
+          let near = Math.hypot(p.x - a.x, p.z - a.z) < 0.6;
+          if (!near && a.species === 'horse') {
+            const fx = Math.sin(a.rot), fz = Math.cos(a.rot), dx = p.x - a.x, dz = p.z - a.z;
+            const along = dx * fx + dz * fz, off = Math.abs(dx * fz - dz * fx);
+            near = Math.abs(along) < 1.1 && off < 0.45;
+          }
+          if (near && p.y > g && p.y < g + tall) return { kind: 'animal', animal: a, point: p.clone() };
         }
         for (const o of objs) {
           if (skipPieces && o.kind === 'structure') continue;
@@ -1707,7 +1766,7 @@ export class Game {
     if (inp.hit('KeyM')) this.ui.toggle('map');
     if (inp.hit('KeyG') && !this.placing) this.request(ACTION_MAP.survey, { g: this, t: { kind: 'none' } });
     if (inp.hit('KeyR')) this.repeatLast();
-    if (inp.hit('KeyX')) { if (this.action) this.cancelAction('You stop what you are doing.'); }
+    if (inp.hit('KeyX')) { if (this.action) this.cancelAction('You stop what you are doing.'); else if (this.riding) this.dismount(); }
     if (inp.hit('Escape')) this.stopPlacing();
     if (inp.hit('Backquote') || inp.hit('F2')) this.ui.toggle('dev');
     if (inp.hit('Digit0')) this.setActive(null);
@@ -1941,6 +2000,7 @@ export class Game {
 
   private die() {
     const p = this.player;
+    this.dismount(true);
     this.msg('You died. Your items were left where you fell.', 'warn');
     if (this.inv.items.length) {
       this.dropToGround(this.inv.items.splice(0), p.pos.x, p.pos.y, p.pos.z);

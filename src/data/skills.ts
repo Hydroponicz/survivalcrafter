@@ -19,6 +19,7 @@ export const SKILLS = {
   fighting: 'Fighting',
   butchering: 'Butchering',
   tailoring: 'Tailoring',
+  taming: 'Taming',
 } as const;
 
 export type SkillId = keyof typeof SKILLS;
@@ -42,6 +43,7 @@ export const SKILL_INFO: Record<SkillId, string> = {
   fighting: 'Fighting animals and dodging their attacks.',
   butchering: 'Butchering animals with a knife. Higher skill gives more meat and cleaner hides.',
   tailoring: 'Making clothing from hides. Higher skill makes better protection.',
+  taming: 'Winning wild animals over. Feed a wild horse apples to tame it: the higher your skill, the better the chance each time.',
 };
 
 export class Skills {

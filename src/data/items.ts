@@ -122,6 +122,7 @@ const defs: ItemDef[] = [
   { id: 'jar_of_water', name: 'Jar of water', icon: '💧', weight: 3.5, food: { nutrition: 0, water: 35, returns: 'clay_jar' }, desc: 'Fresh water. Drink it or use it for cooking.' },
 
   // --- food
+  { id: 'apple', name: 'Apple', icon: '🍎', weight: 0.15, food: { nutrition: 8, water: 4 }, desc: 'A crisp red apple from an apple tree. A tasty snack, and horses love them: hold one and feed it to a wild horse to win it over.' },
   { id: 'berries', name: 'Berries', icon: '🫐', weight: 0.1, food: { nutrition: 4, water: 2 }, desc: 'A handful of wild berries.' },
   { id: 'mushroom', name: 'Penny bun', icon: '🍄', weight: 0.1, food: { nutrition: 4 }, unknownName: 'Brown-capped mushroom',
     desc: 'A plump mushroom with a brown cap and a thick pale stem. Tasty, and even better roasted.' },

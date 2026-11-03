@@ -106,6 +106,14 @@ export function forageGeometry(species: string): THREE.BufferGeometry {
         paint(new THREE.DodecahedronGeometry(0.075, 0).scale(1.2, 0.7, 1).translate(0, 0.04, 0), 0xd8d2c4),
         paint(new THREE.DodecahedronGeometry(0.06, 0).scale(1, 0.7, 1.1).translate(0.1, 0.035, 0.06), 0x2e2c30),
       ]);
+    case 'fallen_apple':
+      // A red apple (sometimes two), a stalk and a leaf.
+      return merge([
+        paint(new THREE.SphereGeometry(0.075, 10, 8).scale(1, 0.9, 1).translate(0, 0.065, 0), 0xc0281e),
+        paint(new THREE.CylinderGeometry(0.006, 0.006, 0.05, 4).translate(0, 0.15, 0), 0x5a3a20),
+        paint(new THREE.SphereGeometry(0.03, 5, 3).scale(1.6, 0.25, 0.8).translate(0.03, 0.15, 0), 0x4f8a2e),
+        paint(new THREE.SphereGeometry(0.068, 10, 8).scale(1, 0.9, 1).translate(0.13, 0.058, 0.06), 0xb8401e),
+      ]);
     case 'pebbles':
       // A little heap of loose stones, paler than the bedrock and the ground's own grit
       // so they read as something to pick up, and big enough to see in the grass.
@@ -157,7 +165,7 @@ export function forageScale(category: string): number {
 }
 
 /** Finds lying low on the ground that the grass is kept off, and how far round them (m). */
-export const LOW_FINDS: Record<string, number> = { pebbles: 0.5, flint: 0.45, fallen_branch: 0.75, driftwood: 0.75 };
+export const LOW_FINDS: Record<string, number> = { pebbles: 0.5, flint: 0.45, fallen_branch: 0.75, driftwood: 0.75, fallen_apple: 0.4 };
 
 /** Rough height of each prop (before scaling), for targeting and markers. */
 export function forageHeight(species: string): number {
