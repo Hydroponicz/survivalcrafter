@@ -7,12 +7,13 @@ import { buildToolMesh } from '../game/tools';
 // image for the backpack, hotbar and equipment slots. Drawn on first ask, a
 // few a frame; until then the item's emoji stands in.
 
-const SIZE = 96;
+const SIZE = 128;
 
 let renderer: THREE.WebGLRenderer | null = null;
 let failed = false;
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(28, 1, 0.01, 50);
+// Square on (no perspective) and framed tight to each item, so even a long thin tool fills its picture.
+const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.01, 50);
 const urls = new Map<string, string>();
 const queued: string[] = [];
 let onReady: (() => void) | null = null;
@@ -76,10 +77,28 @@ function portrait(type: string): string {
   scene.add(obj);
   const box = new THREE.Box3().setFromObject(obj);
   const sphere = box.getBoundingSphere(new THREE.Sphere());
-  const dist = sphere.radius / Math.sin(THREE.MathUtils.degToRad(camera.fov / 2)) * 0.98;
   const dir = new THREE.Vector3(0.35, 0.45, 1).normalize();
-  camera.position.copy(sphere.center).addScaledVector(dir, dist);
+  camera.position.copy(sphere.center).addScaledVector(dir, sphere.radius * 3);
   camera.lookAt(sphere.center);
+  camera.updateMatrixWorld();
+  // The item's extent as the camera sees it: fit the view to that, with a little margin.
+  const view = new THREE.Box3();
+  obj.updateMatrixWorld(true);
+  obj.traverse((o) => {
+    const g = (o as THREE.Mesh).geometry;
+    if (!(o as THREE.Mesh).isMesh || !g) return;
+    const pos = g.getAttribute('position');
+    const v = new THREE.Vector3();
+    for (let i = 0; i < pos.count; i += Math.max(1, Math.floor(pos.count / 400))) {
+      v.fromBufferAttribute(pos, i).applyMatrix4(o.matrixWorld).applyMatrix4(camera.matrixWorldInverse);
+      view.expandByPoint(v);
+    }
+  });
+  const cx = (view.min.x + view.max.x) / 2, cy = (view.min.y + view.max.y) / 2;
+  const half = Math.max(view.max.x - view.min.x, view.max.y - view.min.y) / 2 * 1.08;
+  camera.left = cx - half; camera.right = cx + half; camera.top = cy + half; camera.bottom = cy - half;
+  camera.near = 0.001; camera.far = sphere.radius * 8;
+  camera.updateProjectionMatrix();
   renderer!.render(scene, camera);
   const url = renderer!.domElement.toDataURL('image/png');
   scene.remove(obj);

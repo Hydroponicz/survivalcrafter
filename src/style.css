@@ -91,7 +91,7 @@ button { font: inherit; cursor: pointer; }
 
 .hotbar { position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%); display: flex; gap: 4px; align-items: flex-end; }
 .slot {
-  position: relative; width: 48px; height: 48px; background: rgba(20, 16, 10, 0.75); border: 2px solid rgba(255,255,255,0.12);
+  position: relative; width: 64px; height: 64px; background: rgba(20, 16, 10, 0.75); border: 2px solid rgba(255,255,255,0.12);
   border-radius: 6px; display: flex; align-items: center; justify-content: center;
 }
 .slot { pointer-events: auto; cursor: pointer; transition: border-color 0.1s, transform 0.1s; }
@@ -101,10 +101,10 @@ button { font: inherit; cursor: pointer; }
 .slot.drop-target { border-style: solid !important; border-color: var(--good) !important; transform: scale(1.08); }
 .item-row[draggable=true] { cursor: grab; }
 .slot.empty { opacity: 0.4; }
-.slot-key { position: absolute; top: 1px; left: 4px; font-size: 10px; color: var(--muted); }
-.slot-icon { font-size: 24px; }
-.slot-count { position: absolute; bottom: 1px; right: 4px; font-size: 11px; }
-.active-label { position: absolute; bottom: 56px; left: 50%; transform: translateX(-50%); white-space: nowrap; font-size: 14px; text-shadow: 0 1px 3px #000; }
+.slot-key { position: absolute; top: 2px; left: 5px; font-size: 11px; color: var(--muted); text-shadow: 0 1px 2px #000; z-index: 1; }
+.slot-icon { font-size: 30px; }
+.slot-count { position: absolute; bottom: 2px; right: 5px; font-size: 13px; font-weight: bold; text-shadow: 0 1px 2px #000, 0 0 3px #000; }
+.active-label { position: absolute; bottom: 74px; left: 50%; transform: translateX(-50%); white-space: nowrap; font-size: 14px; text-shadow: 0 1px 3px #000; }
 .active-label small { color: var(--muted); }
 
 .log {
@@ -223,6 +223,7 @@ table.keys td:first-child { color: var(--accent); white-space: nowrap; font-fami
   position: absolute; left: 0; top: 0; z-index: 49; pointer-events: none !important;
   font-size: 26px; opacity: 0.85; filter: drop-shadow(0 2px 3px rgba(0,0,0,0.6));
 }
+.ui-drag-ghost .icon-img { width: 56px; height: 56px; }
 /* Hover styles for the in-game cursor (it can't trigger :hover). */
 .menu-item.vhover { background: rgba(232, 181, 98, 0.2); }
 .slot.vhover { border-color: rgba(255,255,255,0.35); }
@@ -378,7 +379,7 @@ table.keys td:first-child { color: var(--accent); white-space: nowrap; font-fami
 .char-view { height: 250px; border-radius: 6px; background: radial-gradient(ellipse at 50% 70%, #3a3324 0%, #1a1712 75%); border: 1px solid var(--panel-edge); overflow: hidden; }
 .char-canvas { width: 100%; height: 100%; display: block; object-fit: contain; }
 .eq-slots { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 8px; }
-.eq-slot { position: relative; display: grid; grid-template-columns: 26px 1fr; grid-template-rows: auto auto; column-gap: 6px; align-items: center;
+.eq-slot { position: relative; display: grid; grid-template-columns: 36px 1fr; grid-template-rows: auto auto; column-gap: 6px; align-items: center;
   padding: 4px 6px; border: 1px dashed rgba(181, 168, 142, 0.35); border-radius: 5px; background: rgba(0, 0, 0, 0.2); min-height: 40px; }
 .eq-slot.filled { border-style: solid; border-color: var(--panel-edge); background: rgba(107, 86, 54, 0.25); }
 .eq-label { grid-column: 1 / 3; font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); }
@@ -389,7 +390,7 @@ table.keys td:first-child { color: var(--accent); white-space: nowrap; font-fami
 .window button.eq-off { position: absolute; top: 2px; right: 3px; padding: 0 4px; font-size: 10px; line-height: 14px; }
 .eq-head { margin: 10px 0 4px; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; color: var(--accent); }
 .eq-tools { display: flex; flex-wrap: wrap; gap: 5px; }
-.eq-tool { width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; font-size: 18px; border: 1px solid var(--panel-edge); border-radius: 5px; background: rgba(0, 0, 0, 0.25); cursor: pointer; }
+.eq-tool { width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; font-size: 18px; border: 1px solid var(--panel-edge); border-radius: 5px; background: rgba(0, 0, 0, 0.25); cursor: pointer; }
 .eq-tool.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
 .eq-tool:hover, .eq-tool.vhover { background: rgba(107, 86, 54, 0.4); }
 .eq-none { color: var(--muted); font-size: 12px; font-style: italic; }
@@ -414,11 +415,11 @@ table.keys td:first-child { color: var(--accent); white-space: nowrap; font-fami
 
 .window-head { cursor: grab; user-select: none; }
 .window-head.dragging { cursor: grabbing; }
-.icon-img { width: 34px; height: 34px; display: block; object-fit: contain; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.6)); }
-.item-row .icon { width: 36px; display: flex; align-items: center; justify-content: center; }
-.slot-icon .icon-img { width: 40px; height: 40px; }
-.eq-icon .icon-img { width: 26px; height: 26px; }
-.eq-tool .icon-img { width: 28px; height: 28px; }
+.icon-img { width: 46px; height: 46px; display: block; object-fit: contain; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.6)); }
+.item-row .icon { width: 50px; display: flex; align-items: center; justify-content: center; }
+.slot-icon .icon-img { width: 58px; height: 58px; }
+.eq-icon .icon-img { width: 36px; height: 36px; }
+.eq-tool .icon-img { width: 38px; height: 38px; }
 
 /* Hold Alt: HUD parts take the cursor (for tooltips and dragging). */
 #ui .bars .bar, #ui .clock, #ui .status > span, #ui > .tut-panel { pointer-events: auto; }
@@ -439,3 +440,6 @@ table.keys td:first-child { color: var(--accent); white-space: nowrap; font-fami
 .wt-row b { color: var(--ink); font-weight: normal; font-variant-numeric: tabular-nums; }
 .wt-row i { position: absolute; left: 0; bottom: -1px; height: 2px; background: var(--accent); opacity: 0.7; border-radius: 1px; }
 .inv-weight { cursor: help; }
+
+.recipe-head .icon-img { width: 38px; height: 38px; }
+.recipe-head .icon { display: inline-flex; vertical-align: middle; margin-right: 4px; }
