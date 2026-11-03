@@ -1108,6 +1108,7 @@ export class Game {
     const t = this.world.terrain;
     const objs = this.world.near(origin.x, origin.z, maxD + 3);
     const animals = this.world.animals.filter((a) => Math.hypot(a.x - origin.x, a.z - origin.z) < maxD + 2);
+    const rocks = this.groundCover.bouldersNear(origin.x, origin.z, maxD + 1);
     const p = new THREE.Vector3();
     for (let d = 0.1; d <= maxD; d += 0.05) {
       p.copy(origin).addScaledVector(dir, d);
@@ -1122,6 +1123,11 @@ export class Game {
         for (const o of objs) {
           if (skipPieces && o.kind === 'structure') continue;
           if (this.hitObject(o, p)) return { kind: 'object', obj: o, point: p.clone() };
+        }
+        // Boulders: squat lumps (half a metre across at scale 1, flattened).
+        for (const b of rocks) {
+          const rx = 0.5 * b.sc, ry = 0.36 * b.sc, dy = p.y - b.y;
+          if (((p.x - b.x) ** 2 + (p.z - b.z) ** 2) / (rx * rx) + (dy * dy) / (ry * ry) < 1) return { kind: 'rock', rock: b, point: p.clone() };
         }
       }
       if (t.solidAt(p.x, p.y, p.z)) {

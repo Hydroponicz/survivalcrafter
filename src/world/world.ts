@@ -140,6 +140,8 @@ export class World {
   animals: AnimalObj[] = [];
   stumps: Stump[] = [];
   time = DAY_LENGTH * 0.36; // start in the morning
+  /** Boulders you've broken up (by their spot: see groundcover's rockKey). */
+  brokenRocks = new Set<string>();
   private grid = new Map<number, Set<WorldObj>>();
   private nextId = 1;
   private tickTimer = 0;
@@ -530,6 +532,7 @@ export class World {
       time: this.time,
       spawn: this.spawn,
       stumps: this.stumps,
+      brokenRocks: [...this.brokenRocks],
     };
   }
 
@@ -554,6 +557,7 @@ export class World {
     w.time = data.time;
     w.spawn = data.spawn;
     w.stumps = data.stumps ?? [];
+    w.brokenRocks = new Set(data.brokenRocks ?? []);
     return w;
   }
 }

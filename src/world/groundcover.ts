@@ -280,6 +280,14 @@ const COVER: Record<Zone, { grass: number; tall: number; flowers: number; fern: 
   snow: { grass: 0, tall: 0, flowers: 0, fern: 0, heather: 0 },
 };
 
+/** A boulder lying on the ground: where, its size (scale), and its key for remembering it's been broken. */
+export interface Boulder { x: number; y: number; z: number; sc: number; key: string }
+
+/** A boulder's lasting name (its spot, to a quarter metre). */
+export function rockKey(x: number, z: number): string {
+  return `${Math.round(x * 4)},${Math.round(z * 4)}`;
+}
+
 export class GroundCover {
   readonly group = Object.assign(new THREE.Group(), { name: 'groundcover' });
   private kinds: Kind[];
@@ -287,6 +295,19 @@ export class GroundCover {
   private cache = [new Map<number, TileData[]>(), new Map<number, TileData[]>()];
   /** Logs and boulders per far tile, kept for the near tiles' plants to avoid. */
   private obstacles = new Map<number, Obstacle[]>();
+  /** The boulders on each far tile (they can be broken up with a pickaxe). */
+  private boulders = new Map<number, Boulder[]>();
+
+  /** Boulders within r of (x, z) (only where the land is generated round you). */
+  bouldersNear(x: number, z: number, r: number): Boulder[] {
+    const out: Boulder[] = [];
+    for (let tz = Math.floor((z - r) / TILE); tz <= Math.floor((z + r) / TILE); tz++) {
+      for (let tx = Math.floor((x - r) / TILE); tx <= Math.floor((x + r) / TILE); tx++) {
+        for (const b of this.boulders.get(tkey(tx, tz)) ?? []) if (Math.hypot(b.x - x, b.z - z) < r + b.sc) out.push(b);
+      }
+    }
+    return out;
+  }
   /** Share of the small plants drawn (graphics setting); the rest are left out evenly. */
   density = 1;
   private centre = [NaN, NaN];
@@ -313,7 +334,7 @@ export class GroundCover {
   invalidate(x: number, z: number, r: number) {
     for (const cache of this.cache) {
       for (let tz = Math.floor((z - r) / TILE); tz <= Math.floor((z + r) / TILE); tz++) {
-        for (let tx = Math.floor((x - r) / TILE); tx <= Math.floor((x + r) / TILE); tx++) { cache.delete(tkey(tx, tz)); this.obstacles.delete(tkey(tx, tz)); }
+        for (let tx = Math.floor((x - r) / TILE); tx <= Math.floor((x + r) / TILE); tx++) { cache.delete(tkey(tx, tz)); this.obstacles.delete(tkey(tx, tz)); this.boulders.delete(tkey(tx, tz)); }
       }
     }
     this.dirty = true;
@@ -355,7 +376,7 @@ export class GroundCover {
       // Drop tiles well out of range so memory doesn't grow.
       for (const k of cache.keys()) {
         const x = tkeyX(k), z = tkeyZ(k);
-        if (Math.abs(x - tx) > r + 2 || Math.abs(z - tz) > r + 2) { cache.delete(k); if (far) this.obstacles.delete(k); }
+        if (Math.abs(x - tx) > r + 2 || Math.abs(z - tz) > r + 2) { cache.delete(k); if (far) { this.obstacles.delete(k); this.boulders.delete(k); } }
       }
     }
     // Redrawn once the patches around are all in (until then the old ones stay).
@@ -457,6 +478,7 @@ export class GroundCover {
       }
     }
     const covered = (x: number, z: number) => obs.length > 0 && obs.some((o) => inside(o, x, z));
+    const rocks: Boulder[] = [];
 
     if (!far) {
       // Zones change slowly: look them up on a 4 m grid.
@@ -530,8 +552,13 @@ export class GroundCover {
           t.surfaceColor(isRock(below) ? below : Mat.Rock, x, g.h, z, 0, col);
           const v = rnd(r, 0.75, 1.05) * 1.5;
           const sc = rnd(r, 0.35, 1.5);
-          put('boulder', x, g.h - sc * 0.15, z, r() * 6.28, sc, col[0] * v, col[1] * v, col[2] * v, rnd(r, -0.2, 0.2));
+          const yaw = r() * 6.28, tilt = rnd(r, -0.2, 0.2);
+          // (Every draw above is made either way, so breaking one leaves the rest where they were.)
+          const key = rockKey(x, z);
+          if (this.world.brokenRocks.has(key)) continue;
+          put('boulder', x, g.h - sc * 0.15, z, yaw, sc, col[0] * v, col[1] * v, col[2] * v, tilt);
           obs.push({ ax: x, az: z, bx: x, bz: z, r: 0.55 * sc });
+          rocks.push({ x, y: g.h - sc * 0.15, z, sc, key });
           continue;
         }
         // Fallen trees lie in the woods (where trees stand thick enough to fall),
@@ -549,7 +576,7 @@ export class GroundCover {
         }
       }
     }
-    if (far) this.obstacles.set(tkey(tx, tz), obs);
+    if (far) { this.obstacles.set(tkey(tx, tz), obs); this.boulders.set(tkey(tx, tz), rocks); }
     return lists.map((L) => ({ m: new Float32Array(L.m), c: new Float32Array(L.c), n: L.c.length / 3 }));
   }
 }

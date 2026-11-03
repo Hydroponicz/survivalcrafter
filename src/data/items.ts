@@ -54,7 +54,7 @@ export interface ItemDef {
 
 const defs: ItemDef[] = [
   // --- raw materials
-  { id: 'rock_shard', name: 'Rock shard', icon: '🪨', weight: 1.0, desc: 'A rough shard of stone. Knapped into tools, stacked into walls.' },
+  { id: 'rock_shard', name: 'Small rock', icon: '🪨', weight: 1.0, desc: 'A fist-sized stone. Knapped into tools, stacked into walls. Pick them up off shores and rocky ground, or break up a boulder with a pickaxe.' },
   { id: 'iron_ore', name: 'Iron ore', icon: '🟤', weight: 2.0, desc: 'Rust-coloured ore. Smelt it at a lit forge.' },
   { id: 'iron_lump', name: 'Iron lump', icon: '⬛', weight: 1.0, desc: 'Smelted iron, ready to be worked on an anvil.' },
   { id: 'dirt', name: 'Dirt', icon: '🟫', weight: 2.0, desc: 'A heap of dirt. Drop it to raise the ground.' },

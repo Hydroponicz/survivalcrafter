@@ -26,7 +26,7 @@ export type SkillId = keyof typeof SKILLS;
 /** What each skill is for (tooltips). */
 export const SKILL_INFO: Record<SkillId, string> = {
   woodcutting: 'Felling trees with a hatchet. Faster chopping, cleaner notches and better logs.',
-  mining: 'Breaking rock and ore with a pickaxe. Faster mining and better shards and ore.',
+  mining: 'Breaking rock and ore with a pickaxe. Faster mining, and better stone and ore; breaks up boulders for small rocks.',
   digging: 'Shifting earth with a shovel: digging, raising, smoothing and levelling ground.',
   foraging: 'Picking wild things. Higher skill spots rarer finds and picks them cleanly; a survey (G) reaches further.',
   herbalism: 'Knowing plants and fungi. Recognise mushrooms and herbs as you pick them, and study unknown ones.',

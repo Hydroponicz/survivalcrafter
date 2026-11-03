@@ -407,6 +407,7 @@ export class UI {
       }
       case 'water': return 'Water';
       case 'animal': return ANIMALS[t.animal.species].name;
+      case 'rock': return t.rock.sc < 0.6 ? 'Small boulder' : t.rock.sc < 1.1 ? 'Boulder' : 'Large boulder';
       case 'none': return '';
       case 'object': {
         const o = t.obj;

@@ -8,6 +8,7 @@ import {
   ANIMALS, CROP_STAGES, cropKey, type AnimalObj, type BushObj, type Crop, type ForageObj, type PileObj, type StructureObj, type TreeObj, type WorldObj,
 } from '../world/world';
 import { FORAGE, IDENTIFY } from '../data/forage';
+import type { Boulder } from '../world/groundcover';
 import { BIOMES, biomeAt, type Biome } from './forage';
 import { treeScale } from '../world/treefx';
 import { SPECIES, TREES } from '../world/trees';
@@ -23,6 +24,7 @@ export type Target =
   | { kind: 'water'; point: THREE.Vector3 }
   | { kind: 'object'; obj: WorldObj; point: THREE.Vector3 }
   | { kind: 'animal'; animal: AnimalObj; point: THREE.Vector3 }
+  | { kind: 'rock'; rock: Boulder; point: THREE.Vector3 }
   | { kind: 'none' };
 
 export interface Ctx {
@@ -82,7 +84,7 @@ const obj = <K extends WorldObj['kind']>(c: Ctx, kind: K): Extract<WorldObj, { k
 const toolIs = (c: Ctx, kind: ToolKind) => !!c.tool && itemDef(c.tool.type).tool === kind;
 const groundMat = (c: Ctx) => (isGround(c) ? c.t.mat : undefined);
 
-/** Cubic metres of earth in one dirt/sand/clay item (and one rock shard). */
+/** Cubic metres of earth in one dirt/sand/clay item (and one small rock). */
 export const EARTH_PER_ITEM = 0.5;
 
 /** Radius of the shovel/pickaxe brush (metres). */
@@ -324,6 +326,32 @@ export const ACTIONS: ActionDef[] = [
       afterEdit(c, cx, cz, 1.1);
       const got = c.g.collectEarth(vol, o.ql);
       c.g.msg(got ? `You mine ${got}.${vol[Mat.Iron] ? ' Iron!' : ''}` : 'You break off some gravel.', vol[Mat.Iron] ? 'good' : 'info');
+    },
+  },
+  // ===== boulders lying about: break them up for small rocks
+  {
+    id: 'break_rock', label: 'Break up the boulder',
+    show: (c) => c.t.kind === 'rock' && toolIs(c, 'pickaxe'),
+    time: (c) => (c.t.kind === 'rock' ? 4 + c.t.rock.sc * 5 : 6), swing: 'chop', skill: 'mining', difficulty: (c) => (c.t.kind === 'rock' ? 3 + c.t.rock.sc * 4 : 5),
+    stamina: 8, toolWear: 0.15,
+    run: (c, o) => {
+      if (c.t.kind !== 'rock') return;
+      const b = c.t.rock;
+      if (!o.success) return c.g.msg('Your pickaxe skips off the boulder. Try again.', 'fail');
+      c.g.world.brokenRocks.add(b.key);
+      c.g.groundCover.invalidate(b.x, b.z, 2);
+      const n = Math.max(2, Math.round(2 + b.sc * 5 + Math.random() * 2));
+      c.g.give('rock_shard', o.ql, n);
+      c.g.sound.chop(0.8);
+      c.g.msg(`The boulder cracks apart: ${n} small rocks.`, 'good');
+    },
+  },
+  {
+    id: 'examine_rock', label: 'Examine', show: (c) => c.t.kind === 'rock', time: 0,
+    run: (c) => {
+      if (c.t.kind !== 'rock') return;
+      const s = c.t.rock.sc;
+      c.g.msg(`A ${s < 0.6 ? 'small' : s < 1.1 ? 'sizeable' : 'big'} boulder. Break it up with a pickaxe for small rocks.`, 'info');
     },
   },
   {
