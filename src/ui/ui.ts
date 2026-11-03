@@ -1138,6 +1138,9 @@ export class UI {
   }
 
   /** Your quests: ones offered to take up, ones under way (tracked on screen or not), and ones done. */
+  /** The quest being walked through (accepted, now to be pointed out), on your first time in the quest log. */
+  private coachQuest: string | null = null;
+
   private renderQuests() {
     const g = this.g, log = g.quests;
     const body = el('div');
@@ -1153,6 +1156,13 @@ export class UI {
       b.addEventListener('click', () => { fn(); this.refresh(); });
       return b;
     };
+    // Your first time here with a new quest: walk through taking it up and pointing it out.
+    const coaching = g.tips.has('quest_intro') && !g.tips.has('quest_coached');
+    const coach = (row: HTMLElement, b: HTMLElement, step: number, html: string) => {
+      b.classList.add('coach-pulse');
+      const c = el('div', 'quest-coach', `<b>Step ${step} of 2.</b> ${html}`);
+      row.appendChild(c);
+    };
     const section = (title: string, list: typeof log.quests) => {
       if (!list.length) return;
       body.appendChild(el('h3', '', title));
@@ -1166,34 +1176,53 @@ export class UI {
         if (q.status === 'active') {
           // The steps: done, the one you're on (with its progress), still to come.
           html += '<ol class="quest-steps">';
+          // (A long quest shows where you are: the last step done, this one, and the next two.)
           d.steps.forEach((st, i) => {
-            if (i < q.step) html += `<li class="done">${st.title}</li>`;
+            if (i < q.step - 1 || i > q.step + 2) return;
+            if (i < q.step) html += `<li class="done" value="${i + 1}">${st.title}</li>`;
             else if (i === q.step) {
               const pr = log.progressOf(g, q);
-              html += `<li class="now">${st.title}${Array.isArray(pr) ? ` <small>(${pr[0]} / ${pr[1]})</small>` : ''}<div class="quest-step-text">${st.text}</div></li>`;
-            } else html += `<li class="later">${st.title}</li>`;
+              html += `<li class="now" value="${i + 1}">${st.title}${Array.isArray(pr) ? ` <small>(${pr[0]} / ${pr[1]})</small>` : ''}<div class="quest-step-text">${st.text}</div></li>`;
+            } else html += `<li class="later" value="${i + 1}">${st.title}</li>`;
           });
           html += '</ol>';
+          const more = d.steps.length - (q.step + 3);
+          if (more > 0) html += `<div class="quest-more">…and ${more} more step${more > 1 ? 's' : ''}</div>`;
         } else if (q.status === 'done') {
           html += `<div class="quest-outro">${d.outro.text}</div>`;
         }
         row.innerHTML = html;
         const btns = el('div', 'btns');
+        let coachOn: [HTMLElement, number, string] | null = null;
         if (q.status === 'offered') {
-          btns.append(button('Accept', 'Take up this quest and track it on screen', () => log.accept(q.id)),
-            button('Accept, don\'t track', 'Take it up but keep it out of the panel for now', () => log.accept(q.id, false)));
+          const accept = button('Accept', 'Take up this quest and track it on screen', () => { log.accept(q.id); if (coaching) this.coachQuest = q.id; });
+          btns.append(accept, button('Accept, don\'t track', 'Take it up but keep it out of the panel for now', () => log.accept(q.id, false)));
+          if (coaching && !this.coachQuest) coachOn = [accept, 1, '<b>Accept</b> takes up the quest. It shows in the panel on the right while it\'s tracked.'];
         } else if (q.status === 'active') {
           btns.append(q.tracked
             ? button('Untrack', 'Hide it from the panel on screen (it keeps its progress)', () => log.setTracked(q.id, false))
             : button('Track', 'Show it in the panel on screen', () => log.setTracked(q.id, true)));
-          if (q !== log.focused) btns.append(button('Point it out', 'Track it first: the things it needs are marked in the world', () => log.focus(q.id)));
+          if (q !== log.focused) {
+            const point = button('Point it out', 'Track it first: the things it needs are marked in the world', () => {
+              log.focus(q.id);
+              if (coaching && this.coachQuest === q.id) {
+                g.tips.add('quest_coached');
+                this.coachQuest = null;
+                this.log(`${d.title} is pointed out: follow the blue rings and the arrow. To go back to another quest, open your quests (L) and point that one out instead.`, 'good');
+              }
+            });
+            btns.append(point);
+            if (coaching && this.coachQuest === q.id) coachOn = [point, 2, `<b>Point it out</b> to have what this quest needs marked in the world (blue rings and an arrow). Only one quest is pointed out at a time; your house waits until you come back to it.`];
+          }
         }
         if (btns.childElementCount) row.appendChild(btns);
+        if (coachOn) coach(row, coachOn[0], coachOn[1], coachOn[2]);
         body.appendChild(row);
       }
     };
     section('New', log.quests.filter((q) => q.status === 'offered'));
-    section('Under way', log.quests.filter((q) => q.status === 'active'));
+    // (The quest being walked through comes first, where you'll see it.)
+    section('Under way', log.quests.filter((q) => q.status === 'active').sort((a, b) => +(b.id === this.coachQuest) - +(a.id === this.coachQuest)));
     section('Done', log.quests.filter((q) => q.status === 'done'));
     this.frame('quests', 'Quests', body);
   }

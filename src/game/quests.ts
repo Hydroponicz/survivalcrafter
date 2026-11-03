@@ -404,6 +404,8 @@ export class QuestLog {
   /** Quests just finished (shown in the panel a while) and just offered (likewise), by id, with when. */
   private finished = new Map<string, number>();
   private offered = new Map<string, number>();
+  /** The first quest offered, waiting for a quiet moment to explain the quest log. */
+  private introFor: string | null = null;
   /** Called when something the quest log shows has changed. */
   onChange?: () => void;
 
@@ -561,8 +563,27 @@ export class QuestLog {
     return s ? s.progress(g, q) : true;
   }
 
+  /** The first time a quest is offered: what the quest log is and how to follow several quests. */
+  private intro(g: Game, id: string) {
+    this.introFor = null;
+    g.tips.add('quest_intro');
+    const d = DEF.get(id)!;
+    g.ui.showNotice(`New quest: ${d.title}`,
+      `<p>${d.summary}</p>
+      <p>Quests come to you as you go: this one runs <b>alongside</b> your house, not instead of it. You can follow several at once.</p>
+      <p>Your <b>quest log</b> (${KEY('L')}) holds them all. There you:</p>
+      <ul>
+        <li><b>Accept</b> a new quest to take it up. It shows in the panel on the right while it's <b>tracked</b>.</li>
+        <li><b>Point it out</b>: one quest at a time has what it needs marked in the world, with <span style="color:#8fd0ff">blue rings</span> on the ground and an arrow. Point out the quest you want to work on now, and switch back whenever you like.</li>
+        <li><b>Untrack</b> a quest to set it aside: it keeps its progress for later.</li>
+      </ul>
+      <p>Let's take this one up now.</p>`,
+      'Open my quests', () => { g.ui.show('quests'); g.ui.refresh(); });
+  }
+
   /** Offer what's due, move quests on as their steps are done, and redraw the panel. */
   private check(g: Game) {
+    let flashOffer = false;
     // New quests, when their time comes.
     for (const d of QUESTS) {
       if (!d.offer || this.quests.some((q) => q.id === d.id) || (d.tutorial && this.off) || !d.offer(g)) continue;
@@ -570,8 +591,12 @@ export class QuestLog {
       this.quests.push({ id: d.id, status: 'offered', step: 0, tracked: false, anchor: null, start: { x: p.x, z: p.z } });
       this.offered.set(d.id, this.time);
       g.msg(`New quest: ${d.title}. Open your quests (L) to take it up.`, 'good');
+      // The first one: stop and show how quests work (once you're not in the middle of something).
+      if (!g.tips.has('quest_intro')) this.introFor ??= d.id;
+      flashOffer = true;
       this.changed();
     }
+    if (this.introFor && !g.working && !g.ui.modalOpen && !g.ui.anyWindowOpen()) this.intro(g, this.introFor);
     const home = this.quests.find((q) => q.id === 'home');
     // The house's floor: the first floor you finish (or the nearest, for an old plan).
     if (home && !home.anchor) {
@@ -601,7 +626,13 @@ export class QuestLog {
       }
     }
     for (const [id, t] of this.finished) if (this.time - t > 20) { this.finished.delete(id); this.lastHtml = ''; }
-    for (const [id, t] of this.offered) if (this.time - t > 45) { this.offered.delete(id); this.lastHtml = ''; }
+    // (Offers waiting from an earlier session show again.)
+    for (const q of this.quests) if (q.status === 'offered' && DEF.get(q.id)?.tutorial && !this.offered.has(q.id)) { this.offered.set(q.id, this.time); this.lastHtml = ''; }
+    // An offer stays in the panel until you take it up (a tutorial one), or a while (others).
+    for (const [id, t] of this.offered) {
+      const q = this.quests.find((x) => x.id === id);
+      if (q?.status !== 'offered' || (!DEF.get(id)?.tutorial && this.time - t > 45)) { this.offered.delete(id); this.lastHtml = ''; }
+    }
 
     // The focused quest's step: the nearest few things to go for (looking further afield if there's nothing close).
     const f = this.focused;
@@ -621,7 +652,7 @@ export class QuestLog {
       html += `<div class="quest-card quest-offer"><div class="tut-head">New quest</div>
         <div class="tut-title">${d.title}</div>
         <div class="tut-text">${d.summary}</div>
-        <div class="tut-hint quest-how">Press ${KEY('L')} to open your quests and take it up. You can follow several quests at once, and choose which show here.</div></div>`;
+        <div class="tut-hint quest-how">Press ${KEY('L')} for your quest log: <b>Accept</b> it, then <b>Point it out</b> to have what it needs marked in the world.</div></div>`;
     }
     for (const id of this.finished.keys()) {
       const d = DEF.get(id)!;
@@ -644,7 +675,7 @@ export class QuestLog {
       }
     }
     if (html) html += `<div class="tut-foot">${KEY('L')} quests · Hold Alt to move this</div>`;
-    this.render(html, flash);
+    this.render(html, flash || flashOffer);
   }
 
   private render(html: string, flash: boolean) {
