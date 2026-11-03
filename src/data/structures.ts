@@ -30,6 +30,8 @@ export interface StructureDef {
   container?: number; // storage capacity in kg
   opens?: boolean;
   bed?: boolean;
+  /** Gives light when lit (the fire light's strength, and how high it sits). */
+  glow?: { strength: number; height: number };
   /** Fine furniture: makes the room comfortable. Sleeping in a bed near it, you wake rested (see Game, sleep). */
   comfort?: number;
   /**
@@ -160,6 +162,11 @@ const defs: StructureDef[] = [
     bed: true, desc: 'Sleep to set your respawn point. Fine furniture near it makes you wake rested.' },
 
 ];
+
+// A torch planted in the ground: it burns (its fuel is the burn left) and lights the spot.
+defs.push({ id: 'standing_torch', name: 'Torch', icon: '🔥', category: 'Crafting', snap: false, item: 'torch',
+  boxes: [box(0, 0.55, 0, 0.09, 0.55, 0.09)], snaps: [], materials: [], skill: 'firemaking', difficulty: 1, stepTime: 0,
+  glow: { strength: 0.55, height: 1.15 }, desc: 'A torch planted in the ground. It burns about three days.' });
 
 // Fine furniture: made at a workbench and set down from your pack (see data/furniture).
 for (const f of FURNITURE) {

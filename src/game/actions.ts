@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { isIdentified, itemDef, itemName, learnSpecies, makeItem, TOOL_NAMES, typeDesc, typeName, type Item, type ToolKind } from '../data/items';
+import { isIdentified, itemDef, itemName, learnSpecies, makeItem, TOOL_NAMES, TORCH_BURN, typeDesc, typeName, type Item, type ToolKind } from '../data/items';
 import { RECIPES, STATION_NAMES, type Recipe } from '../data/recipes';
 import { STRUCTURES, totalMaterials, type StructureDef } from '../data/structures';
 import type { SkillId } from '../data/skills';
@@ -449,6 +449,46 @@ export const ACTIONS: ActionDef[] = [
     },
   },
 
+  // ===== torches
+  {
+    id: 'plant_torch', label: 'Plant torch here',
+    show: (c) => isGround(c) && c.g.activeItem()?.type === 'torch',
+    check: (c) => {
+      if (!isGround(c)) return null;
+      if (!isSoft(c.t.mat) || c.t.mat === Mat.Gravel) return 'A torch can only be planted in soft ground: grass, dirt, sand or clay, not rock or gravel.';
+      if (c.t.normal.y < 0.6) return 'The ground is too steep to plant a torch here.';
+      if (c.t.point.y < c.g.world.terrain.waterAt(c.t.point.x, c.t.point.z)) return 'Not under water.';
+      return null;
+    },
+    time: 0.6,
+    run: (c) => {
+      if (!isGround(c)) return;
+      const g = c.g, it = g.activeItem();
+      if (!it || it.type !== 'torch') return;
+      const p = c.t.point;
+      g.world.add<StructureObj>({ kind: 'structure', type: 'standing_torch', x: p.x, y: g.world.terrain.groundBelow(p.x, p.y + 0.3, p.z), z: p.z, yaw: Math.random() * 6.28,
+        consumed: {}, built: true, ql: it.ql, dmg: it.dmg, fuel: TORCH_BURN * Math.max(0, 1 - it.dmg / 100), lit: true });
+      g.consumeActive();
+      g.msg('You plant the torch in the ground. It burns on there; pick it up again any time.', 'info');
+    },
+  },
+  {
+    id: 'relight_torch', label: 'Relight torch',
+    show: (c) => { const s = obj(c, 'structure'); return !!s && s.type === 'standing_torch' && !s.lit; },
+    check: (c) => (c.g.inv.count('kindling') === 0 || c.g.inv.count('branch') === 0 ? 'Relighting a torch takes a kindling and a branch.' : null),
+    time: 5, skill: 'firemaking', difficulty: 2, stamina: 2,
+    minigame: () => ({ kind: 'bowdrill' }),
+    run: (c, o) => {
+      const s = obj(c, 'structure')!;
+      c.g.inv.take('kindling', 1);
+      if (!o.success) { c.g.inventoryChanged(); return c.g.msg('The kindling smoulders and dies. Try again.', 'fail'); }
+      c.g.inv.take('branch', 1);
+      c.g.inventoryChanged();
+      s.lit = true; s.fuel = TORCH_BURN; s.dmg = 0;
+      c.g.world.changed(s);
+      c.g.msg('You bind on a fresh head and the torch flares up again.', 'good');
+    },
+  },
   {
     id: 'place_item', label: (c) => `Place ${itemName(c.tool!).toLowerCase()} here`,
     show: (c) => isGround(c) && !!c.tool && !!itemDef(c.tool.type).places,
@@ -744,12 +784,15 @@ export const ACTIONS: ActionDef[] = [
     run: (c) => {
       const s = obj(c, 'structure')!;
       const def = STRUCTURES[s.type];
-      const it = makeItem(def.item!, s.ql);
-      it.dmg = s.dmg ?? 0;
+      const torch = s.type === 'standing_torch';
+      const it = makeItem(torch && !s.lit ? 'torch_spent' : def.item!, s.ql);
+      it.dmg = torch ? (s.lit ? 100 * (1 - s.fuel / TORCH_BURN) : 0) : s.dmg ?? 0;
       c.g.world.remove(s);
       c.g.inv.add(it);
       c.g.inventoryChanged();
-      c.g.msg(`You pick up the ${def.name.toLowerCase()}${(s.water ?? 0) > 0 ? ', spilling the water' : ''}. Place it again from your pack.`, 'info');
+      c.g.msg(torch
+        ? (s.lit ? 'You pull up the torch. Hold it, or plant it again in soft ground.' : 'You pull up the spent torch. Relight it with a kindling and a branch.')
+        : `You pick up the ${def.name.toLowerCase()}${(s.water ?? 0) > 0 ? ', spilling the water' : ''}. Place it again from your pack.`, 'info');
     },
   },
   {

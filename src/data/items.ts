@@ -18,6 +18,9 @@ export type WearSlot = 'head' | 'body' | 'legs' | 'feet';
 export const WEAR_SLOTS: WearSlot[] = ['head', 'body', 'legs', 'feet'];
 export const WEAR_SLOT_NAMES: Record<WearSlot, string> = { head: 'Head', body: 'Body', legs: 'Legs', feet: 'Feet' };
 
+/** Seconds a torch burns, in your hand or planted (three in-game days of 20 minutes). */
+export const TORCH_BURN = 3 * 20 * 60;
+
 export interface ItemDef {
   id: string;
   name: string;
@@ -70,7 +73,8 @@ const defs: ItemDef[] = [
   { id: 'refined_plank', name: 'Refined plank', icon: '🟧', weight: 2.5, desc: 'A plank sawn true and smooth with an iron saw. For fine work: workbenches and furniture.', fuel: 120 },
   { id: 'shaft', name: 'Shaft', icon: '🥢', weight: 0.6, desc: 'A straight wooden handle.', fuel: 40 },
   { id: 'kindling', name: 'Kindling', icon: '🔥', weight: 0.3, desc: 'Dry wood chips used to start fires.', fuel: 60 },
-  { id: 'torch', name: 'Torch', icon: '🔥', weight: 0.6, desc: 'A branch with a head of fiber and kindling, burning. Hold it to light your way. It burns down while you hold it (about five minutes): put it away when you don\'t need it.' },
+  { id: 'torch', name: 'Torch', icon: '🔥', weight: 0.6, desc: 'A branch with a head of fiber and kindling, burning. Hold it to light your way, or plant it in soft ground (grass, dirt, sand, clay: not rock) to light a spot. It burns for about three days in your hand or planted; then relight it with kindling and a branch.' },
+  { id: 'torch_spent', name: 'Spent torch', icon: '🪵', weight: 0.5, desc: 'A torch that has burnt down, its head charred. Relight it with a kindling and a branch (Primitive crafting).' },
   { id: 'sprout', name: 'Tree sprout', icon: '🌱', weight: 0.2, desc: 'Plant it on grass to grow a new tree.' },
   { id: 'wheat_seeds', name: 'Wheat seeds', icon: '🫘', weight: 0.1, desc: 'Sow on a cultivated field.' },
   { id: 'wheat', name: 'Wheat', icon: '🌾', weight: 0.5, desc: 'Harvested grain. Grind it at a quern.' },

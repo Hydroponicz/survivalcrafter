@@ -49,6 +49,8 @@ export const RECIPES: Recipe[] = [
     output: { item: 'stone_spear', count: 1 } },
   { id: 'torch', name: 'Torch', category: 'Primitive', skill: 'firemaking', difficulty: 2, time: 5,
     inputs: [{ item: 'branch', count: 1 }, { item: 'plant_fiber', count: 2 }, { item: 'kindling', count: 1 }], output: { item: 'torch', count: 1 } },
+  { id: 'relight_torch', name: 'Relight a spent torch', category: 'Primitive', skill: 'firemaking', difficulty: 2, time: 4,
+    inputs: [{ item: 'torch_spent', count: 1 }, { item: 'kindling', count: 1 }, { item: 'branch', count: 1 }], output: { item: 'torch', count: 1 } },
   { id: 'kindling_branch', name: 'Kindling (from branch)', category: 'Primitive', skill: 'firemaking', difficulty: 1, time: 3,
     tool: 'knife', inputs: [{ item: 'branch', count: 1 }], output: { item: 'kindling', count: 2 } },
 

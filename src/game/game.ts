@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { getNextUid, isIdentified, itemDef, itemName, learnSpecies, makeItem, setNextUid, WEAR_SLOTS, type Item, type WearSlot } from '../data/items';
+import { getNextUid, isIdentified, itemDef, itemName, learnSpecies, makeItem, setNextUid, TORCH_BURN, WEAR_SLOTS, type Item, type WearSlot } from '../data/items';
 import type { Recipe, StationKind } from '../data/recipes';
 import { SKILLS, Skills, type SkillId } from '../data/skills';
 import { pieceBoxes, STRUCTURES, type StructureDef, type V3 } from '../data/structures';
@@ -49,8 +49,6 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { QuestLog } from './quests';
 
 const REACH = 4.5;
-/** Seconds a torch burns in your hand. */
-const TORCH_BURN = 300;
 /** Skill above a task's difficulty needed to do it the quick way. */
 export const QUICK_MARGIN = 10;
 const BUILD_REACH = 8;
@@ -1736,11 +1734,16 @@ export class Game {
     // A torch in hand burns down; in deep water it's put out.
     const held = this.activeItem();
     if (held?.type === 'torch') {
-      held.dmg += (dt / TORCH_BURN) * 100;
+      held.dmg += ((dt * this.dev.timeScale) / TORCH_BURN) * 100;
       const doused = p.swimming;
       if (held.dmg >= 100 || doused) {
-        this.msg(doused ? 'Your torch hisses out in the water.' : 'Your torch burns out.', 'warn');
-        this.consumeActive();
+        this.msg(doused ? 'Your torch hisses out in the water. Relight it with kindling and a branch.' : 'Your torch burns down to a charred stub. Relight it with kindling and a branch.', 'warn');
+        // It's spent, not gone: what's left can be relit.
+        this.inv.remove(held.uid);
+        const spent = makeItem('torch_spent', held.ql);
+        this.inv.add(spent);
+        this.setActive(null);
+        this.inventoryChanged();
       }
     }
     if (this.dev.on('noNeeds')) { p.food = 100; p.water = 100; p.stamina = 100; }

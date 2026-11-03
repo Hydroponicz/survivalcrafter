@@ -235,7 +235,7 @@ const LIGHT_STEPS: Step[] = [
     text: `In crafting (${KEY('C')}), under <b>Primitive</b>, make a <b>Torch</b>: a branch, 2 plant fiber and a kindling. You light it with a bow drill: keep the bow moving until it catches.`,
     progress: (g) => g.inv.count('torch') > 0 },
   { id: 'hold', title: 'Light your way',
-    text: `Put the torch in your hand from the hotbar (${KEY('1')}-${KEY('9')}). It lights the ground around you, but it burns down: put it away (${KEY('0')}) when you don't need it, and make more as you go.`,
+    text: `Put the torch in your hand from the hotbar (${KEY('1')}-${KEY('9')}). It lights the ground around you. To light a spot, aim at soft ground (grass, dirt, sand, clay: not rock) and ${KEY('Left click')} to plant it there; pick it up again any time. A torch burns about three days, in your hand or planted; a spent one is relit with a kindling and a branch.`,
     progress: (g) => g.activeItem()?.type === 'torch' },
 ];
 

@@ -12,6 +12,7 @@ import type { ViewCull } from './cull';
 import { cylinderUV, surfaceMat, worldUV, type Surface } from './surfaces';
 import { builtShare, fillPlanes } from './pieceFill';
 import { furnitureMesh } from './furnitureMesh';
+import { STRUCTURES } from '../data/structures';
 import {
   CROP_STAGES, cropPos, type AnimalObj, type BushObj, type ForageObj, type PileObj, type Species, type StructureObj,
   type TreeObj, type World, type WorldListener, type WorldObj,
@@ -277,7 +278,8 @@ export class WorldView implements WorldListener {
       this.group.add(pool.mesh);
     }
 
-    for (let i = 0; i < 4; i++) {
+    // The nearest few fires and planted torches light their surroundings.
+    for (let i = 0; i < 6; i++) {
       const l = new THREE.PointLight(0xff9a40, 0, 16, 1.6);
       this.fireLights.push(l);
       this.group.add(l);
@@ -579,8 +581,10 @@ export class WorldView implements WorldListener {
     this.fireLights.forEach((l, i) => {
       const f = lit[i];
       if (!f) { l.intensity = 0; return; }
-      l.position.set(f.x, f.y + 1.2, f.z);
-      l.intensity = 9 + Math.sin(time * 13 + i) * 1.5 + Math.sin(time * 7.3) * 1;
+      // A fire's light, or a torch's (weaker, up where its flame is).
+      const glow = STRUCTURES[f.type].glow;
+      l.position.set(f.x, f.y + (glow?.height ?? 1.2), f.z);
+      l.intensity = (9 + Math.sin(time * 13 + i) * 1.5 + Math.sin(time * 7.3) * 1) * (glow?.strength ?? 1);
     });
     for (const fl of this.flames) {
       const s = 1 + Math.sin(time * 15 + fl.id) * 0.12;
@@ -769,6 +773,22 @@ export function buildPieceMesh(type: string, state: { lit?: boolean; open?: bool
         if (state.open) rails.rotation.y = -Math.PI / 2;
       }
       g.add(rails);
+      break;
+    }
+    case 'standing_torch': {
+      // A branch stuck upright in the ground, its wrapped head burning (or charred, once spent).
+      tex(new THREE.CylinderGeometry(0.022, 0.03, 1.0, 7), 'rough_wood', 0, 0.5, 0);
+      add(new THREE.CylinderGeometry(0.05, 0.038, 0.14, 8), state.lit ? 0x3a2a1c : 0x1c1814, 0, 1.03, 0, { roughness: 1 });
+      if (state.lit) {
+        const flame = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 8).translate(0, 0.75, 0).scale(0.065, 0.15, 0.065),
+          new THREE.MeshBasicMaterial({ color: 0xffb347, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false }));
+        const core = new THREE.Mesh(new THREE.SphereGeometry(1, 8, 6).translate(0, 0.7, 0).scale(0.03, 0.08, 0.03),
+          new THREE.MeshBasicMaterial({ color: 0xfff1b0, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false }));
+        flame.position.y = core.position.y = 1.08;
+        flame.userData.flame = core.userData.flame = true;
+        flame.castShadow = core.castShadow = false;
+        g.add(flame, core);
+      }
       break;
     }
     case 'campfire':
