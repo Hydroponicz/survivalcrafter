@@ -199,8 +199,9 @@ export class ChopGame extends Minigame {
     // Glide in: from the side, a little above, so you see the blade come down.
     this.camFrom.pos.copy(from.position);
     this.camFrom.quat.copy(from.quaternion);
-    this.camTo.copy(this.work.localToWorld(new THREE.Vector3(1.2, h + 0.55, 0.8)));
-    this.lookAt.copy(this.work.localToWorld(new THREE.Vector3(0, h + 0.2, 0.15)));
+    // (Far enough back to see the hatchet raised high and the log it comes down on.)
+    this.camTo.copy(this.work.localToWorld(new THREE.Vector3(1.55, h + 0.75, 0.95)));
+    this.lookAt.copy(this.work.localToWorld(new THREE.Vector3(0, h + 0.3, 0.2)));
     this.camera.position.copy(from.position);
     this.camera.quaternion.copy(from.quaternion);
     if ((from as THREE.PerspectiveCamera).fov) this.camera.fov = (from as THREE.PerspectiveCamera).fov;
