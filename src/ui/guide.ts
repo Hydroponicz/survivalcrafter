@@ -6,10 +6,10 @@ export const GUIDE_HTML = `
         <tr><td>WASD / Shift / Space</td><td>Move / sprint / jump</td></tr>
         <tr><td>Z</td><td>Crouch (toggle)</td></tr>
         <tr><td>Mouse</td><td>Look (click the game to capture the mouse)</td></tr>
-        <tr><td>V</td><td>Toggle first / third person · mouse wheel zooms in third person</td></tr>
+        <tr><td>V</td><td>Toggle first / third person · Ctrl + mouse wheel zooms in third person</td></tr>
         <tr><td>Left click / E</td><td>Do the default action on what you're looking at</td></tr>
         <tr><td>Right click / F</td><td>Open the action menu (pick with mouse or 1-9)</td></tr>
-        <tr><td>1-9 · 0</td><td>Activate hotbar item · bare hands</td></tr>
+        <tr><td>1-9 · 0 · wheel</td><td>Activate hotbar item · bare hands · mouse wheel steps through the hotbar</td></tr>
         <tr><td>R</td><td>Repeat last action · X: stop current action</td></tr>
         <tr><td>I / Tab · C · B · K</td><td>Inventory · Crafting · Build · Skills</td></tr>
         <tr><td>Hold Left Alt</td><td>Show the cursor: hover anything for a tooltip, or drag windows and the tutorial panel where you like</td></tr>

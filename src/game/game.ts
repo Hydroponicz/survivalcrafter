@@ -435,6 +435,22 @@ export class Game {
     this.setActive(active && active.type === type ? null : it.uid);
   }
 
+  /** Step to the next (dir 1) or previous (-1) hotbar slot holding something you can hold, wrapping round. */
+  cycleHotbar(dir: number) {
+    const active = this.activeItem();
+    let at = active ? this.hotbar.indexOf(active.type) : -1;
+    if (at < 0) at = dir > 0 ? -1 : this.hotbar.length;
+    for (let n = 0; n < this.hotbar.length; n++) {
+      at = (at + dir + this.hotbar.length) % this.hotbar.length;
+      const type = this.hotbar[at];
+      if (!type || type === 'bandage') continue; // (a bandage is applied, not held)
+      const it = this.inv.ofType(type)[0];
+      if (!it) continue;
+      if (it.uid !== this.activeUid) this.setActive(it.uid);
+      return;
+    }
+  }
+
   /** Drop items in a pile on the ground below a point, merging with a pile already there. */
   dropToGround(items: Item[], x: number, y: number, z: number) {
     for (const it of items) if (it.hot) { delete it.hot; this.msg(`The ${itemName(it).toLowerCase()} hisses and cools on the ground.`, 'info'); }
@@ -1627,6 +1643,11 @@ export class Game {
         if (hovered) this.bindHotbar(i, hovered.type);
         else this.useHotbar(i);
       }
+    }
+    // The mouse wheel steps through the hotbar (unless placing, where it rotates the piece).
+    if (inp.wheel && inp.locked && !this.player.wheelCaptured && !this.ui.menuOpen && !this.ui.cursorActive()) {
+      this.cycleHotbar(Math.sign(inp.wheel));
+      inp.wheel = 0;
     }
 
     // While a window or menu is open the mouse drives the in-game cursor, not the camera.

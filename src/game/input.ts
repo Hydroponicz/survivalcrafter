@@ -3,6 +3,8 @@ export class Input {
   mouseDX = 0;
   mouseDY = 0;
   wheel = 0;
+  /** Wheel turned with Ctrl held: zooms the third-person camera (the plain wheel cycles the hotbar). */
+  zoom = 0;
   locked = false;
   /** Mouse buttons currently held down (while the mouse is captured). */
   held = new Set<number>();
@@ -35,7 +37,13 @@ export class Input {
     document.addEventListener('contextmenu', (e) => {
       if (!isTyping(e)) e.preventDefault();
     });
-    window.addEventListener('wheel', (e) => { if (this.locked) this.wheel += Math.sign(e.deltaY); }, { passive: true });
+    window.addEventListener('wheel', (e) => {
+      if (!this.locked) return;
+      // Shift turns the wheel sideways in some browsers, so fall back to deltaX.
+      const d = Math.sign(e.deltaY || e.deltaX);
+      // Ctrl+wheel would zoom the page: take it for the camera instead.
+      if (e.ctrlKey) { e.preventDefault(); this.zoom += d; } else this.wheel += d;
+    }, { passive: false });
     document.addEventListener('pointerlockchange', () => {
       this.locked = document.pointerLockElement === this.canvas;
       if (!this.locked) { this.keys.clear(); this.held.clear(); }
@@ -62,7 +70,7 @@ export class Input {
   }
 
   endFrame() {
-    this.mouseDX = this.mouseDY = this.wheel = 0;
+    this.mouseDX = this.mouseDY = this.wheel = this.zoom = 0;
     this.pressed.clear();
   }
 }

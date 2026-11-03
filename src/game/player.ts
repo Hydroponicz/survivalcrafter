@@ -299,7 +299,7 @@ export class Player {
       this.yaw -= input.mouseDX * 0.0022;
       this.pitch -= input.mouseDY * 0.0022;
       this.pitch = Math.max(-1.5, Math.min(1.5, this.pitch));
-      if (this.cameraMode === 'third' && !this.wheelCaptured) this.camDist = Math.max(2, Math.min(12, this.camDist + input.wheel * 0.6));
+      if (this.cameraMode === 'third') this.camDist = Math.max(2, Math.min(12, this.camDist + input.zoom * 0.6));
     }
 
     const k = input.keys;
