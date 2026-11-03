@@ -258,12 +258,11 @@ export class Game {
   newCharacter() {
     const s = this.world.spawn;
     this.player.pos.set(s.x, this.world.terrain.heightAt(s.x, s.z) + 0.1, s.z);
-    // A very humble start: a crude knife and a bit of fiber.
-    this.inv.add(makeItem('stone_knife', 8));
+    // A very humble start: empty hands and a couple of handfuls of berries.
+    // Your first tool is a knife you knap yourself.
     this.inv.add(makeItem('berries', 10));
     this.inv.add(makeItem('berries', 10));
-    this.autoBind(this.inv.items[0]);
-    this.msg('You wake in the wilderness with nothing but a crude knife. Press H for help.', 'warn');
+    this.msg('You wake in the wilderness with empty hands and a few berries. Press H for help.', 'warn');
     this.msg('Follow the tutorial on the right: it walks you from bare hands to your first house.', 'info');
     this.quests = QuestLog.begin(this.markerTex, s.x, s.z);
   }

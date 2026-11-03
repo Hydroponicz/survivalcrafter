@@ -55,6 +55,8 @@ export interface QuestState {
   start: { x: number; z: number };
   /** Things you've done that a step waits for (e.g. 'felled': a tree you cut has come down). */
   flags?: string[];
+  /** The current step's id (saved with the number, so steps can be added later without shifting saves). */
+  stepId?: string;
 }
 
 export interface QuestSave { quests: QuestState[]; off: boolean }
@@ -147,10 +149,14 @@ const HOME_STEPS: Step[] = [
     targets: (g) => { const f = forage(g, ['fallen_branch', 'driftwood']); return f.length ? f : trees(g, true); },
     far: 'None close by: head into the woods.' },
   { id: 'stones', title: 'Find small rocks',
-    text: 'Small rocks lie loose on shores and around bare rock. Pick up a few: they become the heads of your tools.',
-    progress: (g) => has(g, 'rock_shard', 2),
+    text: 'Small rocks lie loose on shores and around bare rock. Pick up four: two you\'ll knap into a knife, the others become the heads of your hatchet and hammer.',
+    // (Rocks already made into tools count.)
+    progress: (g) => [Math.min(4, g.inv.count('rock_shard') + (hasTool(g, 'knife') ? 2 : 0) + (hasTool(g, 'hatchet') ? 1 : 0) + (hasTool(g, 'hammer') ? 1 : 0)), 4],
     targets: (g) => forage(g, ['pebbles']),
     far: 'None close by: look along a shore or at the foot of a rocky slope.' },
+  { id: 'knife', title: 'Knap a stone knife',
+    text: `Your first tool. Press ${KEY('C')} to open crafting and, under <b>Primitive</b>, make a <b>Stone knife</b> from two small rocks. It's knapped: strike flakes off the edge of the stone until it has the shape of a blade. You'll need the knife for kindling, shafts, butchering and much more.`,
+    progress: (g) => hasTool(g, 'knife') },
   { id: 'cordage', title: 'Twist some cordage',
     text: `Press ${KEY('C')} to open crafting. Under <b>Primitive</b>, craft <b>Cordage</b> twice (3 fiber each). Crafting takes a moment; you can keep the window open.`,
     progress: (g) => {
@@ -229,7 +235,7 @@ const LIGHT_STEPS: Step[] = [
     targets: (g) => { const f = forage(g, ['fiber_grass', 'reeds', 'fallen_branch']); return f.length ? f : trees(g, true); },
     far: 'Fiber grass grows in open meadows; branches lie in the woods.' },
   { id: 'kindling', title: 'Make kindling',
-    text: `In crafting (${KEY('C')}), under <b>Primitive</b>, whittle <b>Kindling (from branch)</b> with your knife. You'll need another branch to make the torch itself.`,
+    text: `In crafting (${KEY('C')}), under <b>Primitive</b>, whittle <b>Kindling (from branch)</b> with a knife (no knife yet? knap a <b>Stone knife</b> from two small rocks first). You'll need another branch to make the torch itself.`,
     progress: (g) => g.inv.count('kindling') > 0 || g.inv.count('torch') > 0 },
   { id: 'torch', title: 'Make a torch',
     text: `In crafting (${KEY('C')}), under <b>Primitive</b>, make a <b>Torch</b>: a branch, 2 plant fiber and a kindling. You light it with a bow drill: keep the bow moving until it catches.`,
@@ -305,17 +311,27 @@ export class QuestLog {
   static load(glow: THREE.Texture, d: QuestSave | OldOnboardingSave): QuestLog {
     const log = new QuestLog(glow);
     if ('quests' in d) {
-      log.quests = d.quests.filter((q) => DEF.has(q.id)).map((q) => ({ ...q, step: Math.min(DEF.get(q.id)!.steps.length, q.step) }));
+      log.quests = d.quests.filter((q) => DEF.has(q.id)).map((q) => {
+        const steps = DEF.get(q.id)!.steps;
+        let step = q.step;
+        const at = q.stepId ? steps.findIndex((s) => s.id === q.stepId) : -1;
+        if (at >= 0) step = at;
+        // Saves from before steps were saved by id: the knife step was added after the stones.
+        else if (!q.stepId && q.id === 'home' && step >= 4) step += 1;
+        return { ...q, step: Math.min(steps.length, step) };
+      });
       log.off = d.off;
     } else {
       // The old single tutorial is the first-house quest.
-      log.quests.push({ id: 'home', status: d.done ? 'done' : 'active', step: Math.min(HOME_STEPS.length, d.step), tracked: true, anchor: d.anchor, start: d.start });
+      // (Before the knife step was added after the stones.)
+      log.quests.push({ id: 'home', status: d.done ? 'done' : 'active', step: Math.min(HOME_STEPS.length, d.step >= 4 && !d.done ? d.step + 1 : d.step), tracked: true, anchor: d.anchor, start: d.start });
       log.off = d.done && d.step < HOME_STEPS.length;
     }
     return log;
   }
 
   serialize(): QuestSave {
+    for (const q of this.quests) q.stepId = this.def(q).steps[q.step]?.id;
     return { quests: this.quests, off: this.off };
   }
 
