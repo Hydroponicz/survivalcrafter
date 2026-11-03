@@ -570,14 +570,13 @@ export class QuestLog {
     const d = DEF.get(id)!;
     g.ui.showNotice(`New quest: ${d.title}`,
       `<p>${d.summary}</p>
-      <p>Quests come to you as you go: this one runs <b>alongside</b> your house, not instead of it. You can follow several at once.</p>
-      <p>Your <b>quest log</b> (${KEY('L')}) holds them all. There you:</p>
+      <p>You can have <b>multiple quests active</b> at once. Your other quests keep their progress.</p>
+      <p>Open your <b>quest log</b> with ${KEY('L')}:</p>
       <ul>
-        <li><b>Accept</b> a new quest to take it up. It's <b>pinned</b> to the panel on the right.</li>
-        <li><b>Track</b> the quest you want to work on now: its targets are marked in the world, with <span style="color:#8fd0ff">blue rings</span> on the ground and an arrow. You track one quest at a time, and can switch whenever you like.</li>
-        <li><b>Unpin</b> a quest to take it off the screen: it keeps its progress for later.</li>
-      </ul>
-      <p>Let's take this one up now.</p>`,
+        <li><b>Accept</b> to start a quest. It's <b>pinned</b> to the panel on the right.</li>
+        <li><b>Track</b> to show a quest's objectives in the world: <span style="color:#8fd0ff">blue markers</span> and an arrow. One quest is tracked at a time; switch any time.</li>
+        <li><b>Unpin</b> to hide a quest from the panel. You won't lose progress.</li>
+      </ul>`,
       'Open my quests', () => { g.ui.show('quests'); g.ui.refresh(); });
   }
 
