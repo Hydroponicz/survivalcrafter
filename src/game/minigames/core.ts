@@ -70,6 +70,11 @@ export abstract class Minigame {
     return null;
   }
 
+  /** A small label by the work that's always shown (a live readout), unlike the coaching hint. */
+  tag(): { x: number; y: number; text: string; gesture?: Gesture } | null {
+    return null;
+  }
+
   /** Gauges shown in the HUD panel. */
   meters(): Meter[] {
     return [];

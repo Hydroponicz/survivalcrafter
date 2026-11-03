@@ -319,7 +319,7 @@ export class MinigameSession {
       <div class="mg-foot"><span>Work: <b>${grade}</b></span><span>Right-click to stop</span></div>
       ${fb}`;
     this.panel.style.visibility = this.intro ? 'hidden' : 'visible';
-    const h = !this.intro && (this.coach || this.idle > 5) ? m.hint() : null;
+    const h = this.intro ? null : ((this.coach || this.idle > 5) ? m.hint() : null) ?? m.tag();
     this.hintEl.style.display = h ? 'flex' : 'none';
     if (h) {
       const html = `${h.gesture ? gestureHtml(h.gesture) : ''}<span>${h.text}</span>`;

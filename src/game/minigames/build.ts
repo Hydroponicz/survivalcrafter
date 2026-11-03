@@ -29,6 +29,8 @@ interface Marker {
   driven: number;
 }
 
+const GOLD = new THREE.Color(0xffd36a), GREEN = new THREE.Color(0x9fdc7c);
+
 /** The raised, ready angle of the hammer (radians back from the strike). */
 const READY = 0.6;
 /** How long the down-stroke takes, and the recoil back up after it (s). */
@@ -74,6 +76,8 @@ export class BuildGame extends Minigame {
   readonly instructions: string;
   /** Played out in the world itself (the game's camera follows this one). */
   readonly inWorld = true;
+  /** The view looks past where you stand: the game hides your body meanwhile. */
+  readonly hidesPlayer = true;
   /** What's shown in the world while you work (added to the world's scene). */
   readonly overlay = new THREE.Group();
   /** Where you stand to do it, and which way you face. */
@@ -108,6 +112,10 @@ export class BuildGame extends Minigame {
   readonly workLight = new THREE.Vector3();
   private camLook = new THREE.Vector3();
   private placeQ = 0;
+  /** How well it would fit if set down now (0..1), whether it's settled into the slot, and a nudge as it does. */
+  private hoverQ = 0;
+  private snapped = false;
+  private nudge = 0;
   private strikeQ: number[] = [];
   private setFrom = new THREE.Vector3();
   private bits: { mesh: THREE.Mesh; vel: THREE.Vector3; life: number }[] = [];
@@ -191,8 +199,13 @@ export class BuildGame extends Minigame {
     const across = fillsAcross(this.def);
     const worldCentre = this.piece.localToWorld(centre.clone());
     const pieceSize = Math.max(max.x - min.x, max.y - min.y);
-    const back = across ? 1.6 : 1.2 + pieceSize * 0.75;
-    this.camTo.pos.copy(worldCentre).addScaledVector(front, back).add(new THREE.Vector3(0, across ? 1.5 : 0.35, 0));
+    // Stations and furniture are laid a flat layer at a time (stones round a fire,
+    // a bench's top): look down on them at an angle, so the layer reads as an
+    // outline to drop into. Walls are seen straight on; floors from above.
+    const station = !across && this.flatSlot();
+    const back = across ? 1.6 : station ? 1.0 + pieceSize * 0.55 : 1.2 + pieceSize * 0.75;
+    const lift = across ? 1.5 : station ? 0.95 + pieceSize * 0.45 : 0.35;
+    this.camTo.pos.copy(worldCentre).addScaledVector(front, back).add(new THREE.Vector3(0, lift, 0));
     this.camTo.look.copy(worldCentre);
     this.camFrom.pos.copy(from.position);
     this.camFrom.quat.copy(from.quaternion);
@@ -223,10 +236,8 @@ export class BuildGame extends Minigame {
 
   hint(): { x: number; y: number; text: string; gesture?: Gesture } | null {
     this.camera.updateMatrixWorld();
-    if (this.phase === 'place') {
-      const p = this.toScreen(this.piece.localToWorld(this.slot.min.clone().add(this.slot.max).multiplyScalar(0.5)));
-      return { x: p.x + 30, y: p.y - 50, text: `move the ${itemDef(this.material).name.toLowerCase()} here and click` };
-    }
+    // (Placing has its own live readout: see tag().)
+    if (this.phase === 'place') return null;
     if (this.phase === 'fix' && this.markers[this.current]) {
       const p = this.toScreen(this.headAt(this.markers[this.current]));
       const n = this.markers.length;
@@ -236,10 +247,20 @@ export class BuildGame extends Minigame {
     return null;
   }
 
+  tag(): { x: number; y: number; text: string; gesture?: Gesture } | null {
+    if (this.phase !== 'place') return null;
+    this.camera.updateMatrixWorld();
+    const p = this.toScreen(this.piece.localToWorld(this.slotCentre()));
+    const pct = Math.round(this.hoverQ * 100);
+    return pct > 0
+      ? { x: p.x + 30, y: p.y - 56, text: `fit ${pct}% — click to set`, gesture: 'click' }
+      : { x: p.x + 30, y: p.y - 56, text: `move the ${itemDef(this.material).name.toLowerCase()} onto the outline` };
+  }
+
   meters(): Meter[] {
     const strikes = this.strikeQ.length ? this.strikeQ.reduce((a, b) => a + b, 0) / this.strikeQ.length : 0;
     return [
-      { label: 'Fit', value: this.phase === 'place' || this.phase === 'arrive' ? 0 : this.placeQ },
+      { label: 'Fit', value: this.phase === 'arrive' ? 0 : this.phase === 'place' ? this.hoverQ : this.placeQ, color: this.phase === 'place' ? '#9fdc7c' : undefined },
       ...(this.fixKind() ? [{ label: this.fixKind() === 'nail' ? 'Nailing' : 'Settling', value: strikes }] : []),
     ];
   }
@@ -267,29 +288,42 @@ export class BuildGame extends Minigame {
         return;
       }
       case 'place': {
-        // The material follows the pointer over the face of the piece.
-        const c = this.slot.min.clone().add(this.slot.max).multiplyScalar(0.5);
-        const wc = this.piece.localToWorld(c.clone());
-        const n = this.camera.getWorldDirection(new THREE.Vector3()).negate();
-        const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(n, wc);
-        this.raycaster.setFromCamera(i.ndc, this.camera);
-        const hit = this.raycaster.ray.intersectPlane(plane, new THREE.Vector3());
-        if (!hit) return;
-        const local = this.piece.worldToLocal(hit.clone());
-        // Held a hand's breadth in front, so you can see where it's going.
-        const camLocal = this.piece.worldToLocal(this.camera.position.clone());
-        this.carried.position.copy(local).lerp(camLocal, 0.06);
-        this.carried.rotation.z = Math.sin(this.time * 2) * 0.02;
-        const size = this.slot.max.clone().sub(this.slot.min);
-        const tol = Math.max(0.06, Math.min(size.x, size.y) * 0.25) * (0.7 + this.ease * 0.6);
-        const off = Math.hypot(local.x - c.x, local.y - c.y, fillsAcross(this.def) ? local.z - c.z : 0);
+        // The material slides over the piece itself, where you point: across the
+        // floor (or the layer being laid), or up the face of a wall. Only how far
+        // it is from the slot in that surface counts.
+        const c = this.slotCentre();
+        const flat = this.flatSlot();
+        const local = this.pointOnSlot(i.ndc, flat);
+        if (!local) return;
+        const off = flat ? Math.hypot(local.x - c.x, local.z - c.z) : Math.hypot(local.x - c.x, local.y - c.y);
+        const tol = this.tolerance();
+        const q = clamp01(1 - off / tol);
+        this.hoverQ = q;
+        // Close enough, and it settles into the slot with a little nudge.
+        const inside = off < tol;
+        if (inside && !this.snapped) { this.snapped = true; this.nudge = 1; sfx.tick(2); }
+        else if (!inside) this.snapped = false;
+        const want = inside ? c.clone() : local.clone();
+        if (!inside) {
+          // Held a hand's breadth off the surface, so it reads as carried.
+          if (flat) want.y += 0.05;
+          else want.z += (this.piece.worldToLocal(this.camera.position.clone()).z > c.z ? 1 : -1) * 0.05;
+        }
+        this.carried.position.lerp(want, 1 - Math.exp(-dt * (inside ? 16 : 30)));
+        this.nudge = Math.max(0, this.nudge - dt * 4);
+        this.carried.position.y += Math.sin(this.nudge * Math.PI) * 0.015;
+        this.carried.rotation.z = inside ? 0 : Math.sin(this.time * 2) * 0.02;
+        // The outline warms from gold to green as you close in.
+        (this.slotGlow.material as THREE.LineBasicMaterial).color.copy(GOLD).lerp(GREEN, q);
+        (this.slotFill.material as THREE.MeshBasicMaterial).color.copy(GOLD).lerp(GREEN, q);
         if (i.pressed) {
-          if (off > tol * 3) { this.say('Line it up with the glowing slot.', false, 0.8); return; }
-          this.placeQ = clamp01(1 - off / tol);
+          if (off > tol * 3) { this.say('Line it up with the outline.', false, 0.8); return; }
+          this.placeQ = q;
           this.sample(this.placeQ, 1);
           this.setFrom.copy(this.carried.position);
           this.phase = 'set';
           this.t = 0;
+          (this.slotGlow.material as THREE.LineBasicMaterial).color.copy(GOLD);
           this.say(this.placeQ > 0.85 ? 'A snug fit.' : this.placeQ > 0.5 ? 'Set.' : 'A bit off — it’ll do.', this.placeQ > 0.5, 0.8);
         }
         return;
@@ -316,6 +350,38 @@ export class BuildGame extends Minigame {
       case 'done':
         return;
     }
+  }
+
+  private slotCentre(): THREE.Vector3 {
+    return this.slot.min.clone().add(this.slot.max).multiplyScalar(0.5);
+  }
+
+  /** A layer lying flat (a floor strip, a course of a campfire or bench) rather than a course up a wall. */
+  private flatSlot(): boolean {
+    const size = this.slot.max.clone().sub(this.slot.min);
+    return size.y < Math.min(size.x, size.z);
+  }
+
+  /** How far off the slot still fits (m), from the slot's size in the surface you move over, and your skill. */
+  private tolerance(): number {
+    const size = this.slot.max.clone().sub(this.slot.min);
+    const m = this.flatSlot() ? Math.min(size.x, size.z) : Math.min(size.x, size.y);
+    return Math.max(0.1, m * 0.35) * (0.7 + this.ease * 0.6);
+  }
+
+  /** Where the pointer meets the slot's surface, in the piece's frame (or null). */
+  private pointOnSlot(ndc: THREE.Vector2, flat: boolean): THREE.Vector3 | null {
+    const c = this.slotCentre();
+    this.raycaster.setFromCamera(ndc, this.camera);
+    this.piece.updateMatrixWorld();
+    const ray = this.raycaster.ray.clone().applyMatrix4(this.piece.matrixWorld.clone().invert());
+    const plane = flat ? new THREE.Plane(new THREE.Vector3(0, 1, 0), -c.y) : new THREE.Plane(new THREE.Vector3(0, 0, 1), -c.z);
+    const hit = ray.intersectPlane(plane, new THREE.Vector3());
+    if (hit && hit.distanceTo(c) < 2.5) return hit;
+    // Looking along the surface: fall back to a plane facing the view.
+    const camLocal = this.piece.worldToLocal(this.camera.position.clone());
+    const facing = new THREE.Plane().setFromNormalAndCoplanarPoint(camLocal.sub(c).normalize(), c);
+    return ray.intersectPlane(facing, new THREE.Vector3());
   }
 
   /** Nails along the course (or the log's ends to settle). */
