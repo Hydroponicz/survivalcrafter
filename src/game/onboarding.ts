@@ -269,7 +269,6 @@ export class Onboarding {
     g.ui.root.append(this.panel, this.edge);
     // Hold Alt and drag it wherever suits you.
     g.ui.movable(this.panel, 'tutorial');
-    this.panel.dataset.tip = '<b>Tutorial</b><br>Hold <b>Alt</b> and drag to move this panel. Turn it off from the pause menu (Esc).';
     g.scene.add(this.group);
   }
 

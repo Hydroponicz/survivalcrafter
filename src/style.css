@@ -246,7 +246,7 @@ table.keys td:first-child { color: var(--accent); white-space: nowrap; font-fami
 .menu-foot { padding: 6px 12px 3px; color: var(--muted); font-size: 11px; border-top: 1px solid rgba(255,255,255,0.08); margin-top: 3px; }
 
 /* ---------- overlays */
-.pause { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,0.45); pointer-events: auto !important; cursor: pointer; }
+.pause { position: absolute; inset: 0; z-index: 20; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,0.45); pointer-events: auto !important; cursor: pointer; }
 .start-prompt { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,0.25); pointer-events: auto !important; cursor: pointer; }
 .start-box { text-align: center; background: var(--panel); border: 1px solid var(--panel-edge); padding: 22px 36px; border-radius: 10px; }
 .start-box h2 { margin: 0 0 4px; color: var(--accent); animation: mg-hint-pulse 1.2s ease-in-out infinite alternate; }
@@ -423,3 +423,14 @@ table.keys td:first-child { color: var(--accent); white-space: nowrap; font-fami
 /* Hold Alt: HUD parts take the cursor (for tooltips and dragging). */
 #ui .bars .bar, #ui .clock, #ui .status > span, #ui > .tut-panel { pointer-events: auto; }
 .drag-handle { cursor: grab; }
+
+.alt-hint {
+  position: absolute; left: 50%; top: 38%; transform: translate(-50%, -50%); z-index: 25; width: 380px; padding: 14px 18px 12px;
+  background: var(--panel); border: 1px solid var(--panel-edge); border-left: 3px solid var(--accent); border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,0.5);
+}
+#ui > .alt-hint { pointer-events: auto; }
+.alt-hint h3 { margin: 0 0 6px; color: var(--accent); }
+.alt-hint p, .alt-hint li { margin: 4px 0; font-size: 14px; line-height: 1.45; }
+.alt-hint ul { margin: 4px 0 6px; padding-left: 20px; }
+.alt-hint button { width: 100%; margin-top: 8px; padding: 8px; background: #3b2f1f; color: var(--ink); border: 1px solid var(--panel-edge); border-radius: 5px; }
+.alt-hint button:hover, .alt-hint button.vhover { background: #5a4629; }

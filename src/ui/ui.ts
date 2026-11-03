@@ -365,7 +365,29 @@ export class UI {
 
   /** Holding Left Alt shows the cursor (hover for tooltips, drag windows) without opening anything. */
   get peeking(): boolean {
-    return this.g.input.keys.has('AltLeft') || !!this.windowDrag;
+    return this.g.input.keys.has('AltLeft') || !!this.windowDrag || !!this.altHint;
+  }
+
+  /** The first time you hold Alt: what it's for, until you say you've got it. */
+  private altHint: HTMLElement | null = null;
+  private altSeen = (() => { try { return localStorage.getItem('survivalcrafter.altHint') === 'seen'; } catch { return false; } })();
+
+  private showAltHint() {
+    this.altSeen = true;
+    const h = el('div', 'alt-hint', `<h3>Free cursor</h3>
+      <p>While you hold <b>Left Alt</b> the cursor is yours and the camera holds still:</p>
+      <ul><li>hover anything (bars, items, skills, buttons) to learn more about it</li>
+      <li>drag windows and the tutorial panel by their title bars to where you like them</li></ul>
+      <p class="hint">Let go of Alt to look around again.</p>`);
+    const ok = el('button', 'wide', 'Got it');
+    ok.addEventListener('click', () => {
+      h.remove();
+      this.altHint = null;
+      try { localStorage.setItem('survivalcrafter.altHint', 'seen'); } catch { /* private mode */ }
+    });
+    h.appendChild(ok);
+    this.root.appendChild(h);
+    this.altHint = h;
   }
 
   closeMenu() {
@@ -501,9 +523,11 @@ export class UI {
     drawIcons();
     // The tutorial panel steps aside while a window is open.
     this.root.classList.toggle('has-window', this.open.size > 0);
-    // Tooltips follow the in-game cursor, and go when it does.
+    if (!this.altSeen && g.input.locked && g.input.keys.has('AltLeft')) this.showAltHint();
+    // Tooltips follow the in-game cursor, and go when it does (and stay out of the way of a drag).
     this.tooltip.check();
     if (this.cursor.isVisible) this.tooltip.place(this.cursor.x, this.cursor.y);
+    if (this.windowDrag) this.tooltip.reset();
     if (this.windowDrag && g.input.locked) this.dragWindowTo(this.cursor.x, this.cursor.y);
     else if (g.input.locked) this.tooltip.reset();
     // Your character in the inventory window, as you are now.
