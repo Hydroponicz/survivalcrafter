@@ -8,13 +8,21 @@ export class Tooltip {
   /** Where the pointer last was (to find what's under it again after a redraw). */
   private px = 0;
   private py = 0;
+  /** Which side of the pointer the box sits (kept until it no longer fits, so it doesn't hop about). */
+  private left = false;
+  private above = false;
+  private tip = '';
 
   constructor(root: HTMLElement) {
     this.el = document.createElement('div');
     this.el.className = 'tooltip';
     root.appendChild(this.el);
-    document.addEventListener('mouseover', (e) => this.over(e.target as Element | null, e.clientX, e.clientY));
-    document.addEventListener('mousemove', (e) => { if (this.target) this.place(e.clientX, e.clientY); });
+    // While the game holds the mouse, the in-game cursor drives the tooltip
+    // (its hovers are replayed events); the real mouse's events then report
+    // where the pointer was when it was captured, and would tug the box there.
+    const real = (e: MouseEvent) => e.isTrusted && !!document.pointerLockElement;
+    document.addEventListener('mouseover', (e) => { if (!real(e)) this.over(e.target as Element | null, e.clientX, e.clientY); });
+    document.addEventListener('mousemove', (e) => { if (this.target && !real(e)) this.place(e.clientX, e.clientY); });
   }
 
   private over(el: Element | null, x: number, y: number) {
@@ -28,7 +36,8 @@ export class Tooltip {
     if (title) { (t as HTMLElement).dataset.tip ??= escapeHtml(title); t.removeAttribute('title'); }
     const tip = (t as HTMLElement).dataset.tip;
     if (!tip) { this.hide(); return; }
-    this.el.innerHTML = tip;
+    // (A window redrawn under the pointer gives the same tip again: leave it be.)
+    if (this.tip !== tip) { this.tip = tip; this.el.innerHTML = tip; this.left = this.above = false; }
     this.el.style.display = 'block';
     this.place(x, y);
   }
@@ -38,9 +47,16 @@ export class Tooltip {
     this.px = x; this.py = y;
     if (this.el.style.display !== 'block') return;
     const w = this.el.offsetWidth, h = this.el.offsetHeight;
-    const left = x + 16 + w > window.innerWidth ? x - 12 - w : x + 16;
-    const top = y + 18 + h > window.innerHeight ? y - 10 - h : y + 18;
-    this.el.style.transform = `translate(${Math.max(4, left)}px, ${Math.max(4, top)}px)`;
+    // Right of and below the pointer unless it won't fit; once moved, it stays
+    // on that side until it fits back comfortably (no flipping at the edge).
+    if (!this.left && x + 16 + w > window.innerWidth) this.left = true;
+    else if (this.left && x + 16 + w < window.innerWidth - 40) this.left = false;
+    if (!this.above && y + 18 + h > window.innerHeight) this.above = true;
+    else if (this.above && y + 18 + h < window.innerHeight - 40) this.above = false;
+    const left = this.left ? x - 12 - w : x + 16;
+    const top = this.above ? y - 10 - h : y + 18;
+    const t = `translate(${Math.round(Math.max(4, left))}px, ${Math.round(Math.max(4, top))}px)`;
+    if (this.el.style.transform !== t) this.el.style.transform = t;
   }
 
   /** Hide unless the thing hovered is still on the page (windows close, menus redraw). */
