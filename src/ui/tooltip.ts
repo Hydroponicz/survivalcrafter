@@ -5,6 +5,9 @@
 export class Tooltip {
   readonly el: HTMLElement;
   private target: Element | null = null;
+  /** Where the pointer last was (to find what's under it again after a redraw). */
+  private px = 0;
+  private py = 0;
 
   constructor(root: HTMLElement) {
     this.el = document.createElement('div');
@@ -15,6 +18,7 @@ export class Tooltip {
   }
 
   private over(el: Element | null, x: number, y: number) {
+    this.px = x; this.py = y;
     const t = el?.closest?.('[data-tip], [title]') ?? null;
     if (t === this.target) return;
     this.target = t;
@@ -31,6 +35,7 @@ export class Tooltip {
 
   /** Keep the box by the pointer, inside the screen. */
   place(x: number, y: number) {
+    this.px = x; this.py = y;
     if (this.el.style.display !== 'block') return;
     const w = this.el.offsetWidth, h = this.el.offsetHeight;
     const left = x + 16 + w > window.innerWidth ? x - 12 - w : x + 16;
@@ -40,7 +45,10 @@ export class Tooltip {
 
   /** Hide unless the thing hovered is still on the page (windows close, menus redraw). */
   check() {
-    if (this.target && !this.target.isConnected) { this.target = null; this.hide(); }
+    if (!this.target || this.target.isConnected) return;
+    // Redrawn under a still pointer: show whatever is there now.
+    this.target = null;
+    this.over(document.elementFromPoint(this.px, this.py), this.px, this.py);
   }
 
   hide() {

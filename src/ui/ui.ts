@@ -527,9 +527,9 @@ export class UI {
     // Tooltips follow the in-game cursor, and go when it does (and stay out of the way of a drag).
     this.tooltip.check();
     if (this.cursor.isVisible) this.tooltip.place(this.cursor.x, this.cursor.y);
+    else if (g.input.locked) this.tooltip.reset();
     if (this.windowDrag) this.tooltip.reset();
     if (this.windowDrag && g.input.locked) this.dragWindowTo(this.cursor.x, this.cursor.y);
-    else if (g.input.locked) this.tooltip.reset();
     // Your character in the inventory window, as you are now.
     if (this.open.has('character')) {
       const held = g.activeItem();
@@ -699,7 +699,9 @@ export class UI {
     const g = this.g;
     const body = el('div');
     const w = g.inv.weight();
-    body.appendChild(el('div', 'inv-weight', `Carrying <b>${w.toFixed(1)}</b> / ${CARRY_CAPACITY} kg${w > CARRY_CAPACITY ? ' — <span class="warn">overloaded, you move slowly</span>' : ''}`));
+    const carrying = el('div', 'inv-weight', `Carrying <b>${w.toFixed(1)}</b> / ${CARRY_CAPACITY} kg${w > CARRY_CAPACITY ? ' — <span class="warn">overloaded, you move slowly</span>' : ''}`);
+    carrying.dataset.tip = weightTip(g.inv.items, CARRY_CAPACITY, 'Over this you move slowly.');
+    body.appendChild(carrying);
     body.appendChild(el('div', 'hint', 'Click <b>Use</b> to make an item your active item (tools, seeds, dirt…). Drag an item onto the hotbar (or hover it and press <b>1-9</b>) to bind it.'));
     const groups = g.inv.grouped().sort((a, b) => itemDef(a.type).name.localeCompare(itemDef(b.type).name));
     if (!groups.length) body.appendChild(el('div', 'empty', 'Your pack is empty.'));
@@ -847,7 +849,9 @@ export class UI {
     const body = el('div');
     const cap = c.kind === 'structure' ? STRUCTURES[c.type].container : undefined;
     const w = items.reduce((a, i) => a + itemDef(i.type).weight, 0);
-    body.appendChild(el('div', 'inv-weight', `${items.length} items · ${w.toFixed(1)}${cap ? ` / ${cap}` : ''} kg`));
+    const held = el('div', 'inv-weight', `${items.length} items · ${w.toFixed(1)}${cap ? ` / ${cap}` : ''} kg`);
+    held.dataset.tip = weightTip(items, cap, cap ? 'It holds no more than this.' : '');
+    body.appendChild(held);
     const all = el('button', 'wide', 'Take everything you can carry');
     all.addEventListener('click', () => g.takeFromPile(c, [...items]));
     body.appendChild(all);
@@ -1148,4 +1152,24 @@ function skillTip(k: SkillId, v: number): string {
 
 function escAttr(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+}
+
+/** Hover text for a load: what weighs the most, heaviest first. */
+function weightTip(items: Item[], cap: number | undefined, capNote: string): string {
+  const by = new Map<string, { n: number; kg: number }>();
+  let total = 0;
+  for (const it of items) {
+    const kg = itemDef(it.type).weight;
+    const e = by.get(it.type) ?? { n: 0, kg: 0 };
+    e.n++; e.kg += kg; total += kg;
+    by.set(it.type, e);
+  }
+  if (!total) return '<b>Weight</b><br>Nothing here yet.';
+  const rows = [...by].sort((a, b) => b[1].kg - a[1].kg);
+  const top = rows.slice(0, 6), rest = rows.slice(6).reduce((a, [, e]) => a + e.kg, 0);
+  const line = (name: string, kg: number) => `<div class="wt-row"><span>${name}</span><b>${kg.toFixed(1)} kg</b><i style="width:${Math.max(2, (kg / total) * 100)}%"></i></div>`;
+  return `<b>Weight</b> · ${total.toFixed(1)}${cap ? ` / ${cap}` : ''} kg${cap ? ` (${Math.round((total / cap) * 100)}%)` : ''}
+    ${top.map(([type, e]) => line(`${esc(itemDef(type).name)}${e.n > 1 ? ` ×${e.n}` : ''}`, e.kg)).join('')}
+    ${rest > 0 ? line(`${rows.length - 6} other kinds`, rest) : ''}
+    ${capNote ? `<span class="tip-facts">${capNote}</span>` : ''}`;
 }
