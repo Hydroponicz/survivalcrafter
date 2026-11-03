@@ -634,20 +634,35 @@ export class Game {
     this.settleTimer -= dt;
     if (this.settleTimer > 0) return;
     this.settleTimer = 0.5;
-    const p = this.player.pos, t = this.world.terrain;
+    const p = this.player.pos;
     if (this.settled.size > 4000) this.settled.clear();
     let budget = 60;
     for (const o of this.world.near(p.x, p.z, 45)) {
       if (o.kind !== 'forage' || this.settled.has(o.id)) continue;
       if (budget-- <= 0) break;
-      let lo = o.y - 0.45, hi = o.y + 0.45;
-      let y = o.y;
-      if (t.solidAt(o.x, lo, o.z) && !t.solidAt(o.x, hi, o.z)) {
-        for (let k = 0; k < 9; k++) { const mid = (lo + hi) / 2; if (t.solidAt(o.x, mid, o.z)) lo = mid; else hi = mid; }
-        y = (lo + hi) / 2;
-      }
-      this.settled.set(o.id, y);
-      if (Math.abs(y - o.y) > 0.01) this.view.resettleForage(o);
+      this.settleFind(o);
+    }
+  }
+
+  /** Measure the drawn ground under one find and rest it there. */
+  private settleFind(o: ForageObj) {
+    const t = this.world.terrain;
+    let lo = o.y - 0.45, hi = o.y + 0.45;
+    let y = o.y;
+    if (t.solidAt(o.x, lo, o.z) && !t.solidAt(o.x, hi, o.z)) {
+      for (let k = 0; k < 9; k++) { const mid = (lo + hi) / 2; if (t.solidAt(o.x, mid, o.z)) lo = mid; else hi = mid; }
+      y = (lo + hi) / 2;
+    }
+    this.settled.set(o.id, y);
+    this.view.resettleForage(o);
+  }
+
+  /** The ground round a point was worked: measure the finds there afresh, now. */
+  resettleFinds(x: number, z: number, r: number) {
+    for (const o of this.world.near(x, z, r)) {
+      if (o.kind !== 'forage' || Math.hypot(o.x - x, o.z - z) > r) continue;
+      this.settled.delete(o.id);
+      this.settleFind(o);
     }
   }
 

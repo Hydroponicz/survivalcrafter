@@ -479,12 +479,19 @@ export class World {
   }
 
   /** Forage finds on ground that was dug away or buried are lost; the rest settle to the new surface. */
-  settleForage(x: number, z: number, r: number) {
-    for (const o of this.near(x, z, r + 1)) {
+  /**
+   * After the ground is worked round a point: finds where it was dug out go
+   * with the earth; elsewhere (levelled, raised, smoothed) they ride the new
+   * surface.
+   */
+  settleForage(x: number, z: number, r: number, dug = false) {
+    for (const o of [...this.near(x, z, r + 1)]) {
       if (o.kind !== 'forage') continue;
-      const h = this.terrain.heightAt(o.x, o.z);
-      if (Math.abs(h - o.y) > 0.25) this.remove(o);
-      else { o.y = h; this.changed(o); }
+      const d = Math.hypot(o.x - x, o.z - z);
+      if (d > r + 0.3) continue;
+      if (dug) { this.remove(o); continue; }
+      o.y = this.terrain.heightAt(o.x, o.z);
+      this.changed(o);
     }
   }
 

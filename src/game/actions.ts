@@ -123,9 +123,11 @@ function earthBudget(c: Ctx, base: number, skill: SkillId) {
   return base * (0.6 + 0.4 * power) * (1 + c.g.skills.get(skill) / 120);
 }
 
-function afterEdit(c: Ctx, x: number, z: number, r: number) {
+/** After the ground's been worked: crops, finds (gone if `dug` out, else onto the new surface), and what's drawn. */
+function afterEdit(c: Ctx, x: number, z: number, r: number, dug = false) {
   c.g.world.disturbCrops(x, z, r);
-  c.g.world.settleForage(x, z, r);
+  c.g.world.settleForage(x, z, r, dug);
+  c.g.resettleFinds(x, z, r + 0.5);
   c.g.view.refreshNear(x, z, r + 1);
   c.g.groundCover.invalidate(x, z, r + 1);
 }
@@ -240,7 +242,7 @@ export const ACTIONS: ActionDef[] = [
       const budget = earthBudget(c, 0.9, 'digging') * (o.success ? 1 : 0.4);
       const cx = p.x - n.x * 0.35, cy = p.y - n.y * 0.35, cz = p.z - n.z * 0.35;
       const vol = c.g.world.terrain.dig(cx, cy, cz, DIG_RADIUS, budget, isSoft);
-      afterEdit(c, cx, cz, DIG_RADIUS);
+      afterEdit(c, cx, cz, DIG_RADIUS, true);
       const got = c.g.collectEarth(vol, o.ql);
       c.g.msg(got ? `You dig out ${got}.` : 'You scrape at the ground but move almost nothing.', o.success ? 'good' : 'info');
     },
@@ -324,7 +326,7 @@ export const ACTIONS: ActionDef[] = [
       const { point: p, normal: n } = c.t;
       const cx = p.x - n.x * 0.3, cy = p.y - n.y * 0.3, cz = p.z - n.z * 0.3;
       const vol = c.g.world.terrain.dig(cx, cy, cz, 1.1, earthBudget(c, 0.7, 'mining'), () => true);
-      afterEdit(c, cx, cz, 1.1);
+      afterEdit(c, cx, cz, 1.1, true);
       const got = c.g.collectEarth(vol, o.ql);
       c.g.msg(got ? `You mine ${got}.${vol[Mat.Iron] ? ' Iron!' : ''}` : 'You break off some gravel.', vol[Mat.Iron] ? 'good' : 'info');
     },
