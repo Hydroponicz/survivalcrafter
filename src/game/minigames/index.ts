@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import { Minigame, type MgInput } from './core';
 import { CordageGame } from './cordage';
 import { CrankGame, type CrankVariant } from './crank';
-import { CarveGame, CenterGame, HeatGame, PlaceGame, type HeatVariant, type PlaceVariant } from './shape';
+import { CenterGame, HeatGame, PlaceGame, type HeatVariant, type PlaceVariant } from './shape';
+import { CarveGame } from './whittle';
 import { StrikeGame, type StrikeVariant } from './strike';
 import { BellowsGame, BowDrillGame, SawGame } from './stroke';
 import { PourGame, QuenchGame } from './smithy';
@@ -17,7 +18,7 @@ export type MinigameSpec =
   | { kind: 'quench'; gear?: number }
   | { kind: 'crank'; variant: CrankVariant; turns: number }
   | { kind: 'strike'; variant: StrikeVariant; hits: number; gear?: number; heat?: number; iron?: boolean }
-  | { kind: 'carve'; passes: number; wide?: boolean }
+  | { kind: 'carve'; passes: number; wide?: boolean; make?: string }
   | { kind: 'heat'; variant: HeatVariant }
   | { kind: 'place'; variant: PlaceVariant; count: number }
   | { kind: 'center' }
@@ -33,7 +34,7 @@ export function createMinigame(spec: MinigameSpec, ease: number, toolType?: stri
     case 'quench': return new QuenchGame(ease, spec.gear ?? 0.5);
     case 'crank': return new CrankGame(ease, spec.variant, spec.turns);
     case 'strike': return new StrikeGame(ease, spec.variant, spec.hits, { anvil: spec.gear, heat: spec.heat, iron: spec.iron }, toolType);
-    case 'carve': return new CarveGame(ease, spec.passes, spec.wide, toolType);
+    case 'carve': return new CarveGame(ease, spec.passes, spec.wide, toolType, spec.make);
     case 'heat': return new HeatGame(ease, spec.variant);
     case 'place': return new PlaceGame(ease, spec.variant, spec.count);
     case 'center': return new CenterGame(ease);
@@ -49,12 +50,12 @@ export const RECIPE_MINIGAMES: Record<string, MinigameSpec> = {
   stone_pickaxe: { kind: 'strike', variant: 'knap', hits: 5 },
   stone_hammer: { kind: 'strike', variant: 'knap', hits: 4 },
   stone_spear: { kind: 'strike', variant: 'knap', hits: 4 },
-  kindling_branch: { kind: 'carve', passes: 1 },
-  shaft: { kind: 'carve', passes: 2 },
+  kindling_branch: { kind: 'carve', passes: 1, make: 'kindling' },
+  shaft: { kind: 'carve', passes: 2, make: 'shaft' },
   kindling_log: { kind: 'strike', variant: 'split', hits: 3 },
   split_planks: { kind: 'strike', variant: 'split', hits: 3 },
   saw_planks: { kind: 'saw', cuts: 4 },
-  wooden_shovel: { kind: 'carve', passes: 2, wide: true },
+  wooden_shovel: { kind: 'carve', passes: 1, wide: true, make: 'wooden_shovel' },
   clay_jar: { kind: 'center' },
   fire_jar: { kind: 'heat', variant: 'fire' },
   mortar: { kind: 'crank', variant: 'stir', turns: 3 },
@@ -67,7 +68,7 @@ export const RECIPE_MINIGAMES: Record<string, MinigameSpec> = {
   saw: { kind: 'strike', variant: 'forge', hits: 6 },
   scythe: { kind: 'strike', variant: 'forge', hits: 6 },
   iron_sword: { kind: 'strike', variant: 'forge', hits: 7 },
-  wooden_tongs: { kind: 'carve', passes: 2 },
+  wooden_tongs: { kind: 'carve', passes: 2, make: 'wooden_tongs' },
   crucible: { kind: 'center' },
   fire_crucible: { kind: 'heat', variant: 'fire' },
   bellows: { kind: 'strike', variant: 'nail', hits: 4 },
@@ -84,10 +85,10 @@ export const RECIPE_MINIGAMES: Record<string, MinigameSpec> = {
   poultice: { kind: 'crank', variant: 'pound', turns: 3 },
   hearty_stew: { kind: 'crank', variant: 'stir', turns: 4 },
   // Cutting the hide to shape.
-  hide_cap: { kind: 'carve', passes: 1 },
-  hide_boots: { kind: 'carve', passes: 2 },
-  hide_trousers: { kind: 'carve', passes: 2, wide: true },
-  hide_tunic: { kind: 'carve', passes: 3, wide: true },
+  hide_cap: { kind: 'carve', passes: 1, make: 'hide_cap' },
+  hide_boots: { kind: 'carve', passes: 1, make: 'hide_boots' },
+  hide_trousers: { kind: 'carve', passes: 1, wide: true, make: 'hide_trousers' },
+  hide_tunic: { kind: 'carve', passes: 1, wide: true, make: 'hide_tunic' },
 };
 
 /** The hands-on work for one building step, by the material it uses. */

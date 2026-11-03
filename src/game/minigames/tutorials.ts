@@ -131,12 +131,12 @@ const T: Record<string, Tutorial> = {
   },
   carve: {
     title: 'Carving',
-    what: 'Whittle the wood by drawing the knife along the marked line.',
+    what: 'Knife work: whittle a branch down, or cut a shape out of a plank or hide, by drawing the knife along the dashed line.',
     steps: [
-      { gesture: 'right', text: 'Hold the left button and draw the knife slowly from left to right along the dashed line.' },
-      { gesture: 'hold', text: 'Stay on the line. Rushing doesn’t carve faster.' },
+      { gesture: 'right', text: 'Hold the left button and draw the knife along the line: left to right on a branch (each pass peels and pares it), round the outline on a plank or hide.' },
+      { gesture: 'hold', text: 'Stay on the line at a steady pace. Rushing doesn’t cut faster, and slipping off gouges the work.' },
     ],
-    quality: 'The closer you follow the line, the better the piece.',
+    quality: 'The cleaner and steadier your cuts, the better the piece.',
   },
   'heat:roast': {
     title: 'Cooking over the fire',
