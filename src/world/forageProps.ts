@@ -91,10 +91,13 @@ export function forageGeometry(species: string): THREE.BufferGeometry {
     }
     case 'fallen_branch':
     case 'driftwood': {
-      const wood = species === 'driftwood' ? 0xb8ab94 : 0x5c4027;
+      // Weathered grey-brown, lighter than the forest floor, with a pale snapped end.
+      const wood = species === 'driftwood' ? 0xb8ab94 : 0x86684a;
       return merge([
-        paint(new THREE.CylinderGeometry(0.04, 0.05, 1.1, 5).rotateZ(Math.PI / 2).translate(0, 0.05, 0), wood),
-        paint(new THREE.CylinderGeometry(0.02, 0.03, 0.45, 4).rotateZ(Math.PI / 2).rotateY(0.7).translate(0.25, 0.05, 0.12), wood),
+        paint(new THREE.CylinderGeometry(0.05, 0.06, 1.15, 6).rotateZ(Math.PI / 2).translate(0, 0.06, 0), wood),
+        paint(new THREE.CylinderGeometry(0.048, 0.048, 0.02, 6).rotateZ(Math.PI / 2).translate(0.585, 0.06, 0), 0xd8c09a),
+        paint(new THREE.CylinderGeometry(0.022, 0.032, 0.5, 5).rotateZ(Math.PI / 2).rotateY(0.7).translate(0.25, 0.06, 0.13), wood),
+        paint(new THREE.CylinderGeometry(0.014, 0.02, 0.3, 4).rotateZ(Math.PI / 2).rotateY(-0.9).translate(-0.3, 0.05, -0.1), 0x9a7c5a),
       ]);
     }
     case 'flint':

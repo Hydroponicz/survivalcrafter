@@ -237,6 +237,8 @@ export class WorldView implements WorldListener {
   private foragePools = new Map<string, InstancePool>();
   /** Whether the player can currently see a forage find (skill-gated). */
   forageVisible: (o: ForageObj) => boolean = () => true;
+  /** Where a find actually rests: on the ground as drawn (which can differ a little from its stored height). */
+  forageGround: (o: ForageObj) => number = (o) => o.y;
   private cropGeo: THREE.BufferGeometry;
   private cropMats: THREE.MeshStandardMaterial[];
 
@@ -440,6 +442,11 @@ export class WorldView implements WorldListener {
     else this.berryPool.hide(slot);
   }
 
+  /** Redraw one find (after the ground under it has been measured). */
+  resettleForage(o: ForageObj) {
+    this.updateForage(o);
+  }
+
   private updateForage(o: ForageObj) {
     const slot = this.slots.get(o.id);
     const pool = this.foragePools.get(o.species);
@@ -447,7 +454,7 @@ export class WorldView implements WorldListener {
     if (!this.forageVisible(o)) { pool.hide(slot); return; }
     const s = (0.85 + hash2(o.id, 5) * 0.35) * forageScale(FORAGE[o.species]?.category ?? 'material');
     this.q.setFromAxisAngle(this.up, o.rot);
-    this.m4.compose(new THREE.Vector3(o.x, o.y - 0.02, o.z), this.q, new THREE.Vector3(s, s, s));
+    this.m4.compose(new THREE.Vector3(o.x, this.forageGround(o) - 0.02, o.z), this.q, new THREE.Vector3(s, s, s));
     pool.set(slot, this.m4);
   }
 

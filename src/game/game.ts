@@ -211,6 +211,7 @@ export class Game {
     this.view = new WorldView(world);
     this.knowledge.load(undefined);
     this.view.forageVisible = (o) => this.canSee(o);
+    this.view.forageGround = (o) => this.settled.get(o.id) ?? o.y;
     world.regionHooks.push(forageRegion);
     this.scene.add(this.markers);
     this.scene.add(this.view.group);
@@ -619,6 +620,37 @@ export class Game {
 
   // ---------- foraging
   /** Can the player see this find? Rarer ones need skill, or a survey. */
+  /** Finds sitting on the ground as it's drawn, by id (measured once, near you). */
+  private settled = new Map<number, number>();
+  private settleTimer = 0;
+
+  /**
+   * Finds are placed by the land's smooth height, but the ground drawn from the
+   * voxels can sit a few centimetres above or below it: enough to bury a branch.
+   * Near you (where the ground is built anyway), measure the real surface under
+   * each find and set it there.
+   */
+  private settleFinds(dt: number) {
+    this.settleTimer -= dt;
+    if (this.settleTimer > 0) return;
+    this.settleTimer = 0.5;
+    const p = this.player.pos, t = this.world.terrain;
+    if (this.settled.size > 4000) this.settled.clear();
+    let budget = 60;
+    for (const o of this.world.near(p.x, p.z, 45)) {
+      if (o.kind !== 'forage' || this.settled.has(o.id)) continue;
+      if (budget-- <= 0) break;
+      let lo = o.y - 0.45, hi = o.y + 0.45;
+      let y = o.y;
+      if (t.solidAt(o.x, lo, o.z) && !t.solidAt(o.x, hi, o.z)) {
+        for (let k = 0; k < 9; k++) { const mid = (lo + hi) / 2; if (t.solidAt(o.x, mid, o.z)) lo = mid; else hi = mid; }
+        y = (lo + hi) / 2;
+      }
+      this.settled.set(o.id, y);
+      if (Math.abs(y - o.y) > 0.01) this.view.resettleForage(o);
+    }
+  }
+
   canSee(o: ForageObj): boolean {
     return noticeOf(o) <= this.skills.get('foraging') || (this.revealed.get(o.id) ?? 0) > this.elapsed;
   }
@@ -1854,6 +1886,7 @@ export class Game {
       this.growth.update(this.world, p.pos.x, p.pos.z, dt * this.dev.timeScale);
     });
     this.updateMarkers();
+    this.settleFinds(dt);
     if (!this.quests && !this.tour) this.quests = new QuestLog(this.markerTex);
     if (this.quests && !this.quests.onChange) this.quests.onChange = () => this.ui.refresh();
     this.quests?.update(this, dt);
