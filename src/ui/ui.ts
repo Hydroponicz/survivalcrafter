@@ -532,12 +532,12 @@ export class UI {
     if (p.slope === 'blocked') status.push('<span class="warn">Too steep to climb</span>');
     else if (p.slope === 'sliding') status.push('<span class="warn">Sliding!</span>');
     else if (p.slope === 'steep') status.push('Steep — hard going');
-    if (p.effects.poisoned) status.push(`<span class="bad" data-tip="Losing health until it wears off. A yarrow poultice draws poison out.">Poisoned ${Math.ceil(p.effects.poisoned.t)}s</span>`);
-    if (p.effects.nauseous) status.push('<span class="warn" data-tip="You recover stamina slowly for a while.">Nauseous</span>');
+    if (p.effects.poisoned) status.push(`<span class="bad" data-tip="Losing health until it wears off. A yarrow poultice cures it.">Poisoned ${Math.ceil(p.effects.poisoned.t)}s</span>`);
+    if (p.effects.nauseous) status.push('<span class="warn" data-tip="Your stamina recovers slowly for a while.">Nauseous</span>');
     if (p.effects.refreshed) status.push('<span class="good-text" data-tip="Mint tea: stamina comes back twice as fast for a while.">Refreshed</span>');
-    if (p.effects.bandaged) status.push('<span class="good-text" data-tip="A bandage is healing you, slowly.">Bandaged</span>');
+    if (p.effects.bandaged) status.push('<span class="good-text" data-tip="A bandage is slowly healing you.">Bandaged</span>');
     if (p.effects.rested) status.push(`<span class="good-text" data-tip="You slept in comfort (${p.effects.rested.rate}): stamina comes back ${Math.round(p.effects.rested.rate * 20)}% faster for a while.">Well rested</span>`);
-    if (g.placing) status.push(`${g.placingItem ? 'Placing' : 'Planning'}: ${g.placing.name} — LMB place · ${g.placing.attach ? 'aim at a forge side' : 'wheel or Q/E rotate'} · RMB stop${g.placement?.snapped ? ' · snapped' : ''}`);
+    if (g.placing) status.push(`Placing: ${g.placing.name} — Left-click place · ${g.placing.attach ? 'aim at the side of a forge' : 'Wheel or Q/E rotate'} · Right-click cancel${g.placement?.snapped ? ' · snapped' : ''}`);
     if (g.placement && !g.placement.valid) status.push(`<span class="warn">${esc(g.placement.reason)}</span>`);
     setHTML(this.statusEl, status.join(' · '));
 
@@ -760,7 +760,7 @@ export class UI {
     const carrying = el('div', 'inv-weight', `Carrying <b>${w.toFixed(1)}</b> / ${CARRY_CAPACITY} kg${w > CARRY_CAPACITY ? ' — <span class="warn">overloaded, you move slowly</span>' : ''}`);
     carrying.dataset.tip = weightTip(g.inv.items, CARRY_CAPACITY, 'Over this you move slowly.');
     body.appendChild(carrying);
-    body.appendChild(el('div', 'hint', 'Click <b>Use</b> to make an item your active item (tools, seeds, dirt…). Drag an item onto the hotbar (or hover it and press <b>1-9</b>) to bind it.'));
+    body.appendChild(el('div', 'hint', 'Click <b>Use</b> to equip an item (tools, seeds, dirt…). Drag an item onto the hotbar, or hover over it and press <b>1-9</b>, to add it there.'));
     const groups = g.inv.grouped().sort((a, b) => itemDef(a.type).name.localeCompare(itemDef(b.type).name));
     if (!groups.length) body.appendChild(el('div', 'empty', 'Your pack is empty.'));
     const chest = this.container?.kind === 'structure' ? this.container : null;
@@ -1012,7 +1012,7 @@ export class UI {
   private renderBuild() {
     const g = this.g;
     const body = el('div');
-    body.appendChild(el('div', 'hint', 'Pick a piece to plan it: a ghost follows your aim and snaps to nearby walls, floors and roofs. Left-click to place plans (you can keep placing), wheel or Q/E rotates, right-click stops. Then build each plan with <b>Continue building</b> — it takes the listed materials, tool and skill.'));
+    body.appendChild(el('div', 'hint', 'Choose a piece: an outline follows your aim and snaps to nearby floors, walls and roofs. Left-click to place it (you can keep placing more), use the wheel or Q/E to rotate, and right-click to stop. Then aim at a placed outline with the right tool and click to build it.'));
     const cats = [...new Set(BUILDABLE.map((d) => d.category))];
     for (const cat of cats) {
       body.appendChild(el('h3', '', cat));
@@ -1144,7 +1144,7 @@ export class UI {
   private renderQuests() {
     const g = this.g, log = g.quests;
     const body = el('div');
-    body.appendChild(el('div', 'hint', 'You can have several quests at once. <b>Track</b> the one you want to work on: its targets are marked in the world. <b>Pinned</b> quests show in the panel on screen; unpin one to set it aside (it keeps its progress).'));
+    body.appendChild(el('div', 'hint', 'You can have multiple quests active. <b>Track</b> the one you\'re working on to mark its objectives in the world. <b>Pinned</b> quests show in the panel on screen; unpin one to hide it (you keep your progress).'));
     if (!log || !log.quests.length) {
       body.appendChild(el('div', 'quest-none', 'No quests yet.'));
       this.frame('quests', 'Quests', body);

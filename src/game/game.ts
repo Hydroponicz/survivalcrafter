@@ -275,8 +275,8 @@ export class Game {
     // Your first tool is a knife you knap yourself.
     this.inv.add(makeItem('berries', 10));
     this.inv.add(makeItem('berries', 10));
-    this.msg('You wake in the wilderness with empty hands and a few berries. Press H for help.', 'warn');
-    this.msg('Follow the tutorial on the right: it walks you from bare hands to your first house.', 'info');
+    this.msg('You wake up in the wilderness with nothing but a few berries. Press H for help.', 'warn');
+    this.msg('Follow the quest on the right: it guides you all the way to your first house.', 'info');
     this.quests = QuestLog.begin(this.markerTex, s.x, s.z);
   }
 
@@ -514,7 +514,7 @@ export class Game {
     for (const it of items) {
       if (itemDef(it.type).noPickup) continue;
       if (!this.dev.on('noWeight') && this.inv.weight() + itemDef(it.type).weight > CARRY_CAPACITY * 1.5) {
-        this.msg('You cannot carry any more.', 'fail');
+        this.msg('You can\'t carry any more.', 'fail');
         break;
       }
       const idx = list.indexOf(it);
@@ -553,8 +553,8 @@ export class Game {
     const p = this.player;
     const known = isIdentified(it.type);
     const harmful = f.effect === 'nausea' || f.effect === 'poison' || f.effect === 'severe_poison';
-    if (known && harmful) return this.msg(`You know better than to eat ${itemDef(it.type).name.toLowerCase()}.`, 'fail');
-    if (f.nutrition > 0 && p.food >= 99 && !f.water && !f.effect) return this.msg('You are too full to eat.', 'fail');
+    if (known && harmful) return this.msg(`You know better than to eat ${itemDef(it.type).name.toLowerCase()}: it's poisonous.`, 'fail');
+    if (f.nutrition > 0 && p.food >= 99 && !f.water && !f.effect) return this.msg('You\'re too full to eat.', 'fail');
     const name = itemName(it).toLowerCase();
     const qm = 0.6 + it.ql / 125;
     p.food = Math.min(100, p.food + f.nutrition * qm);
@@ -566,7 +566,7 @@ export class Game {
     } else {
       this.inv.remove(uid);
       const verb = f.verb ? f.verb.toLowerCase() : 'eat';
-      this.msg(`You ${verb} the ${name}.${it.type === 'raw_meat' || it.type === 'mushroom' ? ' It is not very appetising raw.' : ''}`, 'info');
+      this.msg(`You ${verb} the ${name}.${it.type === 'raw_meat' || it.type === 'mushroom' ? ' It doesn\'t taste great raw.' : ''}`, 'info');
       if (it.type === 'raw_meat' && Math.random() < 0.3) { p.health -= 8; this.msg('Your stomach cramps.', 'fail'); }
     }
     if (f.effect) this.applyEffect(f.effect, it.type);
@@ -587,25 +587,25 @@ export class Game {
         p.stamina = 0;
         p.health -= 5;
         fx.nauseous = { t: 45, rate: 0 };
-        this.msg('Your stomach heaves. You are violently sick.', 'warn');
+        this.msg('Your stomach churns and you throw up. You\'re poisoned!', 'warn');
         break;
       case 'poison':
         fx.poisoned = { t: 30, rate: 0.6 };
-        this.msg('A cold sweat breaks out. You have been poisoned!', 'warn');
+        this.msg('You break out in a cold sweat. You\'ve been poisoned!', 'warn');
         break;
       case 'severe_poison':
         fx.poisoned = { t: 45, rate: 1.1 };
-        this.msg('Your limbs go numb and your heart races. This is deadly poison — treat it now!', 'warn');
+        this.msg('Your limbs go numb and your heart races. Deadly poison: cure it with a yarrow poultice, fast!', 'warn');
         break;
       case 'heal':
         p.health = Math.min(100, p.health + 30);
-        if (fx.poisoned) { delete fx.poisoned; this.msg('The poultice draws out the poison.', 'good'); }
+        if (fx.poisoned) { delete fx.poisoned; this.msg('The poultice cures the poison.', 'good'); }
         else this.msg('The poultice soothes your wounds.', 'good');
         break;
       case 'soothe':
         p.health = Math.min(100, p.health + 6);
         if (fx.poisoned) fx.poisoned.t = Math.max(0, fx.poisoned.t - 10);
-        this.msg('The bitter leaves settle you a little.', 'info');
+        this.msg('The bitter leaves settle your stomach a little.', 'info');
         break;
       case 'refresh': {
         const tea = type !== 'mint';
@@ -822,7 +822,7 @@ export class Game {
 
   request(def: ActionDef, ctx: Ctx) {
     if (this.action || this.working) {
-      if (this.queue.length >= 5) return this.msg('You cannot queue any more actions.', 'fail');
+      if (this.queue.length >= 5) return this.msg('Your action queue is full.', 'fail');
       this.queue.push({ def, ctx });
       this.msg(`Queued: ${typeof def.label === 'function' ? def.label(ctx) : def.label}.`, 'info');
       return;
@@ -852,12 +852,12 @@ export class Game {
   }
 
   private begin(def: ActionDef, ctx: Ctx): boolean {
-    if (this.targetGone(ctx)) { this.msg('There is nothing there any more.', 'fail'); return false; }
-    if (ctx.tool?.hot && def.toolWear) { this.msg(`The ${itemName(ctx.tool).toLowerCase()} is too hot to work with. Quench it or let it cool.`, 'fail'); return false; }
+    if (this.targetGone(ctx)) { this.msg('There\'s nothing there anymore.', 'fail'); return false; }
+    if (ctx.tool?.hot && def.toolWear) { this.msg(`The ${itemName(ctx.tool).toLowerCase()} is too hot to use. Quench it or let it cool down.`, 'fail'); return false; }
     const problem = def.check?.(ctx) ?? null;
     if (problem) { this.msg(problem, 'fail'); return false; }
     const stamina = def.stamina ?? 0;
-    if (stamina > 0 && this.player.stamina < stamina) { this.msg('You are too exhausted. Rest a moment.', 'fail'); return false; }
+    if (stamina > 0 && this.player.stamina < stamina) { this.msg('You\'re too exhausted. Rest for a moment.', 'fail'); return false; }
     const base = typeof def.time === 'function' ? def.time(ctx) : def.time;
     if (base <= 0) {
       def.run(ctx, { success: true, ql: 0, toolQl: 0 });
@@ -1059,7 +1059,7 @@ export class Game {
     this.view.treeFx.scree(p.pos.x, p.pos.y, p.pos.z, n.x / hl, n.z / hl, colour, p.slope === 'sliding' ? 3 : 2);
     if (!this.steepTipShown) {
       this.steepTipShown = true;
-      this.msg('Too steep to climb here. Find a gentler way up, or cut steps into the slope with a shovel or pickaxe.', 'warn');
+      this.msg('Too steep to climb. Find an easier way up, or dig steps into the slope with a shovel or pickaxe.', 'warn');
     }
   }
 
@@ -1130,7 +1130,7 @@ export class Game {
     if (!this.target) return;
     const opts = this.actionsFor(this.target).filter((o) => o.def.id === la.def.id);
     if (opts[0]) this.request(opts[0].def, opts[0].ctx);
-    else this.msg('You cannot do that here.', 'fail');
+    else this.msg('You can\'t do that here.', 'fail');
   }
 
   // ---------- combat & animals
@@ -1143,7 +1143,7 @@ export class Game {
     this.world.animals = this.world.animals.filter((x) => x !== a);
     const d = ANIMALS[a.species];
     this.dropToGround([makeItem('corpse', 50, `${d.name.toLowerCase()} corpse`)], a.x, this.world.terrain.heightAt(a.x, a.z), a.z);
-    this.msg(`You kill the ${d.name.toLowerCase()}! Butcher the corpse with a knife.`, 'good');
+    this.msg(`You killed the ${d.name.toLowerCase()}! Butcher it with a knife for meat and hide.`, 'good');
     this.quests?.note(`killed_${a.species}`);
     if (this.action?.ctx.t.kind === 'animal' && this.action.ctx.t.animal === a) this.action = null;
     this.queue = this.queue.filter((q) => !(q.ctx.t.kind === 'animal' && q.ctx.t.animal === a));
@@ -1205,7 +1205,7 @@ export class Game {
                   this.player.shake(0.5);
                   if (this.action?.def.id === 'apply_bandage') this.cancelAction('The blow knocks the bandage out of your hands.');
                 }
-              } else this.msg(`You get clear of the ${d.name.toLowerCase()}'s charge.`, 'info');
+              } else this.msg(`You dodge the ${d.name.toLowerCase()}'s charge!`, 'info');
             }
           } else {
             a.dirX = (p.x - a.x) / l; a.dirZ = (p.z - a.z) / l;
@@ -1370,14 +1370,14 @@ export class Game {
     this.placing = def;
     this.placingItem = null;
     this.player.wheelCaptured = true;
-    this.msg(`Planning ${def.name.toLowerCase()}: left-click to place, mouse wheel or Q/E to rotate, right-click to stop.`, 'info');
+    this.msg(`Placing ${def.name.toLowerCase()}: left-click to place, mouse wheel or Q/E to rotate, right-click to cancel.`, 'info');
   }
 
   /** Set down a piece of equipment from your pack (bellows, anvil, trough…). */
   startPlacingItem(it: Item) {
     const type = itemDef(it.type).places;
     if (!type) return;
-    if (this.working || this.action) return this.msg('Finish what you are doing first.', 'fail');
+    if (this.working || this.action) return this.msg('Finish what you\'re doing first.', 'fail');
     const def = STRUCTURES[type];
     this.placing = def;
     this.placingItem = it;
@@ -1557,7 +1557,7 @@ export class Game {
     if (!p.valid) return this.msg(p.reason, 'fail');
     const item = this.placingItem;
     if (item) {
-      if (!this.inv.find(item.uid)) { this.stopPlacing(); return this.msg('You no longer have it.', 'fail'); }
+      if (!this.inv.find(item.uid)) { this.stopPlacing(); return this.msg('You don\'t have it anymore.', 'fail'); }
       this.inv.remove(item.uid);
       if (this.activeUid === item.uid) this.activeUid = null;
       this.inventoryChanged();
@@ -1571,7 +1571,7 @@ export class Game {
       this.sound.glance(0.6);
       const name = p.def.name.toLowerCase();
       const forgeNear = this.world.near(p.x, p.z, 4).some((o) => o.kind === 'structure' && o.type === 'forge' && Math.hypot(o.x - p.x, o.z - p.z) < 4);
-      if (!p.def.attach && !forgeNear) this.msg('Tip: smithing needs the forge, anvil and trough all within reach of where you stand. Keep them close together.', 'info');
+      if (!p.def.attach && !forgeNear) this.msg('Tip: to smith, you need the forge, anvil and quench trough all within reach. Keep them close together.', 'info');
       this.msg(p.def.attach ? `You set the bellows against the forge (QL ${placed.ql.toFixed(1)}). Now it can get hot enough for metal.`
         : p.def.water ? `You set down the ${name}. Fill it with jars of water before quenching.`
           : `You set down the ${name} (QL ${placed.ql.toFixed(1)}).`, 'good');
@@ -1584,7 +1584,7 @@ export class Game {
     if (p.def.container) s.items = [];
     this.clearAround(s);
     if (this.dev.on('freeBuild')) this.devFinishStructure(s);
-    else this.msg(`Planned a ${p.def.name.toLowerCase()}. Build it with "Continue building" using the materials and tools it needs.`, 'good');
+    else this.msg(`${p.def.name} placed. Aim at it with the right tool and click to build it.`, 'good');
   }
 
   // ---------- main loop
@@ -1750,7 +1750,7 @@ export class Game {
     for (const btn of inp.takeClicks()) {
       if (this.placing) {
         if (btn === 0) this.confirmPlacement();
-        else { this.stopPlacing(); this.msg('Stopped planning.', 'info'); }
+        else { this.stopPlacing(); this.msg('Stopped placing.', 'info'); }
         continue;
       }
       // A weapon or bow in hand, or an animal under your aim: fight.
@@ -1857,7 +1857,7 @@ export class Game {
         it.hot -= dt;
         if (it.hot <= 0) {
           delete it.hot;
-          this.msg(`Your ${itemName(it).toLowerCase()} has cooled in the air without being quenched.`, 'info');
+          this.msg(`Your ${itemName(it).toLowerCase()} cooled down before you could quench it.`, 'info');
           this.inventoryChanged();
         }
       }
@@ -1941,7 +1941,7 @@ export class Game {
 
   private die() {
     const p = this.player;
-    this.msg('You have died. Your belongings remain where you fell.', 'warn');
+    this.msg('You died. Your items were left where you fell.', 'warn');
     if (this.inv.items.length) {
       this.dropToGround(this.inv.items.splice(0), p.pos.x, p.pos.y, p.pos.z);
     }
@@ -2107,7 +2107,7 @@ export class Game {
     } else {
       const s = this.world.spawn;
       p.pos.set(s.x, this.world.terrain.heightAt(s.x, s.z) + 0.1, s.z);
-      this.msg('You could not find footing nearby, so you made your way back home.', 'info');
+      this.msg('You couldn\'t find solid ground nearby, so you headed back home.', 'info');
     }
     p.vel.set(0, 0, 0);
   }

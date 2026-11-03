@@ -183,7 +183,7 @@ export const ACTIONS: ActionDef[] = [
           g.world.remove(node);
           return g.msg(`You fumble and ruin the ${forageName(node).toLowerCase()}.`, 'fail');
         }
-        return g.msg(`You can't quite work the ${forageName(node).toLowerCase()} loose. Try again.`, 'fail');
+        return g.msg(`You couldn't pull the ${forageName(node).toLowerCase()} free. Try again.`, 'fail');
       }
       g.world.remove(node);
       if (sp.category === 'mushroom') g.quests?.note('picked_mushroom');
@@ -220,10 +220,10 @@ export const ACTIONS: ActionDef[] = [
     time: 5, skill: 'herbalism', difficulty: (c) => IDENTIFY[c.item!.type] ?? 5, stamina: 1,
     run: (c, o) => {
       const it = c.item!;
-      if (!o.success) return c.g.msg(`You turn the ${itemName(it).toLowerCase()} over in your hands, but still can't place it.`, 'fail');
+      if (!o.success) return c.g.msg(`You look the ${itemName(it).toLowerCase()} over, but still can't tell what it is.`, 'fail');
       learnSpecies(it.type);
       c.g.inventoryChanged();
-      c.g.msg(`You work it out: it's ${itemDef(it.type).name.toLowerCase()}. ${itemDef(it.type).desc}`, 'skill');
+      c.g.msg(`You figured it out: it's ${itemDef(it.type).name.toLowerCase()}. ${itemDef(it.type).desc}`, 'skill');
     },
   },
   {
@@ -322,7 +322,7 @@ export const ACTIONS: ActionDef[] = [
     stamina: 10, toolWear: 0.2,
     run: (c, o) => {
       if (!isGround(c)) return;
-      if (!o.success) return c.g.msg('You chip at the rock but nothing breaks off.', 'fail');
+      if (!o.success) return c.g.msg('You chip at the rock, but nothing breaks off.', 'fail');
       const { point: p, normal: n } = c.t;
       const cx = p.x - n.x * 0.3, cy = p.y - n.y * 0.3, cz = p.z - n.z * 0.3;
       const vol = c.g.world.terrain.dig(cx, cy, cz, 1.1, earthBudget(c, 0.7, 'mining'), () => true);
@@ -373,7 +373,7 @@ export const ACTIONS: ActionDef[] = [
     time: 6, skill: 'farming', difficulty: 5, stamina: 7, toolWear: 0.1,
     run: (c, o) => {
       if (!isGround(c)) return;
-      if (!o.success) return c.g.msg('The roots are too tough here. You fail to break the soil.', 'fail');
+      if (!o.success) return c.g.msg('The roots are too tough here. You couldn\'t break the soil.', 'fail');
       const p = c.t.point;
       c.g.world.terrain.paint(p.x, p.y, p.z, 1.3, Mat.Field, (m) => m === Mat.Grass || m === Mat.Dirt);
       c.g.msg('You till the soil into a field. Sow seeds on it.', 'good');
@@ -388,7 +388,7 @@ export const ACTIONS: ActionDef[] = [
       if (!isGround(c) || !c.tool) return;
       const seedQl = c.tool.ql;
       c.g.consumeActive();
-      if (!o.success) return c.g.msg('You scatter the seeds badly; the birds get them.', 'fail');
+      if (!o.success) return c.g.msg('You scatter the seeds badly, and the birds eat them.', 'fail');
       const { key } = cropAt(c);
       c.g.world.crops.set(key, { planted: c.g.world.time, ql: (o.ql + seedQl) / 2, tended: 0 });
       c.g.world.listener?.cropsChanged(key);
@@ -411,7 +411,7 @@ export const ACTIONS: ActionDef[] = [
       if (!o.success) return c.g.msg('You pull up a few sprouts by mistake.', 'fail');
       crop.tended++;
       crop.ql = Math.min(100, crop.ql + 2 + c.g.skills.get('farming') * 0.05);
-      c.g.msg('You weed and tend the crop. It will grow faster and better.', 'good');
+      c.g.msg('You weed and tend the crop. It will now grow faster and better.', 'good');
     },
   },
   {
@@ -474,7 +474,7 @@ export const ACTIONS: ActionDef[] = [
       g.world.add<StructureObj>({ kind: 'structure', type: 'standing_torch', x: p.x, y: g.world.terrain.groundBelow(p.x, p.y + 0.3, p.z), z: p.z, yaw: Math.random() * 6.28,
         consumed: {}, built: true, ql: it.ql, dmg: it.dmg, fuel: TORCH_BURN * Math.max(0, 1 - it.dmg / 100), lit: true });
       g.consumeActive();
-      g.msg('You plant the torch in the ground. It burns on there; pick it up again any time.', 'info');
+      g.msg('You plant the torch in the ground. It keeps burning there, and you can pick it back up any time.', 'info');
     },
   },
   {
@@ -658,7 +658,7 @@ export const ACTIONS: ActionDef[] = [
       c.g.inventoryChanged();
       if (!o.success) {
         if (Math.random() < 0.3) c.g.msg(`You botch it and ruin the ${itemName(m).toLowerCase()}.`, 'fail');
-        else { c.g.inv.add(m); c.g.inventoryChanged(); c.g.msg('You fumble and have to start that part over.', 'fail'); }
+        else { c.g.inv.add(m); c.g.inventoryChanged(); c.g.msg('You slip up and have to redo that part.', 'fail'); }
         return;
       }
       s.consumed[next] = (s.consumed[next] ?? 0) + 1;
@@ -749,7 +749,7 @@ export const ACTIONS: ActionDef[] = [
     check: (c) => {
       const s = obj(c, 'structure')!;
       if (s.fuel <= 0) return 'There is no fuel in it. Add branches, kindling or logs first.';
-      if (c.g.inv.count('kindling') === 0) return 'You need kindling to start a fire. (Craft it from a branch with a knife.)';
+      if (c.g.inv.count('kindling') === 0) return 'You need kindling to light a fire. Craft it from 3 branches with a knife, or split a plank at a chopping block.';
       return null;
     },
     time: 6, skill: 'firemaking', difficulty: 8, stamina: 3,
@@ -887,9 +887,9 @@ export const ACTIONS: ActionDef[] = [
         g.world.time += skip;
         g.player.food = Math.max(0, g.player.food - 10);
         g.player.water = Math.max(0, g.player.water - 15);
-        g.msg('You sleep through the night and wake rested. This bed is now your home.', 'good');
+        g.msg('You sleep through the night and wake up rested. Your respawn point is set.', 'good');
       } else {
-        g.msg('You rest a while. This bed is now your home — you will wake here if you die.', 'good');
+        g.msg('You rest for a while. This bed is now your respawn point.', 'good');
       }
     },
   },
@@ -937,16 +937,16 @@ export const ACTIONS: ActionDef[] = [
       const a = c.t.animal;
       const d = ANIMALS[a.species];
       const hp = a.hp / a.maxHp;
-      c.g.msg(`A ${d.name.toLowerCase()}. ${hp > 0.8 ? 'It looks healthy.' : hp > 0.4 ? 'It is wounded.' : 'It is badly hurt.'}${d.aggressive ? ' It looks ill-tempered.' : ''}`, 'info');
+      c.g.msg(`A ${d.name.toLowerCase()}. ${hp > 0.8 ? 'It looks healthy.' : hp > 0.4 ? 'It is wounded.' : 'It is badly hurt.'}${d.aggressive ? ' It looks aggressive.' : ''}`, 'info');
     },
   },
   // ===== looking after yourself
   {
     id: 'apply_bandage', label: 'Apply a bandage', show: () => false,
     check: (c) => {
-      if (c.g.inv.count('bandage') === 0) return 'You have no bandages. Twist some from plant fiber (Primitive).';
+      if (c.g.inv.count('bandage') === 0) return 'You have no bandages. Craft some from plant fiber (Crafting → Primitive).';
       if (c.g.player.health >= 99) return 'You are not hurt.';
-      if (c.g.combat.inCombat()) return 'You can\'t stop to bind a wound in the middle of a fight. Get clear first.';
+      if (c.g.combat.inCombat()) return 'You can\'t bandage up in the middle of a fight. Get away first.';
       return null;
     },
     time: 4, fixedTime: true,
@@ -957,7 +957,7 @@ export const ACTIONS: ActionDef[] = [
       // It heals slowly: 25 health over 40 seconds.
       g.player.effects.bandaged = { t: BANDAGE_TIME, rate: 25 / BANDAGE_TIME };
       g.quests?.note('bandaged');
-      g.msg('You bind the wound. It will heal over the next while (25 health).', 'good');
+      g.msg('You apply the bandage. It will heal 25 health over time.', 'good');
     },
   },
 
@@ -1006,10 +1006,11 @@ export const ACTIONS: ActionDef[] = [
       g.inventoryChanged();
       const name = itemDef(r.output.item).name.toLowerCase();
       const article = r.output.count > 1 ? `${r.output.count} ` : /^[aeiou]/.test(name) ? 'an ' : 'a ';
-      const plural = r.output.count > 1 && !name.endsWith('s') ? 's' : '';
-      g.msg(`You create ${article}${name}${plural} (QL ${ql.toFixed(1)}).`, 'good');
+      // (Some things don't take an s: kindling, flour, dough...)
+      const plural = r.output.count > 1 && !name.endsWith('s') && !/kindling|flour|dough|meat|bread|cordage/.test(name) ? 's' : '';
+      g.msg(`You made ${article}${name}${plural} (QL ${ql.toFixed(1)}).`, 'good');
       if (hot) g.msg(g.smithy().trough
-        ? 'It is still glowing. Quench it in the trough now, while it is hot, to harden it.'
+        ? 'It\'s still glowing hot! Dip it in the quench trough now to harden it.'
         : 'It is still glowing. Quench it in a water trough before it cools to harden it.', 'info');
     },
   },
@@ -1091,7 +1092,7 @@ export function craftProblem(g: Game, r: Recipe, tool?: Item): string | null {
     if (g.usableCount(inp.item) < inp.count) return `Need ${inp.count} ${itemDef(inp.item).name.toLowerCase()}.`;
   }
   for (const st of r.stations ?? []) {
-    if (st === 'forge' && !g.stationNear(st) && g.forgeWithoutBellows()) return 'The forge cannot get hot enough without bellows. Craft bellows and place them against its side.';
+    if (st === 'forge' && !g.stationNear(st) && g.forgeWithoutBellows()) return 'The forge can\'t get hot enough without bellows. Craft bellows and place them against its side.';
     if (!g.stationNear(st)) return `Must be near ${STATION_NAMES[st]}.`;
   }
   return null;
