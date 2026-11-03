@@ -260,7 +260,7 @@ table.keys td:first-child { color: var(--accent); white-space: nowrap; font-fami
 .pause-buttons button { padding: 8px 18px; background: #3b2f1f; color: var(--ink); border: 1px solid var(--panel-edge); border-radius: 5px; }
 .pause-buttons button:hover { background: #57452b; }
 .pause-buttons .danger { color: var(--bad); }
-.notice-backdrop { position: absolute; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center; background: rgba(20, 6, 4, 0.55); pointer-events: auto; }
+.notice-backdrop { position: absolute; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center; background: rgba(20, 6, 4, 0.55); pointer-events: auto !important; }
 .notice { width: min(560px, calc(100vw - 32px)); padding: 20px 24px 18px; background: var(--panel); border: 1px solid var(--panel-edge); border-top: 3px solid #d9614a; border-radius: 8px; box-shadow: 0 12px 40px rgba(0,0,0,0.6); color: var(--ink); line-height: 1.5; }
 .notice-head { font-size: 22px; color: #ff9a8a; margin-bottom: 8px; }
 .notice-body p { margin: 0 0 9px; font-size: 14px; }
