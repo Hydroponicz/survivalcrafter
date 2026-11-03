@@ -4,6 +4,8 @@ import { CordageGame } from './cordage';
 import { CrankGame, type CrankVariant } from './crank';
 import { CenterGame, HeatGame, PlaceGame, type HeatVariant, type PlaceVariant } from './shape';
 import { CarveGame } from './whittle';
+import { BuildGame } from './build';
+import type { StructureObj } from '../../world/world';
 import { StrikeGame, type StrikeVariant } from './strike';
 import { BellowsGame, BowDrillGame, SawGame } from './stroke';
 import { PourGame, QuenchGame } from './smithy';
@@ -22,11 +24,16 @@ export type MinigameSpec =
   | { kind: 'heat'; variant: HeatVariant }
   | { kind: 'place'; variant: PlaceVariant; count: number }
   | { kind: 'center' }
-  | { kind: 'cord'; plies: number };
+  | { kind: 'cord'; plies: number }
+  | { kind: 'build'; s: StructureObj; material: string };
 
-/** `toolType`: the item you're working with, shown in the scene where the work uses one. */
-export function createMinigame(spec: MinigameSpec, ease: number, toolType?: string): Minigame {
+/**
+ * `toolType`: the item you're working with, shown in the scene where the work uses one.
+ * `camera`: the game's view, for work done in the world itself (building).
+ */
+export function createMinigame(spec: MinigameSpec, ease: number, toolType?: string, camera?: THREE.Camera): Minigame {
   switch (spec.kind) {
+    case 'build': return new BuildGame(ease, spec.s, spec.material, toolType, camera ?? new THREE.PerspectiveCamera());
     case 'saw': return new SawGame(ease, spec.cuts);
     case 'bowdrill': return new BowDrillGame(ease);
     case 'bellows': return new BellowsGame(ease, spec.gear);
@@ -116,6 +123,7 @@ export function minigameVerb(spec: MinigameSpec): string {
     case 'cord': return 'twist and wrap';
     case 'strike': return { split: 'split', knap: 'knap', forge: 'hammer', nail: 'nail' }[spec.variant];
     case 'carve': return 'carve';
+    case 'build': return 'build';
     case 'heat': return { roast: 'cook', bake: 'bake', fire: 'fire', brew: 'brew' }[spec.variant];
     case 'place': return 'lay';
     case 'center': return 'throw';
@@ -151,8 +159,10 @@ export class MinigameSession {
   private lastProgress = 0;
 
   constructor(spec: MinigameSpec, ease: number, root: HTMLElement, private onEnd: (perf: number | null, seconds: number) => void, private label: string,
-    guide: { intro: boolean; coach: boolean } = { intro: false, coach: false }, toolType?: string) {
-    this.mg = createMinigame(spec, ease, toolType);
+    guide: { intro: boolean; coach: boolean } = { intro: false, coach: false }, toolType?: string, world?: { scene: THREE.Scene; camera: THREE.Camera }) {
+    this.mg = createMinigame(spec, ease, toolType, world?.camera);
+    // Work done on the world itself shows there, under the game's own camera.
+    if (this.mg instanceof BuildGame) world?.scene.add(this.mg.overlay);
     this.coach = guide.coach;
     this.intro = guide.intro ? tutorialFor(spec) : null;
     if (this.intro) {
@@ -249,8 +259,13 @@ export class MinigameSession {
     this.onEnd(perf, this.elapsed);
   }
 
+  /** The work happens in the world (the game draws it, from this camera). */
+  get worldCamera(): THREE.PerspectiveCamera | null {
+    return this.mg instanceof BuildGame && !this.ended ? this.mg.camera : null;
+  }
+
   render(renderer: THREE.WebGLRenderer) {
-    if (this.ended) return;
+    if (this.ended || this.mg instanceof BuildGame) return;
     this.mg.resize();
     renderer.autoClear = false;
     renderer.clearDepth();

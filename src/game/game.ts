@@ -180,6 +180,8 @@ export class Game {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.shadowMap.enabled = true;
+    // Planned pieces draw the built part solid and the rest as a blueprint, split by clipping planes.
+    this.renderer.localClippingEnabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.shadowMap.autoUpdate = false;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -782,7 +784,16 @@ export class Game {
     if (!this.working && !this.reopen.length) this.reopen = this.ui.closeAllWindows();
     const label = typeof def.label === 'function' ? def.label(ctx) : def.label;
     const session = new MinigameSession(spec, ease, this.ui.root, (perf, secs) => this.endWork(perf, secs), label,
-      { intro: runs === 0, coach: runs < 3 }, tool?.type);
+      { intro: runs === 0, coach: runs < 3 }, tool?.type, { scene: this.scene, camera: this.camera });
+    // Building happens at the piece itself: step up to it.
+    const stand = (session.mg as { stand?: { x: number; z: number; yaw: number } }).stand;
+    if (stand) {
+      const p = this.player, t = this.world.terrain;
+      const y = this.player.groundAt(this.world, stand.x, t.heightAt(stand.x, stand.z) + 1, stand.z).y;
+      if (Number.isFinite(y) && this.player.penetration(this.world, stand.x, y + 0.02, stand.z) === 0) { p.pos.set(stand.x, y + 0.02, stand.z); p.vel.set(0, 0, 0); }
+      p.yaw = stand.yaw;
+      p.pitch = 0;
+    }
     this.working = { session, def, ctx, key };
     this.lastAction = { def, recipe: ctx.recipe };
     if (runs > 0) this.msg(`You set to work (${minigameVerb(spec)}). Right-click to stop.`, 'info');
@@ -1476,6 +1487,9 @@ export class Game {
       else this.working.session.update(dt, inp);
       p.update(dt, inp, this.world, true, 0, false, false);
       p.updateCamera(this.camera, this.world.terrain);
+      // Work in the world (building) is seen through its own view of the piece.
+      const wc = this.working?.session.worldCamera;
+      if (wc) { this.camera.position.copy(wc.position); this.camera.quaternion.copy(wc.quaternion); }
       this.tickLife(dt);
       return;
     }

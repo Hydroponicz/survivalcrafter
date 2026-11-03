@@ -15,7 +15,7 @@ import { SPECIES, TREES } from '../world/trees';
 import { ZONE_NAMES } from '../world/climate';
 import type { Game } from './game';
 import type { SwingKind } from './tools';
-import { buildStepMinigame, RECIPE_MINIGAMES, type MinigameSpec } from './minigames';
+import { RECIPE_MINIGAMES, type MinigameSpec } from './minigames';
 import { CARRY_CAPACITY } from './inventory';
 import { anvilGrade, bellowsGrade, HOT_TIME, smithyCap } from './smithy';
 
@@ -591,7 +591,8 @@ export const ACTIONS: ActionDef[] = [
     minigame: (c) => {
       const s = obj(c, 'structure')!;
       const next = nextMaterial(STRUCTURES[s.type], s);
-      return next ? buildStepMinigame(next) : undefined;
+      // Done on the piece itself: carry the next material in and fix it in place.
+      return next ? { kind: 'build', s, material: next } : undefined;
     },
     skill: (c) => STRUCTURES[obj(c, 'structure')!.type].skill,
     difficulty: (c) => STRUCTURES[obj(c, 'structure')!.type].difficulty,

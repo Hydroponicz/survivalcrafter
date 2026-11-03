@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { leafMaterial, SPECIES, treeGeometries, TREES } from './trees';
-import { STRUCTURES, totalMaterials } from '../data/structures';
 import { FORAGE, FORAGE_SPECIES } from '../data/forage';
 import { forageGeometry, forageScale } from './forageProps';
 import { TreeFx, treeScale } from './treefx';
@@ -11,6 +10,7 @@ import { IRON_ANVIL } from './models/iron_anvil';
 import { WOOD_BUCKET } from './models/wood_bucket';
 import type { ViewCull } from './cull';
 import { cylinderUV, surfaceMat, worldUV, type Surface } from './surfaces';
+import { builtShare, fillPlanes } from './pieceFill';
 import {
   CROP_STAGES, cropPos, type AnimalObj, type BushObj, type ForageObj, type PileObj, type Species, type StructureObj,
   type TreeObj, type World, type WorldListener, type WorldObj,
@@ -483,21 +483,36 @@ export class WorldView implements WorldListener {
   }
 
   private structureMesh(o: StructureObj): THREE.Object3D {
-    const def = STRUCTURES[o.type];
     const g = buildPieceMesh(o.type, { lit: o.lit, open: o.open, water: o.water });
     g.position.set(o.x, o.y, o.z);
     g.rotation.y = o.yaw;
     g.traverse((c) => { if (c instanceof THREE.Mesh && c.userData.flame) this.flames.add(c); });
     if (!o.built) {
-      // A planned piece: a blueprint ghost that firms up as materials go in.
-      const progress = Object.values(o.consumed).reduce((a, b) => a + b, 0) / totalMaterials(def);
+      // A planned piece: what's been built is solid (walls course by course
+      // from the ground up, floors plank by plank), the rest a blueprint ghost.
+      const share = builtShare(o);
+      const { built, rest } = fillPlanes(o, share);
+      if (share > 0) {
+        const solid = buildPieceMesh(o.type, { lit: o.lit, open: o.open, water: o.water });
+        solid.traverse((c) => {
+          if (c instanceof THREE.Mesh) {
+            const m = (c.material as THREE.MeshStandardMaterial).clone();
+            m.clippingPlanes = [built];
+            m.clipShadows = true;
+            c.material = m;
+          }
+        });
+        g.add(solid);
+        solid.userData.solid = true;
+      }
       g.traverse((c) => {
-        if (c instanceof THREE.Mesh) {
+        if (c instanceof THREE.Mesh && !isInSolid(c)) {
           const m = (c.material as THREE.MeshStandardMaterial).clone();
           m.transparent = true;
-          m.opacity = 0.3 + progress * 0.5;
+          m.opacity = 0.35;
           m.depthWrite = false;
-          m.color.lerp(new THREE.Color(0x9ec4ff), 0.55 * (1 - progress));
+          m.color.lerp(new THREE.Color(0x9ec4ff), 0.55);
+          m.clippingPlanes = [rest];
           c.material = m;
           c.castShadow = false;
         }
@@ -803,4 +818,10 @@ export function buildPieceMesh(type: string, state: { lit?: boolean; open?: bool
       break;
   }
   return g;
+}
+
+/** Inside the solid (built) copy of a planned piece? */
+function isInSolid(o: THREE.Object3D): boolean {
+  for (let p = o.parent; p; p = p.parent) if (p.userData.solid) return true;
+  return false;
 }

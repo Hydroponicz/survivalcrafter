@@ -129,6 +129,15 @@ const T: Record<string, Tutorial> = {
     ],
     quality: 'Clean strikes make sturdier building pieces.',
   },
+  build: {
+    title: 'Building',
+    what: 'You build each piece where it stands, a course at a time: carry the material in, set it in place, and fix it there.',
+    steps: [
+      { gesture: 'click', text: 'Move the plank (or log, or stone) onto the glowing slot on the piece and click to set it. The closer the fit, the better.' },
+      { gesture: 'click', text: 'Then hammer each nail home (or settle a log with your hatchet): click as the ring closes on it. A glancing blow bends the nail.' },
+    ],
+    quality: 'A snug fit and clean strikes make a sturdier piece.',
+  },
   carve: {
     title: 'Carving',
     what: 'Knife work: whittle a branch down, or cut a shape out of a plank or hide, by drawing the knife along the dashed line.',
