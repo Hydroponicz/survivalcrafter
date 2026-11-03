@@ -47,6 +47,8 @@ export class DistantLand {
   /** Thin the distant forests by this many levels (a graphics setting). */
   forestThin = 0;
   private forest: FarForest | null;
+  /** Take the distant trees' pictures (once, with the game's renderer). */
+  bakeTrees(renderer: THREE.WebGLRenderer) { this.forest?.bake(renderer); }
 
   /** With a world seed, distant land carries forests too. */
   constructor(seed?: number) {

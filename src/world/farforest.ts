@@ -2,8 +2,8 @@ import * as THREE from 'three';
 import type { ViewCull } from './cull';
 import { tempAt, zoneOf } from './climate';
 import { hash2 } from './noise';
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { SPECIES, TreeCover, treeGeometries, TREES, VEGETATION, type Species } from './trees';
+import { ImpostorAtlas } from './impostors';
+import { SPECIES, TreeCover, TREES, VEGETATION, type Species } from './trees';
 import { CELL, PAD, SEA, TILE, TN, type TileData } from './worldgen';
 
 // Forests to the horizon. The real trees only stand within a couple of
@@ -14,46 +14,6 @@ import { CELL, PAD, SEA, TILE, TN, type TileData } from './worldgen';
 
 /** Map cells between candidate trees, at full detail (16 m). */
 const STEP = 2;
-
-/** Paint a geometry one colour (as vertex colours) and drop what merging doesn't need. */
-function painted(g: THREE.BufferGeometry, hex: number): THREE.BufferGeometry {
-  const ng = g.index ? g.toNonIndexed() : g;
-  if (ng.attributes.uv) ng.deleteAttribute('uv');
-  const c = new THREE.Color(hex), n = ng.attributes.position.count;
-  const col = new Float32Array(n * 3);
-  for (let i = 0; i < n; i++) { col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b; }
-  ng.setAttribute('color', new THREE.BufferAttribute(col, 3));
-  return ng;
-}
-
-/** A pared-down copy of a kind of real tree, trunk and crown painted in its colours. */
-function standIn(kind: Species): THREE.BufferGeometry {
-  const g = treeGeometries(kind, 0, true);
-  const merged = mergeGeometries([painted(g.trunk, TREES[kind].bark), painted(g.leaves, TREES[kind].leaf)])!;
-  merged.computeVertexNormals();
-  return merged;
-}
-
-/**
- * The barest outline of a kind of tree, for forests a couple of kilometres
- * off: its crown as a few flat faces (a spike for a conifer, a diamond for a
- * leafy tree), no trunk. At that distance it reads the same, at a fraction
- * of the drawing.
- */
-function outline(kind: Species): THREE.BufferGeometry {
-  const leaves = treeGeometries(kind, 0, true).leaves;
-  leaves.computeBoundingBox();
-  const b = leaves.boundingBox!, r = Math.max(b.max.x - b.min.x, b.max.z - b.min.z) / 2;
-  const conifer = kind === 'pine' || kind === 'spruce';
-  // Down to the ground a little way, so there's no gap under it.
-  const lo = conifer ? b.min.y * 0.7 : b.min.y * 0.85, hi = b.max.y;
-  const g = conifer
-    ? new THREE.ConeGeometry(r, hi - lo, 4, 1, true).translate(0, (hi + lo) / 2, 0)
-    : new THREE.OctahedronGeometry(1).scale(r, (hi - lo) / 2, r).translate(0, (hi + lo) / 2, 0);
-  const out = painted(g, TREES[kind].leaf);
-  out.computeVertexNormals();
-  return out;
-}
 
 /** Beyond this (metres) a stand-in is drawn as its barest outline. */
 const OUTLINE_AT = 700;
@@ -138,27 +98,18 @@ export class StandIns {
 }
 
 export class FarForest {
-  readonly geometry = Object.fromEntries(SPECIES.map((k) => [k, standIn(k)])) as Record<Species, THREE.BufferGeometry>;
-  readonly outline = Object.fromEntries(SPECIES.map((k) => [k, outline(k)])) as Record<Species, THREE.BufferGeometry>;
-  // Lit like the real trees.
-  readonly material = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.9, metalness: 0 });
   /** x, z, radius: the stand-ins give way to the real trees within this circle around you. */
   readonly near = { value: new THREE.Vector3(0, 0, 0) };
+  /** The distant trees: cards showing pictures of the real trees. */
+  readonly impostors = new ImpostorAtlas(this.near);
   private cover: TreeCover;
 
   constructor(private seed: number) {
     this.cover = new TreeCover(seed);
-    this.material.onBeforeCompile = (shader) => {
-      shader.uniforms.uNear = this.near;
-      shader.vertexShader = shader.vertexShader
-        .replace('#include <common>', '#include <common>\nuniform vec3 uNear;')
-        .replace('#include <project_vertex>', `#include <project_vertex>
-  {
-    vec3 root = (modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
-    if (distance(root.xz, uNear.xy) < uNear.z) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
-  }`);
-    };
   }
+
+  /** Take the impostors' pictures (needs the game's renderer; once). */
+  bake(renderer: THREE.WebGLRenderer) { this.impostors.bake(renderer); }
 
   /**
    * The stand-ins for one tile, coarsest first: the first `counts[2]` are
@@ -168,7 +119,7 @@ export class FarForest {
   /** A tile's stand-ins, from a plan made elsewhere (a worker) or worked out here. */
   build(d: TileData, plan = planStandIns(this.seed, this.cover, d)): StandIns[] {
     // Coarsest first: how many to consider for a near, middling or far tile.
-    return plan.map((p) => new StandIns(this.geometry[p.species], this.outline[p.species], this.material, p.mats, p.cols, p.counts));
+    return plan.map((p) => new StandIns(this.impostors.cards[p.species], this.impostors.cards[p.species], this.impostors.material, p.mats, p.cols, p.counts));
   }
 }
 
