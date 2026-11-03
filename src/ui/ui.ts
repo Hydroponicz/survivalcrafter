@@ -4,6 +4,7 @@ import { isIdentified, ITEMS, itemDef, itemName, TOOL_NAMES, typeDesc, WEAR_SLOT
 import { RECIPES, STATION_NAMES, type Recipe } from '../data/recipes';
 import { SKILL_INFO, SKILLS, type SkillId } from '../data/skills';
 import { Tooltip } from './tooltip';
+import { drawIcons, itemIcon, onIconsReady } from './itemIcons';
 import { CharacterPreview } from './preview';
 import { BUILDABLE, STRUCTURES, totalMaterials } from '../data/structures';
 import { ACTION_MAP, craftProblem, forageName, type ActionDef, type Ctx, type Target } from '../game/actions';
@@ -17,7 +18,7 @@ import { CARRY_CAPACITY } from '../game/inventory';
 import { MAT_NAMES } from '../world/terrain';
 import { ANIMALS, cropKey, type PileObj, type StructureObj } from '../world/world';
 
-type WindowName = 'inventory' | 'crafting' | 'skills' | 'build' | 'help' | 'container' | 'dev' | 'journal';
+type WindowName = 'inventory' | 'character' | 'crafting' | 'skills' | 'build' | 'help' | 'container' | 'dev' | 'journal';
 
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, html?: string) => {
   const e = document.createElement(tag);
@@ -65,6 +66,12 @@ export class UI {
   private refreshTimer = 0;
   private lastHtml = new Map<WindowName, string>();
   private pressedWindow: WindowName | null = null;
+  /** A window being dragged by its title bar, and where in it you took hold. */
+  private windowDrag: { name: string; w: HTMLElement; dx: number; dy: number } | null = null;
+  /** Where you've put each window (remembered in this browser). */
+  private windowPos: Record<string, { x: number; y: number }> = (() => {
+    try { return JSON.parse(localStorage.getItem('survivalcrafter.windows') ?? '{}'); } catch { return {}; }
+  })();
   private pendingRender = new Set<WindowName>();
   private lastRefreshKey = '';
   /** In-game cursor for windows and menus while the mouse stays captured. */
@@ -82,6 +89,7 @@ export class UI {
     this.root = document.getElementById('ui')!;
     this.root.innerHTML = '';
     this.tooltip = new Tooltip(document.body);
+    onIconsReady(() => { this.lastRefreshKey = ''; this.refresh(); });
     const hud = el('div', 'hud');
     hud.innerHTML = `
       <div class="crosshair"></div>
@@ -111,7 +119,7 @@ export class UI {
       this.bars[k] = b.querySelector('.bar-fill')!;
     }
 
-    for (const name of ['inventory', 'crafting', 'skills', 'build', 'help', 'container', 'dev', 'journal'] as WindowName[]) {
+    for (const name of ['inventory', 'character', 'crafting', 'skills', 'build', 'help', 'container', 'dev', 'journal'] as WindowName[]) {
       const w = el('div', `window window-${name}`);
       w.style.display = 'none';
       w.addEventListener('mousedown', (e) => {
@@ -139,16 +147,17 @@ export class UI {
         <h2>Paused</h2>
         <p>Click to return to the wilderness</p>
         <div class="pause-buttons">
-          <button data-act="resume">Resume</button>
-          <button data-act="save">Save game</button>
-          <button data-act="unstuck">Unstuck</button>
-          <button data-act="quality">Graphics: ${g.graphics.level.label}</button>
-          <button data-act="fps">Frame cap: ${g.graphics.fpsLabel}</button>
-          <button data-act="export">Export save file</button>
-          <button data-act="import">Import save file</button>
-          <button data-act="help">Controls &amp; guide</button>
-          <button data-act="skip-tutorial">Skip tutorial</button>
-          <button data-act="new" class="danger">Abandon world</button>
+          <button data-act="resume" title="Back to the game">Resume</button>
+          <button data-act="save" title="Save now (the game also saves every minute and when you leave)">Save game</button>
+          <button data-act="unstuck" title="Move to the nearest open ground if you are stuck in terrain">Unstuck</button>
+          <button data-act="quality" title="Cycle Low / Medium / High: shadows, view distance, plants and sharpness">Graphics: ${g.graphics.level.label}</button>
+          <button data-act="fps" title="Cap the frame rate to save power and keep your computer cool">Frame cap: ${g.graphics.fpsLabel}</button>
+          <button data-act="export" title="Download your world as a file (a backup, or to move it to another browser)">Export save file</button>
+          <button data-act="import" title="Load a world from a save file, replacing this one">Import save file</button>
+          <button data-act="help" title="Controls and how the game works (H)">Controls &amp; guide</button>
+          <button data-act="windows" title="Put every window and panel back where it started">Reset window positions</button>
+          <button data-act="skip-tutorial" title="Turn the tutorial quest off for this world">Skip tutorial</button>
+          <button data-act="new" title="Delete this world and start a new one" class="danger">Abandon world</button>
         </div>
       </div>`);
     this.pauseEl.addEventListener('click', (e) => {
@@ -166,6 +175,7 @@ export class UI {
         return;
       }
       if (act === 'help') { this.toggle('help'); return; }
+      if (act === 'windows') { this.resetWindows(); this.log('Windows are back where they started.', 'info'); return; }
       if (act === 'skip-tutorial') {
         if (confirm('Turn the tutorial off for this world?')) { g.onboarding?.skip(); this.log('Tutorial off. Press H any time for the guide.', 'info'); }
         return;
@@ -209,6 +219,8 @@ export class UI {
       if (this.pendingRender.delete(name)) setTimeout(() => { if (this.open.has(name)) this.render(name); }, 0);
     };
     window.addEventListener('mouseup', release);
+    window.addEventListener('mouseup', () => this.endWindowDrag());
+    window.addEventListener('mousemove', (e) => { if (this.windowDrag && !this.g.input.locked) this.dragWindowTo(e.clientX, e.clientY); });
     window.addEventListener('dragend', release);
     document.addEventListener('mousedown', (e) => {
       // With the mouse captured, clicks are routed through clickMenuCursor instead.
@@ -232,7 +244,56 @@ export class UI {
   show(name: WindowName) {
     this.open.add(name);
     this.windows.get(name)!.style.display = 'flex';
+    const pos = this.windowPos[name];
+    if (pos) this.placeWindow(this.windows.get(name)!, pos.x, pos.y);
     this.render(name);
+  }
+
+  /**
+   * Let a window or panel be dragged about by a handle (its title bar), and
+   * put it back where it was last left.
+   */
+  movable(w: HTMLElement, key: string, handle: HTMLElement = w) {
+    handle.classList.add('drag-handle');
+    handle.addEventListener('mousedown', (e) => {
+      if ((e.target as HTMLElement).closest('button, input, a, [draggable="true"]')) return;
+      const r = w.getBoundingClientRect();
+      this.windowDrag = { name: key, w, dx: e.clientX - r.left, dy: e.clientY - r.top };
+      handle.classList.add('dragging');
+    });
+    const pos = this.windowPos[key];
+    if (pos && handle === w) this.placeWindow(w, pos.x, pos.y);
+  }
+
+  /** Put a window's top left corner at (x, y), keeping its title bar on screen. */
+  private placeWindow(w: HTMLElement, x: number, y: number) {
+    const width = w.offsetWidth || 300;
+    w.style.left = `${Math.max(-width + 80, Math.min(window.innerWidth - 80, x))}px`;
+    w.style.top = `${Math.max(0, Math.min(window.innerHeight - 40, y))}px`;
+    w.style.right = 'auto';
+    w.style.bottom = 'auto';
+    w.style.transform = 'none';
+  }
+
+  private dragWindowTo(px: number, py: number) {
+    const d = this.windowDrag!;
+    this.placeWindow(d.w, px - d.dx, py - d.dy);
+  }
+
+  private endWindowDrag() {
+    const d = this.windowDrag;
+    if (!d) return;
+    this.windowDrag = null;
+    for (const h of [d.w, ...d.w.querySelectorAll('.dragging')]) h.classList.remove('dragging');
+    this.windowPos[d.name] = { x: parseFloat(d.w.style.left), y: parseFloat(d.w.style.top) };
+    try { localStorage.setItem('survivalcrafter.windows', JSON.stringify(this.windowPos)); } catch { /* private mode */ }
+  }
+
+  /** Put every window back where it started. */
+  resetWindows() {
+    this.windowPos = {};
+    try { localStorage.removeItem('survivalcrafter.windows'); } catch { /* private mode */ }
+    for (const w of [...this.windows.values(), ...this.root.querySelectorAll<HTMLElement>('.tut-panel')]) { w.style.left = w.style.top = w.style.right = w.style.bottom = w.style.transform = ''; }
   }
 
   /** Close every window (and the action menu); returns which were open. */
@@ -299,7 +360,12 @@ export class UI {
 
   /** The in-game cursor drives the UI while the mouse is captured and a window or menu is open. */
   cursorActive(): boolean {
-    return this.g.input.locked && this.anyWindowOpen();
+    return this.g.input.locked && (this.anyWindowOpen() || this.peeking);
+  }
+
+  /** Holding Left Alt shows the cursor (hover for tooltips, drag windows) without opening anything. */
+  get peeking(): boolean {
+    return this.g.input.keys.has('AltLeft') || !!this.windowDrag;
   }
 
   closeMenu() {
@@ -368,11 +434,17 @@ export class UI {
     this.bars.water.style.width = `${p.water}%`;
     this.bars.stamina.style.width = `${p.stamina}%`;
 
+    const bar = (k: string, v: number, what: string) => { this.bars[k].parentElement!.dataset.tip = `<b>${k[0].toUpperCase() + k.slice(1)}</b> ${Math.round(v)} / 100<br>${what}`; };
+    bar('health', p.health, 'At zero you die and wake at home, your pack left where you fell. Heals slowly while you\'re fed and watered.');
+    bar('food', p.food, 'Falls over time. Eat (from your backpack): cooked food and better quality feed you more. Starving hurts.');
+    bar('water', p.water, 'Falls faster than food. Aim at a lake or river and drink, or carry jars of water.');
+    bar('stamina', p.stamina, 'Spent by hard work, sprinting and climbing; comes back when you rest, faster when well fed.');
     const f = g.world.dayFraction;
     const mins = Math.floor(f * 24 * 60);
     const hh = String(Math.floor(mins / 60)).padStart(2, '0'), mm = String(mins % 60).padStart(2, '0');
     // With dev settings on, where you are too (handy for reporting a spot).
     const pos = g.dev.anyActive ? ` · ${Math.round(g.player.pos.x)}, ${Math.round(g.player.pos.z)} · ${perf.fps} fps` : '';
+    this.clockEl.dataset.tip = '<b>Time</b><br>A day lasts 20 minutes. Nights are dark: have a fire, or a house to wait them out in.';
     this.clockEl.textContent = `Day ${g.world.day} · ${hh}:${mm}${f > 0.78 || f < 0.22 ? ' · night' : ''}${pos}`;
     // With dev settings on: the slowest frame each second, and what took the time in it.
     this.perfEl.style.display = g.dev.anyActive ? '' : 'none';
@@ -383,18 +455,18 @@ export class UI {
 
     const status: string[] = [];
     if (g.dev.anyActive) status.push('<span class="dev-badge">DEV</span>');
-    if (p.food < 20) status.push('<span class="warn">Hungry</span>');
-    if (p.water < 20) status.push('<span class="warn">Thirsty</span>');
-    if (p.stamina < 10) status.push('<span class="warn">Exhausted</span>');
+    if (p.food < 20) status.push('<span class="warn" data-tip="Your food is low. Eat soon, or you start losing health.">Hungry</span>');
+    if (p.water < 20) status.push('<span class="warn" data-tip="Your water is low. Drink from a lake or river.">Thirsty</span>');
+    if (p.stamina < 10) status.push('<span class="warn" data-tip="No strength left for hard work. Stop and rest a moment.">Exhausted</span>');
     const w = g.inv.weight();
-    if (w > CARRY_CAPACITY) status.push(`<span class="warn">Overloaded ${w.toFixed(0)}/${CARRY_CAPACITY} kg</span>`);
+    if (w > CARRY_CAPACITY) status.push(`<span class="warn" data-tip="You carry more than ${CARRY_CAPACITY} kg and move slowly. Drop or store something.">Overloaded ${w.toFixed(0)}/${CARRY_CAPACITY} kg</span>`);
     if (p.swimming) status.push('Swimming');
     if (p.slope === 'blocked') status.push('<span class="warn">Too steep to climb</span>');
     else if (p.slope === 'sliding') status.push('<span class="warn">Sliding!</span>');
     else if (p.slope === 'steep') status.push('Steep — hard going');
-    if (p.effects.poisoned) status.push(`<span class="bad">Poisoned ${Math.ceil(p.effects.poisoned.t)}s</span>`);
-    if (p.effects.nauseous) status.push('<span class="warn">Nauseous</span>');
-    if (p.effects.refreshed) status.push('<span class="good-text">Refreshed</span>');
+    if (p.effects.poisoned) status.push(`<span class="bad" data-tip="Losing health until it wears off. A yarrow poultice draws poison out.">Poisoned ${Math.ceil(p.effects.poisoned.t)}s</span>`);
+    if (p.effects.nauseous) status.push('<span class="warn" data-tip="You recover stamina slowly for a while.">Nauseous</span>');
+    if (p.effects.refreshed) status.push('<span class="good-text" data-tip="Mint tea: stamina comes back twice as fast for a while.">Refreshed</span>');
     if (g.placing) status.push(`${g.placingItem ? 'Placing' : 'Planning'}: ${g.placing.name} — LMB place · ${g.placing.attach ? 'aim at a forge side' : 'wheel or Q/E rotate'} · RMB stop${g.placement?.snapped ? ' · snapped' : ''}`);
     if (g.placement && !g.placement.valid) status.push(`<span class="warn">${esc(g.placement.reason)}</span>`);
     this.statusEl.innerHTML = status.join(' · ');
@@ -425,14 +497,17 @@ export class UI {
     // If the mouse was released (Esc), the real cursor takes over.
     this.cursor.setVisible(this.cursorActive());
     if (g.input.locked) this.started = true;
+    // Item portraits, a few a frame as they're asked for.
+    drawIcons();
     // The tutorial panel steps aside while a window is open.
     this.root.classList.toggle('has-window', this.open.size > 0);
     // Tooltips follow the in-game cursor, and go when it does.
     this.tooltip.check();
     if (this.cursor.isVisible) this.tooltip.place(this.cursor.x, this.cursor.y);
+    if (this.windowDrag && g.input.locked) this.dragWindowTo(this.cursor.x, this.cursor.y);
     else if (g.input.locked) this.tooltip.reset();
     // Your character in the inventory window, as you are now.
-    if (this.open.has('inventory')) {
+    if (this.open.has('character')) {
       const held = g.activeItem();
       this.preview.show(g.player.model, `${JSON.stringify(g.equipped)}|${held?.type ?? ''}`);
       this.preview.render(1 / 60);
@@ -472,7 +547,7 @@ export class UI {
     g.hotbar.forEach((type, i) => {
       const count = type ? g.inv.count(type) : 0;
       const slot = el('div', `slot${active && type === active.type ? ' active' : ''}${type && !count ? ' empty' : ''}`);
-      slot.innerHTML = `<span class="slot-key">${i + 1}</span>${type ? `<span class="slot-icon">${itemDef(type).icon}</span>` : ''}${count > 1 ? `<span class="slot-count">${count}</span>` : ''}`;
+      slot.innerHTML = `<span class="slot-key">${i + 1}</span>${type ? `<span class="slot-icon">${itemIcon(type)}</span>` : ''}${count > 1 ? `<span class="slot-count">${count}</span>` : ''}`;
       slot.title = type
         ? `${itemDef(type).name} — click to use, drag to move, right-click to clear`
         : 'Empty — drag an item here from your inventory';
@@ -480,6 +555,7 @@ export class UI {
       this.hotbarEl.appendChild(slot);
     });
     const a = el('div', 'active-label', active ? `${itemDef(active.type).icon} ${esc(itemName(active))} <small>QL ${active.ql.toFixed(1)}${active.dmg > 0 ? `, dmg ${active.dmg.toFixed(1)}` : ''}</small>` : 'Bare hands');
+    a.dataset.tip = active ? itemTip(active, 1) : '<b>Bare hands</b><br>Pick things up, forage and gather stones. Pick a tool with 1-9.';
     this.hotbarEl.appendChild(a);
   }
 
@@ -538,7 +614,10 @@ export class UI {
     const scroll = w.querySelector('.window-body')?.scrollTop ?? 0;
     w.innerHTML = '';
     const head = el('div', 'window-head', `<span>${title}</span>`);
+    // Drag a window by its title bar; it stays where you put it.
+    this.movable(w, name, head);
     const x = el('button', 'close', '✕');
+    x.dataset.tip = 'Close';
     x.addEventListener('click', () => this.close(name));
     head.appendChild(x);
     w.append(head, b);
@@ -548,6 +627,7 @@ export class UI {
   private render(name: WindowName) {
     switch (name) {
       case 'inventory': return this.renderInventory();
+      case 'character': return this.renderCharacter();
       case 'crafting': return this.renderCrafting();
       case 'skills': return this.renderSkills();
       case 'build': return this.renderBuild();
@@ -566,7 +646,7 @@ export class UI {
     row.dataset.uids = items.map((i) => i.uid).join(',');
     const weight = items.length * def.weight;
     const ql = items.length > 1 ? `QL ${items.at(-1)!.ql.toFixed(0)}–${best.ql.toFixed(0)}` : `QL ${best.ql.toFixed(1)}`;
-    row.innerHTML = `<span class="icon">${def.icon}</span>
+    row.innerHTML = `<span class="icon">${itemIcon(best.type)}</span>
       <span class="name">${esc(itemName(best))}${items.length > 1 ? ` <b>×${items.length}</b>` : ''}
         <small>${ql}${def.tool && best.dmg > 0 ? ` · dmg ${best.dmg.toFixed(1)}` : ''}${best.quenched ? ' · hardened' : ''}${best.hot ? ` · <span class="warn">glowing, ${Math.ceil(best.hot)}s to quench</span>` : ''} · ${weight.toFixed(1)} kg</small></span>`;
     row.dataset.tip = itemTip(best, items.length);
@@ -647,25 +727,47 @@ export class UI {
         }
       }
     }
-    this.frame('inventory', 'Character', this.characterLayout(body));
+    this.frame('inventory', 'Backpack', body);
+  }
+
+  /** Tab / I: your backpack and your character, together. */
+  toggleInventory() {
+    if (this.open.has('inventory') || this.open.has('character')) { this.close('inventory'); this.close('character'); }
+    else { this.show('character'); this.show('inventory'); }
+  }
+
+  /** Let something be dragged onto the hotbar to bind its kind of item there. */
+  private dragToHotbar(e: HTMLElement, type: string) {
+    e.draggable = true;
+    e.addEventListener('dragstart', (ev) => {
+      ev.dataTransfer!.setData(DRAG_ITEM, type);
+      ev.dataTransfer!.effectAllowed = 'copy';
+      this.hotbarEl.classList.add('dragging');
+    });
+    e.addEventListener('dragend', () => this.hotbarEl.classList.remove('dragging'));
+  }
+
+  private renderCharacter() {
+    this.frame('character', 'Character', this.characterLayout());
     // The portrait's canvas lives on across redraws: put it back in its place.
-    const view = this.windows.get('inventory')!.querySelector('.char-view');
+    const view = this.windows.get('character')!.querySelector('.char-view');
     if (view && !view.contains(this.preview.canvas)) view.appendChild(this.preview.canvas);
   }
 
   /** The character window: you and what you wear and carry in hand, your pack, and your skills. */
-  private characterLayout(pack: HTMLElement): HTMLElement {
+  private characterLayout(): HTMLElement {
     const g = this.g;
-    const layout = el('div', `char-layout${this.open.has('container') ? ' with-container' : ''}`);
+    const layout = el('div', 'char-layout');
     const me = el('div', 'char-col');
     me.appendChild(el('div', 'char-view'));
     const slots = el('div', 'eq-slots');
     for (const slot of WEAR_SLOTS) {
       const it = g.worn(slot);
       const box = el('div', `eq-slot${it ? ' filled' : ''}`, `<span class="eq-label">${WEAR_SLOT_NAMES[slot]}</span>
-        <span class="eq-icon">${it ? itemDef(it.type).icon : ''}</span><span class="eq-name">${it ? esc(itemName(it)) : 'Nothing'}</span>`);
+        <span class="eq-icon">${it ? itemIcon(it.type) : ''}</span><span class="eq-name">${it ? esc(itemName(it)) : 'Nothing'}</span>`);
       box.dataset.tip = it ? itemTip(it, 1) : `<b>${WEAR_SLOT_NAMES[slot]}</b><br>Nothing worn here. Clothing is made from hides (Crafting → Clothing) and takes some of the force of a blow.`;
       if (it) {
+        this.dragToHotbar(box, it.type);
         const off = el('button', 'eq-off', '✕');
         off.dataset.tip = 'Take it off';
         off.addEventListener('click', () => g.takeOff(slot));
@@ -677,7 +779,7 @@ export class UI {
     // In hand, and the tools on your hotbar.
     const held = g.activeItem();
     const hand = el('div', `eq-slot eq-hand${held ? ' filled' : ''}`, `<span class="eq-label">In hand</span>
-      <span class="eq-icon">${held ? itemDef(held.type).icon : '✋'}</span><span class="eq-name">${held ? esc(itemName(held)) : 'Bare hands'}</span>`);
+      <span class="eq-icon">${held ? itemIcon(held.type) : '✋'}</span><span class="eq-name">${held ? esc(itemName(held)) : 'Bare hands'}</span>`);
     hand.dataset.tip = held ? itemTip(held, 1) : '<b>Bare hands</b><br>Pick things up, forage and gather stones. Choose a tool from the hotbar (1-9) to use it.';
     me.appendChild(hand);
     const tools = g.inv.items.filter((i) => itemDef(i.type).tool);
@@ -686,9 +788,10 @@ export class UI {
     for (const t of tools.sort((a, b) => b.ql - a.ql)) {
       if (seen.has(t.type)) continue;
       seen.add(t.type);
-      const chip = el('span', `eq-tool${held?.uid === t.uid ? ' on' : ''}`, itemDef(t.type).icon);
+      const chip = el('span', `eq-tool${held?.uid === t.uid ? ' on' : ''}`, itemIcon(t.type));
       chip.dataset.tip = itemTip(t, 1);
       chip.addEventListener('click', () => g.setActive(t.uid));
+      this.dragToHotbar(chip, t.type);
       belt.appendChild(chip);
     }
     if (!seen.size) belt.appendChild(el('span', 'eq-none', 'No tools yet'));
@@ -699,8 +802,6 @@ export class UI {
     prot.dataset.tip = 'How much of an animal\'s blow your clothing takes. Each piece adds some; better quality adds more.';
     me.appendChild(prot);
 
-    const packCol = el('div', 'inv-col');
-    packCol.appendChild(pack);
 
     const skills = el('div', 'skills-col');
     skills.appendChild(el('div', 'eq-head', 'Skills'));
@@ -710,7 +811,7 @@ export class UI {
       row.dataset.tip = skillTip(k, v);
       skills.appendChild(row);
     }
-    layout.append(me, packCol, skills);
+    layout.append(me, skills);
     return layout;
   }
 
@@ -762,10 +863,11 @@ export class UI {
       const t = g.toolFor(k);
       reqs.push(`<span class="${t ? 'ok' : 'no'}">in pack: ${TOOL_NAMES[k]}${t ? ` (${esc(itemName(t))})` : ''}</span>`);
     }
+    row.dataset.tip = `<b>${esc(r.name)}</b><br>${esc(out.desc)}<br><span class="tip-facts">${SKILLS[r.skill]}: ${esc(SKILL_INFO[r.skill])}${problem ? `<br>${esc(problem)}` : ''}</span>`;
     const lvl = g.skills.get(r.skill);
     const chance = Math.round(g.skills.successChance(r.skill, r.difficulty, tool?.ql ?? 0) * 100);
     row.innerHTML = `
-      <div class="recipe-head"><span class="icon">${out.icon}</span><b>${esc(r.name)}</b>${r.output.count > 1 ? ` ×${r.output.count}` : ''}
+      <div class="recipe-head"><span class="icon">${itemIcon(r.output.item)}</span><b>${esc(r.name)}</b>${r.output.count > 1 ? ` ×${r.output.count}` : ''}
         <small>${SKILLS[r.skill]} ${lvl.toFixed(1)} · difficulty ${r.difficulty}${RECIPE_MINIGAMES[r.id] ? ` · hands-on: ${minigameVerb(RECIPE_MINIGAMES[r.id])}` : ` · ~${chance}% success`}</small></div>
       <div class="recipe-in">${inputs}</div>
       ${reqs.length ? `<div class="recipe-req">${reqs.join(' · ')}</div>` : ''}`;
@@ -829,6 +931,7 @@ export class UI {
       body.appendChild(el('h3', '', cat));
       for (const def of BUILDABLE.filter((d) => d.category === cat)) {
         const row = el('div', 'recipe');
+        row.dataset.tip = `<b>${def.name}</b><br>${esc(def.desc)}<br><span class="tip-facts">${SKILLS[def.skill]} · difficulty ${def.difficulty}${def.tool ? ` · needs a ${def.tool}` : ''}. Plan it, then build it a material at a time.</span>`;
         const mats = def.materials.map((m) => {
           const have = g.inv.count(m.item);
           return `<span class="${have >= m.count ? 'ok' : 'no'}">${itemDef(m.item).icon} ${m.count} ${esc(itemDef(m.item).name.toLowerCase())} (${have})</span>`;

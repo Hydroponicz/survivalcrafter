@@ -267,6 +267,9 @@ export class Onboarding {
     this.edge.className = 'tut-edge';
     this.edge.innerHTML = '<div class="tut-edge-arrow">➤</div><div class="tut-edge-dist"></div>';
     g.ui.root.append(this.panel, this.edge);
+    // Hold Alt and drag it wherever suits you.
+    g.ui.movable(this.panel, 'tutorial');
+    this.panel.dataset.tip = '<b>Tutorial</b><br>Hold <b>Alt</b> and drag to move this panel. Turn it off from the pause menu (Esc).';
     g.scene.add(this.group);
   }
 
@@ -313,7 +316,7 @@ export class Onboarding {
     this.render(`<div class="tut-head">Tutorial · step ${this.step + 1} of ${STEPS.length}</div>
       <div class="tut-title">${s.title}</div>
       <div class="tut-text">${s.text}</div>${far}${bar}
-      <div class="tut-foot">Esc → Skip tutorial to turn it off</div>`, advanced);
+      <div class="tut-foot">Hold Alt to move this · Esc → Skip tutorial to turn it off</div>`, advanced);
   }
 
   private render(html: string, flash: boolean) {

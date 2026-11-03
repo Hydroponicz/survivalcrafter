@@ -14,9 +14,10 @@ export class Input {
       if (isTyping(e)) return;
       if (!this.keys.has(e.code)) this.pressed.add(e.code);
       this.keys.add(e.code);
-      if (['Space', 'Tab', 'F1', 'F2'].includes(e.code)) e.preventDefault();
+      // (Alt shows the cursor: don't let it also open the browser's menu bar.)
+      if (['Space', 'Tab', 'F1', 'F2', 'AltLeft'].includes(e.code)) e.preventDefault();
     });
-    window.addEventListener('keyup', (e) => this.keys.delete(e.code));
+    window.addEventListener('keyup', (e) => { this.keys.delete(e.code); if (e.code === 'AltLeft') e.preventDefault(); });
     window.addEventListener('blur', () => this.keys.clear());
     document.addEventListener('mousemove', (e) => {
       if (!this.locked) return;

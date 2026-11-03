@@ -168,7 +168,7 @@ export class VirtualCursor {
     if (start.defaultPrevented) return;
     const ghost = document.createElement('div');
     ghost.className = 'ui-drag-ghost';
-    ghost.textContent = source.querySelector('.icon, .slot-icon')?.textContent ?? '•';
+    ghost.innerHTML = source.querySelector('.icon, .slot-icon, .eq-icon')?.innerHTML ?? source.innerHTML ?? '•';
     document.getElementById('ui')!.appendChild(ghost);
     this.drag = { source, dt, over: null, accepted: false, ghost };
   }

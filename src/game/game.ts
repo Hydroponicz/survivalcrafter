@@ -1479,7 +1479,7 @@ export class Game {
       p.cameraMode = p.cameraMode === 'first' ? 'third' : 'first';
       this.msg(`${p.cameraMode === 'first' ? 'First' : 'Third'}-person view.`, 'info');
     }
-    if (inp.hit('KeyI') || inp.hit('Tab')) this.ui.toggle('inventory');
+    if (inp.hit('KeyI') || inp.hit('Tab')) this.ui.toggleInventory();
     if (inp.hit('KeyC')) this.ui.toggle('crafting');
     if (inp.hit('KeyK')) this.ui.toggle('skills');
     if (inp.hit('KeyB')) this.ui.toggle('build');
