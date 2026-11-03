@@ -1,6 +1,7 @@
 import type { ToolKind } from './items';
 import type { StationKind } from './recipes';
 import type { SkillId } from './skills';
+import { FURNITURE } from './furniture';
 
 export type V3 = [number, number, number];
 /** Axis-aligned box in the piece's local frame (origin at bottom centre, before yaw). */
@@ -158,24 +159,15 @@ const defs: StructureDef[] = [
     materials: [{ item: 'plank', count: 6 }, { item: 'hide', count: 2 }], tool: 'hammer', skill: 'carpentry', difficulty: 12, stepTime: 3,
     bed: true, desc: 'Sleep to set your respawn point. Fine furniture near it makes you wake rested.' },
 
-  // --- fine furniture: refined (sawn) planks; a bed near it is a comfortable place to sleep
-  { id: 'table', name: 'Table', icon: '🪵', category: 'Furniture', snap: false,
-    boxes: [box(0, 0.4, 0, 0.7, 0.4, 0.45)], snaps: [],
-    materials: [{ item: 'refined_plank', count: 6 }, { item: 'shaft', count: 4 }], tool: 'hammer', skill: 'carpentry', difficulty: 14, stepTime: 3,
-    comfort: 1, desc: 'A sawn-plank table. Comfort 1: sleep in a bed near it to wake rested.' },
-  { id: 'chair', name: 'Chair', icon: '🪑', category: 'Furniture', snap: false,
-    boxes: [box(0, 0.45, 0, 0.24, 0.45, 0.24)], snaps: [],
-    materials: [{ item: 'refined_plank', count: 3 }, { item: 'shaft', count: 2 }], tool: 'hammer', skill: 'carpentry', difficulty: 12, stepTime: 2.5,
-    comfort: 1, desc: 'A sawn-plank chair. Comfort 1.' },
-  { id: 'shelf', name: 'Shelf', icon: '📚', category: 'Furniture', snap: false,
-    boxes: [box(0, 0.75, 0, 0.6, 0.75, 0.16)], snaps: [],
-    materials: [{ item: 'refined_plank', count: 4 }, { item: 'shaft', count: 2 }], tool: 'hammer', skill: 'carpentry', difficulty: 13, stepTime: 2.5,
-    comfort: 1, desc: 'Open shelves to set things out on. Comfort 1.' },
-  { id: 'cupboard', name: 'Cupboard', icon: '🗄️', category: 'Furniture', snap: false,
-    boxes: [box(0, 0.9, 0, 0.55, 0.9, 0.28)], snaps: [],
-    materials: [{ item: 'refined_plank', count: 8 }, { item: 'shaft', count: 2 }, { item: 'cordage', count: 1 }], tool: 'hammer', skill: 'carpentry', difficulty: 16, stepTime: 3,
-    comfort: 2, desc: 'A tall cupboard with doors, sawn and fitted. Comfort 2.' },
 ];
+
+// Fine furniture: made at a workbench and set down from your pack (see data/furniture).
+for (const f of FURNITURE) {
+  const [x, y, z, hx, hy, hz] = f.box;
+  defs.push({ id: f.id, name: f.name, icon: f.icon, category: 'Furniture', snap: false, item: f.id,
+    boxes: [box(x, y, z, hx, hy, hz)], snaps: [], materials: [], skill: 'carpentry', difficulty: f.difficulty, stepTime: 0,
+    comfort: f.comfort || undefined, container: f.container, bed: f.bed, desc: f.desc });
+}
 
 export const STRUCTURES: Record<string, StructureDef> = Object.fromEntries(defs.map((d) => [d.id, d]));
 export const STRUCTURE_LIST = defs;

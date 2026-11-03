@@ -1,5 +1,6 @@
 import type { ToolKind } from './items';
 import type { SkillId } from './skills';
+import { FURNITURE } from './furniture';
 
 export type StationKind = 'fire' | 'forge' | 'anvil' | 'workbench' | 'quern';
 
@@ -150,4 +151,7 @@ export const RECIPES: Recipe[] = [
     tool: 'knife', inputs: [{ item: 'hide', count: 2 }, { item: 'cordage', count: 2 }], output: { item: 'hide_trousers', count: 1 } },
   { id: 'hide_tunic', name: 'Hide tunic', category: 'Clothing', skill: 'tailoring', difficulty: 8, time: 16,
     tool: 'knife', inputs: [{ item: 'hide', count: 2 }, { item: 'cordage', count: 3 }], output: { item: 'hide_tunic', count: 1 } },
+  // --- fine furniture, at a workbench (see data/furniture)
+  ...FURNITURE.map((f): Recipe => ({ id: f.id, name: f.name, category: 'Furniture', skill: 'carpentry', difficulty: f.difficulty, time: f.time,
+    tool: 'hammer', stations: ['workbench'], inputs: f.inputs, output: { item: f.id, count: 1 } })),
 ];

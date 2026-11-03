@@ -12,6 +12,7 @@ import { BellowsGame, BowDrillGame, SawGame } from './stroke';
 import { PourGame, QuenchGame } from './smithy';
 import type { Input } from '../input';
 import { gestureHtml, tutorialFor, type Tutorial } from './tutorials';
+import { FURNITURE } from '../../data/furniture';
 
 export type MinigameSpec =
   | { kind: 'saw'; cuts: number }
@@ -101,6 +102,9 @@ export const RECIPE_MINIGAMES: Record<string, MinigameSpec> = {
   hide_trousers: { kind: 'carve', passes: 1, wide: true, make: 'hide_trousers' },
   hide_tunic: { kind: 'carve', passes: 1, wide: true, make: 'hide_tunic' },
 };
+
+// Furniture is pegged and nailed together at the workbench.
+for (const f of FURNITURE) RECIPE_MINIGAMES[f.id] ??= { kind: 'strike', variant: 'nail', hits: Math.max(3, Math.min(7, Math.round(f.difficulty / 4))) };
 
 /** The hands-on work for one building step, by the material it uses. */
 export function buildStepMinigame(material: string): MinigameSpec {

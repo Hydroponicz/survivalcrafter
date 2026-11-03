@@ -825,9 +825,9 @@ export const ACTIONS: ActionDef[] = [
       comfort = Math.min(MAX_COMFORT, comfort);
       if (comfort > 0) {
         g.player.effects.rested = { t: 240 + 90 * comfort, rate: comfort };
-        g.msg(`Comfort ${comfort}: you wake well rested. Your stamina comes back ${Math.round(comfort * 25)}% faster for a while.${comfort < MAX_COMFORT ? ' More fine furniture near the bed would help.' : ''}`, 'good');
+        g.msg(`Comfort ${comfort}: you wake well rested. Your stamina comes back ${Math.round(comfort * COMFORT_REGEN * 100)}% faster for a while.${comfort < MAX_COMFORT ? ' More fine furniture near the bed would help.' : ''}`, 'good');
       } else {
-        g.msg('A bare room: fine furniture near the bed (a table, chairs, shelves, a cupboard) would help you wake rested.', 'info');
+        g.msg('A bare room: fine furniture near the bed (made at a workbench: chairs, tables, shelves, rugs, a rocking chair…) would help you wake rested.', 'info');
       }
       const f = g.world.dayFraction;
       if (f > 0.75 || f < 0.22) {
@@ -1000,7 +1000,9 @@ export function nextMaterial(def: StructureDef, s: StructureObj): string | undef
 const FUEL_ORDER = ['log', 'plank', 'refined_plank', 'branch', 'shaft', 'kindling'];
 /** Fine furniture within this many metres of a bed counts toward a good night's sleep, up to this much. */
 const COMFORT_RANGE = 6;
-const MAX_COMFORT = 6;
+const MAX_COMFORT = 10;
+/** Faster stamina recovery per point of comfort when you wake rested. */
+export const COMFORT_REGEN = 0.2;
 function fuelItem(c: Ctx): Item | undefined {
   if (c.tool && itemDef(c.tool.type).fuel) return c.tool;
   for (const t of FUEL_ORDER) {

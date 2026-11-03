@@ -1,3 +1,4 @@
+import { FURNITURE } from './furniture';
 // Item definitions. Every item instance carries its own quality (QL 1-100)
 // and damage, like Wurm Online, rather than being an anonymous stack.
 
@@ -152,6 +153,12 @@ const defs: ItemDef[] = [
   // --- ground-only
   { id: 'corpse', name: 'Corpse', icon: '💀', weight: 80, noPickup: true, desc: 'Butcher it with a knife.' },
 ];
+
+// Fine furniture, carried and set down (see data/furniture).
+for (const f of FURNITURE) {
+  defs.push({ id: f.id, name: f.name, icon: f.icon, weight: f.weight, places: f.id,
+    desc: `${f.desc}${f.comfort ? ` Comfort ${f.comfort}: sleep in a bed near it to wake rested.` : ''} Made at a workbench; set it down from your pack, pick it up again any time.` });
+}
 
 export const ITEMS: Record<string, ItemDef> = Object.fromEntries(defs.map((d) => [d.id, d]));
 

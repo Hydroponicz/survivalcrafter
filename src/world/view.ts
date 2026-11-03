@@ -11,6 +11,7 @@ import { WOOD_BUCKET } from './models/wood_bucket';
 import type { ViewCull } from './cull';
 import { cylinderUV, surfaceMat, worldUV, type Surface } from './surfaces';
 import { builtShare, fillPlanes } from './pieceFill';
+import { furnitureMesh } from './furnitureMesh';
 import {
   CROP_STAGES, cropPos, type AnimalObj, type BushObj, type ForageObj, type PileObj, type Species, type StructureObj,
   type TreeObj, type World, type WorldListener, type WorldObj,
@@ -845,35 +846,8 @@ export function buildPieceMesh(type: string, state: { lit?: boolean; open?: bool
       tex(new THREE.BoxGeometry(1.0, 0.35, 1.9), 'dark_planks', 0, 0.18, 0, { turn: true });
       add(new THREE.BoxGeometry(0.9, 0.12, 1.8), 0x9b7552, 0, 0.42, 0);
       break;
-    // Fine furniture, in sawn (refined) planks.
-    case 'table':
-      tex(new THREE.BoxGeometry(1.4, 0.06, 0.9), 'planks', 0, 0.77, 0, { turn: true });
-      for (const [x, z] of [[-0.62, -0.37], [0.62, -0.37], [-0.62, 0.37], [0.62, 0.37]]) tex(new THREE.BoxGeometry(0.07, 0.74, 0.07), 'planks', x, 0.37, z);
-      tex(new THREE.BoxGeometry(1.26, 0.08, 0.03), 'planks', 0, 0.68, -0.37, { turn: true });
-      tex(new THREE.BoxGeometry(1.26, 0.08, 0.03), 'planks', 0, 0.68, 0.37, { turn: true });
-      break;
-    case 'chair':
-      tex(new THREE.BoxGeometry(0.46, 0.05, 0.46), 'planks', 0, 0.45, 0, { turn: true });
-      for (const [x, z] of [[-0.2, -0.2], [0.2, -0.2], [-0.2, 0.2], [0.2, 0.2]]) tex(new THREE.BoxGeometry(0.045, 0.45, 0.045), 'planks', x, 0.225, z);
-      // The back, on the -z side.
-      for (const x of [-0.2, 0.2]) tex(new THREE.BoxGeometry(0.045, 0.5, 0.045), 'planks', x, 0.72, -0.2);
-      for (const y of [0.62, 0.8, 0.95]) tex(new THREE.BoxGeometry(0.44, 0.07, 0.03), 'planks', 0, y, -0.2, { turn: true });
-      break;
-    case 'shelf':
-      for (const x of [-0.58, 0.58]) tex(new THREE.BoxGeometry(0.04, 1.5, 0.32), 'planks', x, 0.75, 0);
-      for (const y of [0.04, 0.5, 0.97, 1.46]) tex(new THREE.BoxGeometry(1.16, 0.035, 0.3), 'planks', 0, y, 0, { turn: true });
-      tex(new THREE.BoxGeometry(1.2, 1.5, 0.02), 'planks', 0, 0.75, -0.15);
-      break;
-    case 'cupboard': {
-      tex(new THREE.BoxGeometry(1.1, 1.8, 0.56), 'planks', 0, 0.9, 0);
-      // Two doors on the front (+z), with a seam between and small knobs.
-      for (const s of [-1, 1]) {
-        tex(new THREE.BoxGeometry(0.53, 1.62, 0.025), 'planks', s * 0.275, 0.92, 0.29);
-        add(new THREE.SphereGeometry(0.022, 8, 6), 0x3a2a1c, s * 0.05, 0.95, 0.31);
-      }
-      tex(new THREE.BoxGeometry(1.16, 0.05, 0.6), 'planks', 0, 1.82, 0, { turn: true });
-      break;
-    }
+    default:
+      furnitureMesh(type, g, tex, add);
   }
   return g;
 }

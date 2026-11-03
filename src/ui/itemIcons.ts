@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { itemDef } from '../data/items';
 import { buildToolMesh } from '../game/tools';
+import { buildPieceMesh } from '../world/view';
 
 // Item portraits: each kind of item drawn once as a little 3D picture (its
 // tool model where it has one, else a simple model of the thing), kept as an
@@ -215,5 +216,7 @@ function model(type: string): THREE.Object3D {
     case 'quench_trough': return group(mesh(new THREE.CylinderGeometry(0.4, 0.34, 0.6, 18), 0x7a5634), at(mesh(new THREE.CircleGeometry(0.37, 18), 0x3f6f8a), 0, 0.25, 0, -Math.PI / 2));
     case 'corpse': return mesh(new THREE.CapsuleGeometry(0.25, 0.7, 4, 8).rotateZ(Math.PI / 2), 0x6a4a30);
   }
+  // Things you set down in the world (furniture): their own model.
+  if (def.places) return buildPieceMesh(def.places);
   return mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), 0x888070);
 }

@@ -24,7 +24,7 @@ import {
   ANIMALS, DAY_LENGTH, pointInPiece, toLocal, toWorld, World, type AnimalObj, type ForageObj, type PileObj, type StructureObj, type TreeObj, type WorldObj,
 } from '../world/world';
 import {
-  ACTION_MAP, ACTIONS, craftProblem, DIG_RADIUS, EARTH_PER_ITEM, LEVEL_RADIUS, type ActionDef, type Ctx, type Target,
+  ACTION_MAP, ACTIONS, COMFORT_REGEN, craftProblem, DIG_RADIUS, EARTH_PER_ITEM, LEVEL_RADIUS, type ActionDef, type Ctx, type Target,
 } from './actions';
 import { DevSettings } from './dev';
 import { distVol, Sound } from './sound';
@@ -1705,7 +1705,7 @@ export class Game {
       let regen = p.food > 5 && p.water > 5 ? 9 : 2.5;
       if (fx.nauseous) regen *= 0.3;
       if (fx.refreshed) regen *= 2;
-      if (fx.rested) regen *= 1 + 0.25 * fx.rested.rate;
+      if (fx.rested) regen *= 1 + COMFORT_REGEN * fx.rested.rate;
       p.stamina = Math.min(100, p.stamina + dt * regen);
     }
     if (fx.poisoned) p.health -= dt * fx.poisoned.rate;
