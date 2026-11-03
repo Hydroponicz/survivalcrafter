@@ -168,6 +168,7 @@ function model(type: string): THREE.Object3D {
     }
   }
   switch (type) {
+    case 'torch': { const t = buildToolMesh(undefined, 'torch'); t.rotation.set(0, 0, -0.75); return t; }
     case 'rock_shard': return heap(() => stone(0x8c8a84, 0.22), 3, 0.25, 3);
     case 'iron_ore': return heap(() => stone(0x8a4e30, 0.22), 3, 0.25, 5);
     case 'iron_lump': return mesh(new THREE.DodecahedronGeometry(0.35, 1).scale(1.3, 0.7, 1), 0x3c3c40, { metalness: 0.6, roughness: 0.5 });

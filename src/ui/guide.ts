@@ -15,6 +15,7 @@ export const GUIDE_HTML = `
         <tr><td>Hold Left Alt</td><td>Show the cursor: hover anything for a tooltip, or drag windows and the tutorial panel where you like</td></tr>
         <tr><td>H · Esc</td><td>This guide · release mouse / close windows</td></tr>
         <tr><td>G · J · M</td><td>Survey the area for things to pick · Field journal · Sound on/off</td></tr>
+        <tr><td>L</td><td>Quests: take up new ones, choose which are tracked on screen</td></tr>
         <tr><td>Mouse in windows</td><td>While a window or the action menu is open, the mouse moves an in-game cursor (the camera holds still). Esc releases the real mouse.</td></tr>
         <tr><td>&#96; or F2</td><td>Dev console (cheats: instant crafting, no needs, fly…)</td></tr>
       </table>

@@ -132,6 +132,7 @@ button { font: inherit; cursor: pointer; }
 .window-build { left: 24px; top: 60px; width: 560px; }
 .window-skills { left: 50%; top: 80px; width: 380px; transform: translateX(-50%); }
 .window-help { left: 50%; top: 50%; width: 680px; transform: translate(-50%, -50%); }
+.window-quests { left: 50%; top: 70px; width: 460px; transform: translateX(-50%); }
 .window-head {
   display: flex; justify-content: space-between; align-items: center; padding: 10px 14px;
   border-bottom: 1px solid var(--panel-edge); font-size: 18px; color: var(--accent); font-weight: bold;
@@ -358,7 +359,7 @@ table.keys td:first-child { color: var(--accent); white-space: nowrap; font-fami
 .tut-head { color: var(--muted); font-size: 11px; letter-spacing: 1px; text-transform: uppercase; }
 .tut-title { color: var(--accent); font-size: 18px; margin: 2px 0 6px; }
 .tut-text { font-size: 13.5px; }
-.tut-text kbd, .tut-foot kbd {
+.tut-text kbd, .tut-foot kbd, .tut-hint kbd, .quest-step-text kbd, .quest-outro kbd {
   display: inline-block; min-width: 1.4em; padding: 0 5px; margin: 0 1px; text-align: center; font: 12px monospace;
   border: 1px solid var(--panel-edge); border-bottom-width: 2px; border-radius: 3px; background: rgba(255, 255, 255, 0.08); color: var(--ink);
 }
@@ -367,6 +368,34 @@ table.keys td:first-child { color: var(--accent); white-space: nowrap; font-fami
 .tut-progress span { position: absolute; inset: 0; text-align: center; font-size: 11px; line-height: 16px; text-shadow: 0 1px 2px #000; }
 .tut-hint { margin-top: 7px; font-size: 12.5px; color: var(--warn); font-style: italic; }
 .tut-foot { margin-top: 8px; color: var(--muted); font-size: 11px; font-style: italic; }
+/* Several quests in the panel: one card each (the focused one in full, the rest in brief). */
+.tut-panel { max-height: calc(100vh - 220px); overflow-y: auto; }
+.quest-card + .quest-card { margin-top: 10px; padding-top: 9px; border-top: 1px solid rgba(255, 255, 255, 0.1); }
+.quest-brief .quest-brief-title { font-size: 14px; color: var(--ink); margin-top: 2px; }
+.quest-brief .tut-progress { height: 12px; margin-top: 5px; }
+.quest-brief .tut-progress span { line-height: 12px; font-size: 10px; }
+.quest-offer .tut-head { color: var(--good, #9fd27a); }
+.quest-offer .tut-title { color: var(--good, #9fd27a); }
+.quest-how { color: var(--ink); font-style: normal; }
+.quest-how kbd { font-style: normal; }
+/* The quest log. */
+.quest-row { padding: 9px 4px 10px; border-bottom: 1px solid rgba(255,255,255,0.06); font-size: 13px; color: #e2d8c2; }
+.quest-row-head b { color: var(--ink); font-size: 14.5px; }
+.quest-row-head small { color: var(--muted); margin-left: 4px; }
+.quest-tag { margin-left: 6px; padding: 1px 6px; border-radius: 8px; background: rgba(232, 181, 98, 0.18); color: var(--accent); font-size: 11px; }
+.quest-summary { color: var(--muted); margin: 2px 0 4px; }
+.quest-steps { margin: 4px 0 6px 18px; padding: 0; }
+.quest-steps li { margin: 2px 0; }
+.quest-steps li.done { color: var(--muted); text-decoration: line-through; }
+.quest-steps li.now { color: var(--accent); }
+.quest-steps li.later { color: #a79f8e; }
+.quest-step-text { color: #e2d8c2; font-size: 12.5px; margin: 3px 0 2px; }
+
+.quest-outro { margin-top: 4px; font-size: 12.5px; }
+.quest-offered { border-left: 3px solid var(--good, #9fd27a); padding-left: 8px; }
+.quest-done .quest-row-head b { color: var(--muted); }
+.quest-row .btns { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+.quest-none { color: var(--muted); font-style: italic; padding: 8px 4px; }
 .tut-flash { animation: tut-flash 1.2s ease-out; }
 @keyframes tut-flash { 0% { box-shadow: 0 0 0 3px rgba(232, 181, 98, 0.9), 0 4px 14px rgba(0,0,0,0.45); transform: scale(1.03); } 100% { box-shadow: 0 4px 14px rgba(0,0,0,0.45); transform: scale(1); } }
 .has-window .tut-panel, .has-window .tut-edge { visibility: hidden; }

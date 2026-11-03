@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { ToolKind } from '../data/items';
-import { buildToolMesh, swingPose, type SwingKind } from './tools';
+import { buildToolMesh, HELD_ITEMS, swingPose, type SwingKind } from './tools';
 import { CharacterRig, HOLD, type Pose as BodyPose, type Region } from './character';
 
 // The first-person arm and tool, drawn in its own pass on top of the world so
@@ -42,6 +42,8 @@ export class ViewModel {
   private arms: CharacterRig | null = null;
   private armsTool = new THREE.Group();
   private armsToolKey = '';
+  /** How much further off than true the arms are drawn (so what's in hand doesn't fill the view). */
+  private armsReach = 0.1;
   /** Elbow, off the bottom-right corner: the forearm runs from here to the hand. */
   private elbow = new THREE.Vector3(0.5, -0.85, -0.5);
 
@@ -85,7 +87,10 @@ export class ViewModel {
     if (key !== this.armsToolKey) {
       this.armsToolKey = key;
       this.armsTool.clear();
-      if (tool.kind) this.armsTool.add(buildToolMesh(tool.kind, tool.type));
+      if (tool.kind || (tool.type && HELD_ITEMS.has(tool.type))) this.armsTool.add(buildToolMesh(tool.kind, tool.type));
+      // A torch held at ease would sit right under your nose: smaller, and with the hand further off.
+      this.armsTool.scale.setScalar(tool.type === 'torch' ? 0.7 : 1);
+      this.armsReach = tool.type === 'torch' ? 0.3 : 0.1;
     }
     rig.setColours(colours);
     rig.update(dt, pose, blend);
@@ -101,8 +106,8 @@ export class ViewModel {
     rig.root.quaternion.copy(q).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw));
     rig.root.position.copy(body.position).sub(eye).applyQuaternion(q).add(eye);
     // A little further off than true, so a tool doesn't fill the view.
-    rig.root.position.x += Math.sin(yaw) * 0.1;
-    rig.root.position.z += Math.cos(yaw) * 0.1;
+    rig.root.position.x += Math.sin(yaw) * this.armsReach;
+    rig.root.position.z += Math.cos(yaw) * this.armsReach;
     rig.head.scale.setScalar(0.001);
   }
 

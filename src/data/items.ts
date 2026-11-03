@@ -68,6 +68,7 @@ const defs: ItemDef[] = [
   { id: 'plank', name: 'Plank', icon: '🟧', weight: 3, desc: 'A wooden plank.', fuel: 150 },
   { id: 'shaft', name: 'Shaft', icon: '🥢', weight: 0.6, desc: 'A straight wooden handle.', fuel: 40 },
   { id: 'kindling', name: 'Kindling', icon: '🔥', weight: 0.3, desc: 'Dry wood chips used to start fires.', fuel: 60 },
+  { id: 'torch', name: 'Torch', icon: '🔥', weight: 0.6, desc: 'A branch with a head of fiber and kindling, burning. Hold it to light your way. It burns down while you hold it (about five minutes): put it away when you don\'t need it.' },
   { id: 'sprout', name: 'Tree sprout', icon: '🌱', weight: 0.2, desc: 'Plant it on grass to grow a new tree.' },
   { id: 'wheat_seeds', name: 'Wheat seeds', icon: '🫘', weight: 0.1, desc: 'Sow on a cultivated field.' },
   { id: 'wheat', name: 'Wheat', icon: '🌾', weight: 0.5, desc: 'Harvested grain. Grind it at a quern.' },

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { ToolKind, WearSlot } from '../data/items';
 import { pieceBoxes, STRUCTURES } from '../data/structures';
-import { buildToolMesh, swingPose, type SwingKind } from './tools';
+import { buildToolMesh, HELD_ITEMS, swingPose, type SwingKind } from './tools';
 import { Y_MIN, type Terrain } from '../world/terrain';
 import { toLocal, type World } from '../world/world';
 import { treeScale, TRUNK } from '../world/treefx';
@@ -191,7 +191,7 @@ export class Player {
   setHeld(kind: ToolKind | undefined, itemType?: string) {
     this.heldItem.clear();
     this.heldKind = kind;
-    if (kind) this.heldItem.add(buildToolMesh(kind, itemType));
+    if (kind || (itemType && HELD_ITEMS.has(itemType))) this.heldItem.add(buildToolMesh(kind, itemType));
   }
 
   get eye(): THREE.Vector3 {

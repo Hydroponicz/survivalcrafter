@@ -28,7 +28,7 @@ import {
 } from './actions';
 import { DevSettings } from './dev';
 import { distVol, Sound } from './sound';
-import type { SwingKind } from './tools';
+import { HELD_ITEMS, type SwingKind } from './tools';
 import { ViewModel } from './viewmodel';
 import { treeScale } from '../world/treefx';
 import { CharacterRig, characterLoaded, SEGMENTS, type Clip } from './character';
@@ -46,9 +46,11 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { SMAAPass } from 'three/examples/jsm/postprocessing/SMAAPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
-import { Onboarding } from './onboarding';
+import { QuestLog } from './quests';
 
 const REACH = 4.5;
+/** Seconds a torch burns in your hand. */
+const TORCH_BURN = 300;
 /** Skill above a task's difficulty needed to do it the quick way. */
 export const QUICK_MARGIN = 10;
 const BUILD_REACH = 8;
@@ -155,6 +157,7 @@ export class Game {
   private renderDt = 1 / 60;
   /** What's in view, for the near trees and plants, and (looser, so redone less often) the grass. */
   private viewCull = new ViewCull(8, 3);
+  private torchLight = new THREE.PointLight(0xffa24a, 0, 15, 1.6);
   private grassCull = new ViewCull(15, 4);
   /** Felled trees whose logs haven't landed yet. */
   private pendingDrops: PendingDrop[] = [];
@@ -175,7 +178,8 @@ export class Game {
   private respawnTimer = 0;
   private elapsed = 0;
   /** The tutorial quest on a new world (null on worlds from before it, once it's over and saved as done it stays done). */
-  onboarding: Onboarding | null = null;
+  /** Your quests (a world from before quests has an empty log, so later quests are still offered). */
+  quests: QuestLog | null = null;
   /** The main menu's backdrop: a camera touring this world, with no one in it (never saved). */
   tour: Tour | null = null;
 
@@ -204,6 +208,9 @@ export class Game {
     this.scene.add(this.markers);
     this.scene.add(this.view.group);
     this.scene.add(this.player.model);
+    // The light of a torch in your hand (always in the scene, dark when unused,
+    // so lighting one doesn't make every material rebuild its shader).
+    this.scene.add(this.torchLight);
     this.sky = new Sky(this.scene);
     this.sky.groundAt = (x, z) => this.distant.groundAt(x, z);
     // The rest of the world, out to the horizon: map tiles are made in the
@@ -260,7 +267,7 @@ export class Game {
     this.autoBind(this.inv.items[0]);
     this.msg('You wake in the wilderness with nothing but a crude knife. Press H for help.', 'warn');
     this.msg('Follow the tutorial on the right: it walks you from bare hands to your first house.', 'info');
-    this.onboarding = Onboarding.begin(this.markerTex, s.x, s.z);
+    this.quests = QuestLog.begin(this.markerTex, s.x, s.z);
   }
 
   /** Show this world as the main menu's backdrop: a slow camera tour, nothing to play. */
@@ -340,7 +347,7 @@ export class Game {
   }
 
   autoBind(it: Item) {
-    if (!itemDef(it.type).tool) return;
+    if (!itemDef(it.type).tool && !HELD_ITEMS.has(it.type)) return;
     if (this.hotbar.includes(it.type)) return;
     const free = this.hotbar.indexOf(null);
     if (free >= 0) this.hotbar[free] = it.type;
@@ -703,7 +710,9 @@ export class Game {
 
   // ---------- actions
   actionsFor(t: Target): { def: ActionDef; ctx: Ctx; label: string; problem: string | null }[] {
-    const ctx: Ctx = { g: this, t, tool: this.activeItem() };
+    // A torch is held up in the other hand, as it were: you work as with bare hands.
+    const held = this.activeItem();
+    const ctx: Ctx = { g: this, t, tool: held && HELD_ITEMS.has(held.type) ? undefined : held };
     const out = [];
     for (const def of ACTIONS) {
       // Structures pick the right tool automatically.
@@ -1546,6 +1555,7 @@ export class Game {
     if (inp.hit('KeyB')) this.ui.toggle('build');
     if (inp.hit('KeyH') || inp.hit('F1')) this.ui.toggle('help');
     if (inp.hit('KeyJ')) this.ui.toggle('journal');
+    if (inp.hit('KeyL')) this.ui.toggle('quests');
     if (inp.hit('KeyM')) {
       this.sound.muted = !this.sound.muted;
       this.msg(this.sound.muted ? 'Sound off.' : 'Sound on.', 'info');
@@ -1695,6 +1705,16 @@ export class Game {
         }
       }
     }
+    // A torch in hand burns down; in deep water it's put out.
+    const held = this.activeItem();
+    if (held?.type === 'torch') {
+      held.dmg += (dt / TORCH_BURN) * 100;
+      const doused = p.swimming;
+      if (held.dmg >= 100 || doused) {
+        this.msg(doused ? 'Your torch hisses out in the water.' : 'Your torch burns out.', 'warn');
+        this.consumeActive();
+      }
+    }
     if (this.dev.on('noNeeds')) { p.food = 100; p.water = 100; p.stamina = 100; }
     if (this.dev.on('godMode')) p.health = 100;
     if (p.health <= 0) this.die();
@@ -1710,7 +1730,9 @@ export class Game {
       this.growth.update(this.world, p.pos.x, p.pos.z, dt * this.dev.timeScale);
     });
     this.updateMarkers();
-    this.onboarding?.update(this, dt);
+    if (!this.quests && !this.tour) this.quests = new QuestLog(this.markerTex);
+    if (this.quests && !this.quests.onChange) this.quests.onChange = () => this.ui.refresh();
+    this.quests?.update(this, dt);
     perf.time('animals', () => this.updateAnimals(dt));
     perf.time('terrain', () => this.world.terrain.update(p.pos.x, p.pos.y, p.pos.z, 6));
     this.world.focus = { x: p.pos.x, z: p.pos.z };
@@ -1725,6 +1747,20 @@ export class Game {
       inp.lock();
     }
     this.ui.update();
+  }
+
+  /** A torch in hand lights the ground around you, flickering. */
+  private updateTorchLight() {
+    const p = this.player, l = this.torchLight;
+    if (this.activeItem()?.type !== 'torch' || this.tour) { l.intensity = 0; return; }
+    // At the flame (in first person, a little ahead of you and to the right).
+    p.heldItem.getWorldPosition(l.position);
+    if (p.cameraMode === 'first') {
+      const f = p.forward();
+      l.position.set(p.pos.x + f.x * 0.45 + Math.cos(p.yaw) * 0.25, p.eye.y - 0.25, p.pos.z + f.z * 0.45 - Math.sin(p.yaw) * 0.25);
+    } else l.position.y += 0.35;
+    const t = this.elapsed;
+    l.intensity = 7 + Math.sin(t * 13) * 0.8 + Math.sin(t * 7.7) * 0.6 + Math.sin(t * 23) * 0.3;
   }
 
   private die() {
@@ -1773,6 +1809,7 @@ export class Game {
     this.view.updateTreeDetail(this.camera.position.x, this.camera.position.z);
     this.view.syncAnimals(this.elapsed);
     this.view.updateFires(p.pos.x, p.pos.z, this.elapsed);
+    this.updateTorchLight();
     this.frameNo++;
     this.renderer.shadowMap.needsUpdate = this.frameNo % this.graphics.level.shadowEvery === 0;
     perf.time('draw', () => { if (this.composer) this.composer.render(this.renderDt); else this.renderer.render(this.scene, this.camera); });
@@ -1819,7 +1856,7 @@ export class Game {
         equipped: this.equipped,
         active: this.activeUid,
         nextUid: getNextUid(),
-        onboarding: this.onboarding?.serialize() ?? null,
+        quests: this.quests?.serialize() ?? null,
       };
       await writeSave(SAVE_KEY, data);
     } catch (e) {
@@ -1965,7 +2002,8 @@ export class Game {
       g.player.effects = data.effects ?? {};
       g.activeUid = data.active;
       g.setActive(data.active);
-      if (data.onboarding) g.onboarding = Onboarding.load(g.markerTex, data.onboarding);
+      const quests = data.quests ?? data.onboarding;
+      if (quests) g.quests = QuestLog.load(g.markerTex, quests);
       return g;
     } catch (e) {
       console.warn('Load failed', e);

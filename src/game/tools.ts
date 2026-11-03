@@ -24,6 +24,7 @@ const modelGeos = new Map<string, THREE.BufferGeometry>();
 const modelMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8 });
 
 export function buildToolMesh(kind: ToolKind | undefined, itemType?: string): THREE.Group {
+  if (itemType === 'torch') return buildTorch();
   const g = new THREE.Group();
   if (!kind) return g;
   const model = itemType ? MODELS[itemType] : undefined;
@@ -163,4 +164,36 @@ export function swingPose(kind: SwingKind, phase: number, impactAt: number) {
   const after = (p - impactAt) / (1 - impactAt);
   const jolt = Math.max(0, 1 - after * 4);
   return { raise: 0, drive: 1 - ease(after), jolt };
+}
+
+/** Something held that's not a tool but still shows in the hand (a torch). */
+export const HELD_ITEMS = new Set(['torch']);
+
+const torchFlame = new THREE.MeshBasicMaterial({ color: 0xffb347, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, fog: false });
+const torchCore = new THREE.MeshBasicMaterial({ color: 0xfff1b0, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false, fog: false });
+
+/** A torch: a branch with a wrapped head, burning (the flame flickers on its own). */
+function buildTorch(): THREE.Group {
+  const g = new THREE.Group();
+  const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.02, 0.5, 7).translate(0, 0.17, 0), mat(0x6b4a2c));
+  const head = new THREE.Mesh(new THREE.CylinderGeometry(0.038, 0.03, 0.12, 8).translate(0, 0.44, 0), mat(0x3a2a1c, { roughness: 1 }));
+  stick.castShadow = head.castShadow = true;
+  // Soft teardrops of flame: an orange glow round a bright heart.
+  const flame = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 8).translate(0, 0.75, 0).scale(0.055, 0.12, 0.055), torchFlame);
+  const core = new THREE.Mesh(new THREE.SphereGeometry(1, 8, 6).translate(0, 0.7, 0).scale(0.026, 0.065, 0.026), torchCore);
+  flame.position.y = core.position.y = 0.47;
+  flame.renderOrder = core.renderOrder = 5;
+  const seed = Math.random() * 100;
+  flame.onBeforeRender = () => {
+    const t = performance.now() / 1000 + seed;
+    const s = 1 + Math.sin(t * 17) * 0.12 + Math.sin(t * 7.3) * 0.08;
+    flame.scale.set(1 + Math.sin(t * 11) * 0.1, s, 1 + Math.cos(t * 13) * 0.1);
+    flame.rotation.z = Math.sin(t * 5.1) * 0.12;
+    core.scale.set(1, 0.9 + Math.sin(t * 19) * 0.15, 1);
+  };
+  g.add(stick, head, flame, core);
+  // Held up, rather than pointing ahead like a tool.
+  g.rotation.z = -1.1;
+  g.userData.torch = true;
+  return g;
 }

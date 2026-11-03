@@ -4,11 +4,14 @@ import type { ToolKind } from '../data/items';
 import type { StructureObj } from '../world/world';
 import type { Game } from './game';
 
-// The tutorial quest on a new world: from bare hands to a first house with a
-// bed and a storage chest. Each step says what to do and how; the things it
-// needs are picked out in the world (a glow on the nearest few and an arrow
-// over the closest, or at the edge of the screen pointing the way when it's
-// out of sight). Steps finish on their own as you do them.
+// Quests: guided goals, each a list of steps that finish on their own as you
+// do them. You can be on several at once; the quest log (L) lists them, and
+// you choose which are tracked: those show in the panel on screen, and the
+// first of them has the things it needs picked out in the world (a glow on
+// the nearest few and an arrow over the closest, or at the edge of the screen
+// pointing the way when it's out of sight). Some quests are yours from the
+// start (the first house); others are offered when the time comes (a light
+// for the first night), and wait in the log until you take them up.
 
 /** Where something to point at is, and how high above its base to point. */
 interface Target { x: number; y: number; z: number; id: number }
@@ -19,12 +22,42 @@ interface Step {
   /** What to do and how (HTML). */
   text: string;
   /** Progress toward it ([have, need]), or done/not done. */
-  progress: (g: Game, q: Onboarding) => [number, number] | boolean;
+  progress: (g: Game, q: QuestState) => [number, number] | boolean;
   /** Things in the world to point at. */
-  targets?: (g: Game, q: Onboarding) => Target[];
+  targets?: (g: Game, q: QuestState) => Target[];
   /** Where to go when there's nothing of the kind near by. */
   far?: string;
 }
+
+export interface QuestDef {
+  id: string;
+  title: string;
+  /** What it's about, in a line (for the quest log). */
+  summary: string;
+  steps: Step[];
+  /** When it's done: a heading, what to know now (HTML), and a line for the message log. */
+  outro: { title: string; text: string; msg: string };
+  /** Offered when this becomes true (checked now and then); without it, the quest is yours from the start. */
+  offer?: (g: Game) => boolean;
+  /** Part of the tutorial: turned off with it. */
+  tutorial?: boolean;
+}
+
+export interface QuestState {
+  id: string;
+  status: 'offered' | 'active' | 'done';
+  step: number;
+  /** Shown in the panel on screen. */
+  tracked: boolean;
+  /** The first floor you built: the house is built around it. */
+  anchor: { x: number; z: number } | null;
+  /** Where you were when the quest began. */
+  start: { x: number; z: number };
+}
+
+export interface QuestSave { quests: QuestState[]; off: boolean }
+/** Saves from before there were several quests: the tutorial alone. */
+export interface OldOnboardingSave { step: number; done: boolean; anchor: { x: number; z: number } | null; start: { x: number; z: number } }
 
 /** How far to look for things to point at (widened when nothing is close). */
 let SEARCH = 70;
@@ -35,7 +68,7 @@ const has = (g: Game, type: string, n: number): [number, number] => [Math.min(n,
 const hasTool = (g: Game, kind: ToolKind) => g.inv.items.some((i) => itemDef(i.type).tool === kind);
 /** Plain walls (the windowed wall and the door have steps of their own). */
 const WALLS = ['log_wall', 'wood_wall', 'stone_wall'];
-const builtNear = (g: Game, q: Onboarding, types: string[], r = HOUSE_R) => {
+const builtNear = (g: Game, q: QuestState, types: string[], r = HOUSE_R) => {
   const a = q.anchor;
   if (!a) return 0;
   let n = 0;
@@ -88,7 +121,7 @@ function game(g: Game): Target[] {
 
 const KEY = (k: string) => `<kbd>${k}</kbd>`;
 
-const STEPS: Step[] = [
+const HOME_STEPS: Step[] = [
   { id: 'move', title: 'Get your bearings',
     text: `Walk with ${KEY('W')}${KEY('A')}${KEY('S')}${KEY('D')} and look around with the mouse. ${KEY('Shift')} runs, ${KEY('Space')} jumps. Press ${KEY('H')} any time for the full guide.`,
     progress: (g, q) => Math.hypot(g.player.pos.x - q.start.x, g.player.pos.z - q.start.z) > 6 },
@@ -166,16 +199,54 @@ const STEPS: Step[] = [
     targets: (g) => plans(g, ['chest']) },
 ];
 
-export interface OnboardingSave { step: number; done: boolean; anchor: { x: number; z: number } | null; start: { x: number; z: number } }
+/** Dusk: the sun low and going down (the first evening you see, in practice your first day). */
+const dusk = (g: Game) => {
+  const f = g.world.dayFraction;
+  return f > 0.69 && f < 0.85;
+};
 
-export class Onboarding {
-  step = 0;
-  done = false;
-  /** The first floor you built: the house is built around it. */
-  anchor: { x: number; z: number } | null = null;
-  start = { x: 0, z: 0 };
-  /** Off for good (skipped, or the quest is over and its last message read). */
-  hidden = false;
+const LIGHT_STEPS: Step[] = [
+  { id: 'materials', title: 'Gather what a torch needs',
+    text: `A torch is a branch with its head wrapped in plant fiber and packed with kindling. Gather a <b>branch</b> and <b>2 plant fiber</b>.`,
+    progress: (g) => {
+      const torches = g.inv.count('torch');
+      return [Math.min(3, Math.min(1, g.inv.count('branch') + torches) + Math.min(2, g.inv.count('plant_fiber') + torches * 2)), 3];
+    },
+    targets: (g) => { const f = forage(g, ['fiber_grass', 'reeds', 'fallen_branch']); return f.length ? f : trees(g, true); },
+    far: 'Fiber grass grows in open meadows; branches lie in the woods.' },
+  { id: 'kindling', title: 'Make kindling',
+    text: `In crafting (${KEY('C')}), under <b>Primitive</b>, whittle <b>Kindling (from branch)</b> with your knife. You'll need another branch to make the torch itself.`,
+    progress: (g) => g.inv.count('kindling') > 0 || g.inv.count('torch') > 0 },
+  { id: 'torch', title: 'Make a torch',
+    text: `In crafting (${KEY('C')}), under <b>Primitive</b>, make a <b>Torch</b>: a branch, 2 plant fiber and a kindling. You light it with a bow drill: keep the bow moving until it catches.`,
+    progress: (g) => g.inv.count('torch') > 0 },
+  { id: 'hold', title: 'Light your way',
+    text: `Put the torch in your hand from the hotbar (${KEY('1')}-${KEY('9')}). It lights the ground around you, but it burns down: put it away (${KEY('0')}) when you don't need it, and make more as you go.`,
+    progress: (g) => g.activeItem()?.type === 'torch' },
+];
+
+export const QUESTS: QuestDef[] = [
+  { id: 'home', title: 'A roof over your head', tutorial: true,
+    summary: 'From bare hands to a first house, with a bed to sleep in and a chest for your things.',
+    steps: HOME_STEPS,
+    outro: { title: 'Welcome home',
+      text: `You've built a house with a bed and a storage chest. From here: cook on a campfire, farm wheat, dig clay and set up a smithy. ${KEY('H')} has the full guide.`,
+      msg: 'Quest complete: you have a home, a bed and somewhere to keep your things. The wilderness is yours.' } },
+  { id: 'light', title: 'Light in the dark', tutorial: true,
+    summary: 'Night is coming. Make a torch to see by.',
+    offer: dusk,
+    steps: LIGHT_STEPS,
+    outro: { title: 'Lights in the night',
+      text: `A torch is a light to carry, but it burns out. For steadier light: a <b>campfire</b> (${KEY('B')} → build one, add fuel, and light it with a bow drill) lights up your camp, cooks your food and warms you while it has fuel; a lit <b>forge</b> glows as it heats metal. Fires burn down too: feed them branches, kindling or logs.`,
+      msg: 'Quest complete: you have a torch to see by. Campfires and a lit forge light the night too, as long as you keep them fed.' } },
+];
+
+const DEF = new Map(QUESTS.map((d) => [d.id, d]));
+
+export class QuestLog {
+  quests: QuestState[] = [];
+  /** The tutorial quests are turned off (from the pause menu). */
+  off = false;
 
   private panel: HTMLElement | null = null;
   private edge: HTMLElement | null = null;
@@ -186,7 +257,11 @@ export class Onboarding {
   private timer = 0;
   private time = 0;
   private lastHtml = '';
-  private doneTimer = 0;
+  /** Quests just finished (shown in the panel a while) and just offered (likewise), by id, with when. */
+  private finished = new Map<string, number>();
+  private offered = new Map<string, number>();
+  /** Called when something the quest log shows has changed. */
+  onChange?: () => void;
 
   constructor(glow: THREE.Texture) {
     const arrowMat = new THREE.MeshBasicMaterial({ color: 0xffc94a, transparent: true, opacity: 0.95, depthTest: false, depthWrite: false, fog: false });
@@ -206,52 +281,88 @@ export class Onboarding {
     this.group.visible = false;
   }
 
-  /** A new world's tutorial, starting where you stand. */
-  static begin(glow: THREE.Texture, x: number, z: number): Onboarding {
-    const q = new Onboarding(glow);
-    q.start = { x, z };
-    return q;
+  /** A new world: the quests you start with, beginning where you stand. */
+  static begin(glow: THREE.Texture, x: number, z: number): QuestLog {
+    const log = new QuestLog(glow);
+    for (const d of QUESTS) if (!d.offer) log.quests.push({ id: d.id, status: 'active', step: 0, tracked: true, anchor: null, start: { x, z } });
+    return log;
   }
 
-  static load(glow: THREE.Texture, d: OnboardingSave): Onboarding {
-    const q = new Onboarding(glow);
-    q.step = Math.min(STEPS.length, d.step);
-    q.done = d.done;
-    q.anchor = d.anchor;
-    q.start = d.start;
-    q.hidden = d.done;
-    return q;
+  static load(glow: THREE.Texture, d: QuestSave | OldOnboardingSave): QuestLog {
+    const log = new QuestLog(glow);
+    if ('quests' in d) {
+      log.quests = d.quests.filter((q) => DEF.has(q.id)).map((q) => ({ ...q, step: Math.min(DEF.get(q.id)!.steps.length, q.step) }));
+      log.off = d.off;
+    } else {
+      // The old single tutorial is the first-house quest.
+      log.quests.push({ id: 'home', status: d.done ? 'done' : 'active', step: Math.min(HOME_STEPS.length, d.step), tracked: true, anchor: d.anchor, start: d.start });
+      log.off = d.done && d.step < HOME_STEPS.length;
+    }
+    return log;
   }
 
-  serialize(): OnboardingSave {
-    return { step: this.step, done: this.done, anchor: this.anchor, start: this.start };
+  serialize(): QuestSave {
+    return { quests: this.quests, off: this.off };
   }
 
-  get active() { return !this.done && !this.hidden; }
+  /** Any tutorial quest still going (for the pause menu's Skip tutorial). */
+  get active() { return !this.off && this.quests.some((q) => q.status !== 'done' && DEF.get(q.id)?.tutorial); }
 
-  /** Stop the tutorial (from the pause menu). */
+  def(q: QuestState): QuestDef { return DEF.get(q.id)!; }
+
+  /** Turn the tutorial quests off (from the pause menu). */
   skip() {
-    this.done = true;
-    this.hidden = true;
-    this.teardown();
+    this.off = true;
+    this.quests = this.quests.filter((q) => q.status === 'done' || !DEF.get(q.id)?.tutorial);
+    this.offered.clear();
+    this.lastHtml = '';
+    this.changed();
   }
 
-  private teardown() {
-    this.group.removeFromParent();
-    this.panel?.remove(); this.panel = null;
-    this.edge?.remove(); this.edge = null;
+  /** Take up an offered quest (tracked, unless you say otherwise). */
+  accept(id: string, track = true) {
+    const q = this.quests.find((x) => x.id === id && x.status === 'offered');
+    if (!q) return;
+    q.status = 'active';
+    q.tracked = track;
+    this.offered.delete(id);
+    this.timer = 0;
+    this.changed();
+  }
+
+  /** Show or hide a quest in the panel on screen. */
+  setTracked(id: string, on: boolean) {
+    const q = this.quests.find((x) => x.id === id);
+    if (!q || q.tracked === on) return;
+    q.tracked = on;
+    this.timer = 0;
+    this.changed();
+  }
+
+  /** Put a quest first: it's the one whose things are pointed out in the world. */
+  focus(id: string) {
+    const i = this.quests.findIndex((x) => x.id === id);
+    if (i <= 0) return;
+    const [q] = this.quests.splice(i, 1);
+    q.tracked = true;
+    this.quests.unshift(q);
+    this.timer = 0;
+    this.changed();
+  }
+
+  /** The quest the world arrows are for: the first tracked one under way. */
+  get focused(): QuestState | undefined {
+    return this.quests.find((q) => q.status === 'active' && q.tracked);
+  }
+
+  private changed() {
+    this.lastHtml = '';
+    this.onChange?.();
   }
 
   update(g: Game, dt: number) {
-    if (this.hidden) return;
     this.time += dt;
     if (!this.panel) this.mount(g);
-    if (this.done) {
-      // The finale stays up a little while, then the tutorial goes away.
-      this.doneTimer += dt;
-      if (this.doneTimer > 14) { this.hidden = true; this.teardown(); }
-      return;
-    }
     this.timer -= dt;
     if (this.timer <= 0) {
       this.timer = 0.4;
@@ -272,56 +383,103 @@ export class Onboarding {
     g.scene.add(this.group);
   }
 
-  /** See whether the current step (and any already done after it) is finished; refresh the panel and targets. */
+  /** Progress of a quest's current step, for showing. */
+  progressOf(g: Game, q: QuestState): [number, number] | boolean {
+    const s = this.def(q).steps[q.step];
+    return s ? s.progress(g, q) : true;
+  }
+
+  /** Offer what's due, move quests on as their steps are done, and redraw the panel. */
   private check(g: Game) {
+    // New quests, when their time comes.
+    for (const d of QUESTS) {
+      if (!d.offer || this.quests.some((q) => q.id === d.id) || (d.tutorial && this.off) || !d.offer(g)) continue;
+      const p = g.player.pos;
+      this.quests.push({ id: d.id, status: 'offered', step: 0, tracked: false, anchor: null, start: { x: p.x, z: p.z } });
+      this.offered.set(d.id, this.time);
+      g.msg(`New quest: ${d.title}. Open your quests (L) to take it up.`, 'good');
+      this.changed();
+    }
+    const home = this.quests.find((q) => q.id === 'home');
     // The house's floor: the first floor you finish (or the nearest, for an old plan).
-    if (!this.anchor) {
+    if (home && !home.anchor) {
       let best: StructureObj | null = null, bd = Infinity;
       for (const o of g.world.objects.values()) {
         if (o.kind !== 'structure' || o.type !== 'floor' || !o.built) continue;
         const d = Math.hypot(o.x - g.player.pos.x, o.z - g.player.pos.z);
         if (d < bd) { bd = d; best = o; }
       }
-      if (best) this.anchor = { x: best.x, z: best.z };
+      if (best) home.anchor = { x: best.x, z: best.z };
     }
-    let advanced = false;
-    while (this.step < STEPS.length && finished(STEPS[this.step].progress(g, this))) {
-      g.msg(`Tutorial: ${STEPS[this.step].title} — done!`, 'good');
-      this.step++;
-      advanced = true;
+    let flash = false;
+    for (const q of this.quests) {
+      if (q.status !== 'active') continue;
+      const d = this.def(q);
+      while (q.step < d.steps.length && isDone(d.steps[q.step].progress(g, q))) {
+        g.msg(`${d.title}: ${d.steps[q.step].title} — done!`, 'good');
+        q.step++;
+        flash = true;
+        this.changed();
+      }
+      if (q.step >= d.steps.length) {
+        q.status = 'done';
+        this.finished.set(q.id, this.time);
+        g.msg(d.outro.msg, 'good');
+        this.changed();
+      }
     }
-    if (this.step >= STEPS.length) {
-      this.done = true;
-      this.group.visible = false;
-      if (this.edge) this.edge.style.display = 'none';
-      g.msg('Tutorial complete: you have a home, a bed and somewhere to keep your things. The wilderness is yours.', 'good');
-      this.render(`<div class="tut-head">Tutorial complete</div>
-        <div class="tut-title">Welcome home</div>
-        <div class="tut-text">You've built a house with a bed and a storage chest. From here: cook on a campfire, farm wheat, dig clay and set up a smithy. ${KEY('H')} has the full guide.</div>`, true);
-      return;
-    }
-    const s = STEPS[this.step];
-    const pr = s.progress(g, this);
-    // The nearest few things to go for (looking further afield if there's nothing close).
+    for (const [id, t] of this.finished) if (this.time - t > 20) { this.finished.delete(id); this.lastHtml = ''; }
+    for (const [id, t] of this.offered) if (this.time - t > 45) { this.offered.delete(id); this.lastHtml = ''; }
+
+    // The focused quest's step: the nearest few things to go for (looking further afield if there's nothing close).
+    const f = this.focused;
+    const s = f && this.def(f).steps[f.step];
     const p = g.player.pos;
     SEARCH = 70;
-    let found = s.targets?.(g, this) ?? [];
-    if (s.targets && !found.length) { SEARCH = 250; found = s.targets(g, this); }
+    let found = s?.targets?.(g, f!) ?? [];
+    if (s?.targets && !found.length) { SEARCH = 250; found = s.targets(g, f!); }
     this.targets = found
       .map((t) => ({ t, d: Math.hypot(t.x - p.x, t.z - p.z) }))
       .sort((a, b) => a.d - b.d).slice(0, this.glows.length).map((e) => e.t);
-    const far = s.far && !this.targets.length ? `<div class="tut-hint">${s.far}</div>` : '';
-    const bar = Array.isArray(pr) ? `<div class="tut-progress"><div class="tut-progress-fill" style="width:${(pr[0] / pr[1]) * 100}%"></div><span>${pr[0]} / ${pr[1]}</span></div>` : '';
-    this.render(`<div class="tut-head">Tutorial · step ${this.step + 1} of ${STEPS.length}</div>
-      <div class="tut-title">${s.title}</div>
-      <div class="tut-text">${s.text}</div>${far}${bar}
-      <div class="tut-foot">Hold Alt to move this · Esc → Skip tutorial to turn it off</div>`, advanced);
+
+    // The panel: news first (offers, quests just done), then each tracked quest; the focused one in full.
+    let html = '';
+    for (const id of this.offered.keys()) {
+      const d = DEF.get(id)!;
+      html += `<div class="quest-card quest-offer"><div class="tut-head">New quest</div>
+        <div class="tut-title">${d.title}</div>
+        <div class="tut-text">${d.summary}</div>
+        <div class="tut-hint quest-how">Press ${KEY('L')} to open your quests and take it up. You can follow several quests at once, and choose which show here.</div></div>`;
+    }
+    for (const id of this.finished.keys()) {
+      const d = DEF.get(id)!;
+      html += `<div class="quest-card"><div class="tut-head">Quest complete · ${d.title}</div>
+        <div class="tut-title">${d.outro.title}</div>
+        <div class="tut-text">${d.outro.text}</div></div>`;
+    }
+    for (const q of this.quests) {
+      if (q.status !== 'active' || !q.tracked) continue;
+      const d = this.def(q), st = d.steps[q.step], pr = st.progress(g, q);
+      const bar = Array.isArray(pr) ? `<div class="tut-progress"><div class="tut-progress-fill" style="width:${(pr[0] / pr[1]) * 100}%"></div><span>${pr[0]} / ${pr[1]}</span></div>` : '';
+      if (q === f) {
+        const far = st.far && !this.targets.length ? `<div class="tut-hint">${st.far}</div>` : '';
+        html += `<div class="quest-card"><div class="tut-head">${d.title} · step ${q.step + 1} of ${d.steps.length}</div>
+          <div class="tut-title">${st.title}</div>
+          <div class="tut-text">${st.text}</div>${far}${bar}</div>`;
+      } else {
+        html += `<div class="quest-card quest-brief"><div class="tut-head">${d.title} · step ${q.step + 1} of ${d.steps.length}</div>
+          <div class="quest-brief-title">${st.title}</div>${bar}</div>`;
+      }
+    }
+    if (html) html += `<div class="tut-foot">${KEY('L')} quests · Hold Alt to move this</div>`;
+    this.render(html, flash);
   }
 
   private render(html: string, flash: boolean) {
     if (!this.panel || html === this.lastHtml) return;
     this.lastHtml = html;
     this.panel.innerHTML = html;
+    this.panel.style.display = html ? '' : 'none';
     if (flash) {
       this.panel.classList.remove('tut-flash');
       void this.panel.offsetWidth; // restart the animation
@@ -377,7 +535,7 @@ export class Onboarding {
   }
 }
 
-const finished = (p: [number, number] | boolean) => (Array.isArray(p) ? p[0] >= p[1] : p);
+const isDone = (p: [number, number] | boolean) => (Array.isArray(p) ? p[0] >= p[1] : p);
 
-/** The steps' ids, in order (for tests). */
-export const ONBOARDING_STEPS = STEPS.map((s) => s.id);
+/** The first-house quest's step ids, in order (for tests). */
+export const ONBOARDING_STEPS = HOME_STEPS.map((s) => s.id);

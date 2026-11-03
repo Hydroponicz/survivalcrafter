@@ -58,6 +58,7 @@ export const RECIPE_MINIGAMES: Record<string, MinigameSpec> = {
   stone_hammer: { kind: 'strike', variant: 'knap', hits: 4 },
   stone_spear: { kind: 'strike', variant: 'knap', hits: 4 },
   kindling_branch: { kind: 'carve', passes: 1, make: 'kindling' },
+  torch: { kind: 'bowdrill' },
   shaft: { kind: 'carve', passes: 2, make: 'shaft' },
   kindling_log: { kind: 'strike', variant: 'split', hits: 3 },
   split_planks: { kind: 'strike', variant: 'split', hits: 3 },

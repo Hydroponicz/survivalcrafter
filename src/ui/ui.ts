@@ -18,7 +18,7 @@ import { CARRY_CAPACITY } from '../game/inventory';
 import { MAT_NAMES } from '../world/terrain';
 import { ANIMALS, cropKey, type PileObj, type StructureObj } from '../world/world';
 
-type WindowName = 'inventory' | 'character' | 'crafting' | 'skills' | 'build' | 'help' | 'container' | 'dev' | 'journal';
+type WindowName = 'inventory' | 'character' | 'crafting' | 'skills' | 'build' | 'help' | 'container' | 'dev' | 'journal' | 'quests';
 
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, html?: string) => {
   const e = document.createElement(tag);
@@ -121,7 +121,7 @@ export class UI {
       this.bars[k] = b.querySelector('.bar-fill')!;
     }
 
-    for (const name of ['inventory', 'character', 'crafting', 'skills', 'build', 'help', 'container', 'dev', 'journal'] as WindowName[]) {
+    for (const name of ['inventory', 'character', 'crafting', 'skills', 'build', 'help', 'container', 'dev', 'journal', 'quests'] as WindowName[]) {
       const w = el('div', `window window-${name}`);
       w.style.display = 'none';
       w.addEventListener('mousedown', (e) => {
@@ -188,7 +188,7 @@ export class UI {
       if (act === 'help') { this.toggle('help'); return; }
       if (act === 'windows') { this.resetWindows(); this.log('Windows are back where they started.', 'info'); return; }
       if (act === 'skip-tutorial') {
-        if (confirm('Turn the tutorial off for this world?')) { g.onboarding?.skip(); this.log('Tutorial off. Press H any time for the guide.', 'info'); }
+        if (confirm('Turn the tutorial off for this world?')) { g.quests?.skip(); this.log('Tutorial off. Press H any time for the guide.', 'info'); }
         return;
       }
       if (act === 'export') {
@@ -557,7 +557,7 @@ export class UI {
     setStyle(this.startEl, 'display', this.started ? 'none' : 'flex');
     const showPause = this.started && !g.input.locked && !this.anyWindowOpen() && !this.wantsRelock && this.relockGrace <= 0;
     setStyle(this.pauseEl, 'display', showPause ? 'flex' : 'none');
-    if (showPause) (this.pauseEl.querySelector('[data-act="skip-tutorial"]') as HTMLElement).style.display = g.onboarding?.active ? '' : 'none';
+    if (showPause) (this.pauseEl.querySelector('[data-act="skip-tutorial"]') as HTMLElement).style.display = g.quests?.active ? '' : 'none';
 
     // Live windows refresh a few times per second.
     this.refreshTimer -= 1 / 60;
@@ -677,6 +677,7 @@ export class UI {
       case 'container': return this.renderContainer();
       case 'dev': return this.renderDev();
       case 'journal': return this.renderJournal();
+      case 'quests': return this.renderQuests();
     }
   }
 
@@ -1094,6 +1095,67 @@ export class UI {
       onChange(v);
     });
     return inp;
+  }
+
+  /** Your quests: ones offered to take up, ones under way (tracked on screen or not), and ones done. */
+  private renderQuests() {
+    const g = this.g, log = g.quests;
+    const body = el('div');
+    body.appendChild(el('div', 'hint', 'You can follow several quests at once. <b>Tracked</b> quests show in the panel on screen; the first of them has what it needs pointed out in the world. Untrack one to set it aside for later: it keeps its place.'));
+    if (!log || !log.quests.length) {
+      body.appendChild(el('div', 'quest-none', 'No quests yet.'));
+      this.frame('quests', 'Quests', body);
+      return;
+    }
+    const button = (label: string, tip: string, fn: () => void, cls = '') => {
+      const b = el('button', cls, label);
+      b.dataset.tip = tip;
+      b.addEventListener('click', () => { fn(); this.refresh(); });
+      return b;
+    };
+    const section = (title: string, list: typeof log.quests) => {
+      if (!list.length) return;
+      body.appendChild(el('h3', '', title));
+      for (const q of list) {
+        const d = log.def(q);
+        const row = el('div', `quest-row quest-${q.status}${q === log.focused ? ' quest-focused' : ''}`);
+        let html = `<div class="quest-row-head"><b>${d.title}</b>`;
+        if (q.status === 'active') html += ` <small>step ${Math.min(q.step + 1, d.steps.length)} of ${d.steps.length}</small>`;
+        if (q === log.focused) html += ' <span class="quest-tag">pointed out</span>';
+        html += `</div><div class="quest-summary">${d.summary}</div>`;
+        if (q.status === 'active') {
+          // The steps: done, the one you're on (with its progress), still to come.
+          html += '<ol class="quest-steps">';
+          d.steps.forEach((st, i) => {
+            if (i < q.step) html += `<li class="done">${st.title}</li>`;
+            else if (i === q.step) {
+              const pr = log.progressOf(g, q);
+              html += `<li class="now">${st.title}${Array.isArray(pr) ? ` <small>(${pr[0]} / ${pr[1]})</small>` : ''}<div class="quest-step-text">${st.text}</div></li>`;
+            } else html += `<li class="later">${st.title}</li>`;
+          });
+          html += '</ol>';
+        } else if (q.status === 'done') {
+          html += `<div class="quest-outro">${d.outro.text}</div>`;
+        }
+        row.innerHTML = html;
+        const btns = el('div', 'btns');
+        if (q.status === 'offered') {
+          btns.append(button('Accept', 'Take up this quest and track it on screen', () => log.accept(q.id)),
+            button('Accept, don\'t track', 'Take it up but keep it out of the panel for now', () => log.accept(q.id, false)));
+        } else if (q.status === 'active') {
+          btns.append(q.tracked
+            ? button('Untrack', 'Hide it from the panel on screen (it keeps its progress)', () => log.setTracked(q.id, false))
+            : button('Track', 'Show it in the panel on screen', () => log.setTracked(q.id, true)));
+          if (q !== log.focused) btns.append(button('Point it out', 'Track it first: the things it needs are marked in the world', () => log.focus(q.id)));
+        }
+        if (btns.childElementCount) row.appendChild(btns);
+        body.appendChild(row);
+      }
+    };
+    section('New', log.quests.filter((q) => q.status === 'offered'));
+    section('Under way', log.quests.filter((q) => q.status === 'active'));
+    section('Done', log.quests.filter((q) => q.status === 'done'));
+    this.frame('quests', 'Quests', body);
   }
 
   private renderJournal() {
