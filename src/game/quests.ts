@@ -111,6 +111,15 @@ function logPiles(g: Game): Target[] {
   return out;
 }
 
+/** Chopping blocks you've built round about. */
+function blocks(g: Game): Target[] {
+  const p = g.player.pos, out: Target[] = [];
+  for (const o of g.world.near(p.x, p.z, SEARCH)) {
+    if (o.kind === 'structure' && o.built && o.type === 'chopping_block') out.push({ x: o.x, y: o.y + 0.8, z: o.z, id: o.id });
+  }
+  return out;
+}
+
 /** Plans of these pieces still to build (to point at the work). */
 function plans(g: Game, types: string[]): Target[] {
   const out: Target[] = [];
@@ -170,12 +179,16 @@ const HOME_STEPS: Step[] = [
     progress: (g, q) => !!q.flags?.includes('felled') || g.inv.count('log') > 0 || g.inv.count('plank') > 0,
     targets: (g) => trees(g),
     far: 'No grown trees close by: head for the woods.' },
+  { id: 'block', title: 'Set up a chopping block',
+    text: `Pick up the logs from the pile where your tree fell (aim at it, ${KEY('Right click')} → <b>Take all</b>). Logs are split on a <b>chopping block</b>: press ${KEY('B')}, pick <b>Chopping block</b> (Crafting), place it on open ground, then with your hatchet in hand aim at it and ${KEY('Left click')} to build it. It takes one log.`,
+    progress: (g) => g.inv.count('plank') >= 5 || [...g.world.near(g.player.pos.x, g.player.pos.z, 40)].some((o) => o.kind === 'structure' && o.type === 'chopping_block' && o.built),
+    targets: (g) => { const p = plans(g, ['chopping_block']); return p.length || g.inv.count('log') > 0 ? p : logPiles(g); } },
   { id: 'planks', title: 'Split rough planks',
-    text: `Pick up the logs from the pile where your tree fell (aim at it, ${KEY('Right click')} → <b>Take all</b>). Then, in crafting (${KEY('C')}), under <b>Woodworking</b>, <b>Split log into rough planks</b> with your hatchet: 2 a log. Rough planks are what you build with: one for your hammer, and the first floor needs 4. (Later, an iron saw cuts <b>refined planks</b> for fine furniture.)`,
+    text: `At your chopping block, open crafting (${KEY('C')}) and under <b>Woodworking</b> pick <b>Split log into rough planks</b>, with the hatchet in your hand: stand the log on the block and split it, 2 planks a log. Rough planks are what you build with: one for your hammer, and the first floor needs 4. (Later, an iron saw cuts <b>refined planks</b> for fine furniture.)`,
     // (A plank already made into the hammer counts.)
     progress: (g) => [Math.min(5, g.inv.count('plank') + (g.inv.count('wooden_hammer') > 0 ? 1 : 0)), 5],
-    // The logs still lying about, until you've picked them up.
-    targets: (g) => (g.inv.count('log') > 0 ? [] : logPiles(g)) },
+    // The logs still lying about until you've picked them up; then your chopping block.
+    targets: (g) => (g.inv.count('log') > 0 ? blocks(g) : logPiles(g)) },
   { id: 'hammer', title: 'Make a wooden hammer',
     text: `Your building tool. Carve a <b>Shaft</b> from a branch with your knife (Woodworking), then under <b>Primitive</b> make a <b>Wooden hammer</b>: the shaft and one rough plank. You drive the handle into the head with a rock.`,
     progress: (g) => hasTool(g, 'hammer') },

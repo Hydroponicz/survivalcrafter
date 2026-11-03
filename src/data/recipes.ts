@@ -2,7 +2,7 @@ import type { ToolKind } from './items';
 import type { SkillId } from './skills';
 import { FURNITURE } from './furniture';
 
-export type StationKind = 'fire' | 'forge' | 'anvil' | 'workbench' | 'quern';
+export type StationKind = 'fire' | 'forge' | 'anvil' | 'workbench' | 'quern' | 'chopping_block';
 
 export const STATION_NAMES: Record<StationKind, string> = {
   fire: 'a lit fire',
@@ -10,6 +10,7 @@ export const STATION_NAMES: Record<StationKind, string> = {
   anvil: 'an anvil',
   workbench: 'a workbench',
   quern: 'a quern',
+  chopping_block: 'a chopping block',
 };
 
 export interface Recipe {
@@ -59,16 +60,16 @@ export const RECIPES: Recipe[] = [
     tool: 'knife', inputs: [{ item: 'shaft', count: 2 }, { item: 'cordage', count: 2 }], output: { item: 'bow', count: 1 } },
   { id: 'arrows', name: 'Arrows', category: 'Primitive', skill: 'toolcrafting', difficulty: 6, time: 8,
     tool: 'knife', inputs: [{ item: 'shaft', count: 1 }, { item: 'flint', count: 1 }, { item: 'feather', count: 1 }], output: { item: 'arrow', count: 3 } },
-  { id: 'kindling_branch', name: 'Kindling (from branch)', category: 'Primitive', skill: 'firemaking', difficulty: 1, time: 3,
-    tool: 'knife', inputs: [{ item: 'branch', count: 1 }], output: { item: 'kindling', count: 2 } },
+  { id: 'kindling_branch', name: 'Kindling (from branches)', category: 'Primitive', skill: 'firemaking', difficulty: 1, time: 4,
+    tool: 'knife', inputs: [{ item: 'branch', count: 3 }], output: { item: 'kindling', count: 3 } },
 
   // --- woodworking
   { id: 'shaft', name: 'Shaft', category: 'Woodworking', skill: 'carpentry', difficulty: 3, time: 5,
     tool: 'knife', inputs: [{ item: 'branch', count: 1 }], output: { item: 'shaft', count: 1 } },
-  { id: 'kindling_log', name: 'Kindling (from log)', category: 'Woodworking', skill: 'woodcutting', difficulty: 3, time: 6,
-    tool: 'hatchet', inputs: [{ item: 'log', count: 1 }], output: { item: 'kindling', count: 6 } },
+  { id: 'kindling_plank', name: 'Kindling (from a rough plank)', category: 'Woodworking', skill: 'woodcutting', difficulty: 3, time: 6,
+    tool: 'hatchet', stations: ['chopping_block'], inputs: [{ item: 'plank', count: 1 }], output: { item: 'kindling', count: 4 } },
   { id: 'split_planks', name: 'Split log into rough planks', category: 'Woodworking', skill: 'carpentry', difficulty: 6, time: 12,
-    tool: 'hatchet', inputs: [{ item: 'log', count: 1 }], output: { item: 'plank', count: 2 } },
+    tool: 'hatchet', stations: ['chopping_block'], inputs: [{ item: 'log', count: 1 }], output: { item: 'plank', count: 2 } },
   { id: 'saw_planks', name: 'Saw log into refined planks', category: 'Woodworking', skill: 'carpentry', difficulty: 10, time: 10,
     tool: 'saw', inputs: [{ item: 'log', count: 1 }], output: { item: 'refined_plank', count: 5 } },
   { id: 'wooden_shovel', name: 'Wooden shovel', category: 'Woodworking', skill: 'carpentry', difficulty: 8, time: 12,

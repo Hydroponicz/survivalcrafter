@@ -5,6 +5,7 @@ import { CrankGame, type CrankVariant } from './crank';
 import { CenterGame, HeatGame, PlaceGame, type HeatVariant, type PlaceVariant } from './shape';
 import { CarveGame } from './whittle';
 import { BuildGame } from './build';
+import { ChopGame, type BlockSpot, type ChopVariant } from './chop';
 import type { StructureObj } from '../../world/world';
 import { StrikeGame, type StrikeVariant } from './strike';
 import { KnapGame, type KnapShape } from './knap';
@@ -28,7 +29,8 @@ export type MinigameSpec =
   | { kind: 'center' }
   | { kind: 'cord'; plies: number }
   | { kind: 'knap'; shape: KnapShape; hits: number }
-  | { kind: 'build'; s: StructureObj; material: string };
+  | { kind: 'build'; s: StructureObj; material: string }
+  | { kind: 'chop'; variant: ChopVariant; block?: BlockSpot };
 
 /**
  * `toolType`: the item you're working with, shown in the scene where the work uses one.
@@ -37,6 +39,10 @@ export type MinigameSpec =
 export function createMinigame(spec: MinigameSpec, ease: number, toolType?: string, camera?: THREE.Camera): Minigame {
   switch (spec.kind) {
     case 'build': return new BuildGame(ease, spec.s, spec.material, toolType, camera ?? new THREE.PerspectiveCamera());
+    case 'chop': {
+      const cam = camera ?? new THREE.PerspectiveCamera();
+      return new ChopGame(ease, spec.variant, spec.block ?? { x: cam.position.x, y: 0, z: cam.position.z - 1, top: cam.position.y - 1.1 }, toolType, cam);
+    }
     case 'saw': return new SawGame(ease, spec.cuts);
     case 'bowdrill': return new BowDrillGame(ease);
     case 'bellows': return new BellowsGame(ease, spec.gear);
@@ -51,6 +57,11 @@ export function createMinigame(spec: MinigameSpec, ease: number, toolType?: stri
     case 'cord': return new CordageGame(ease, spec.plies);
     case 'knap': return new KnapGame(ease, spec.shape, spec.hits);
   }
+}
+
+/** Work played out in the world itself (building, splitting at the block), drawn by the game's own camera. */
+function inWorld(mg: Minigame): mg is (BuildGame | ChopGame) {
+  return mg instanceof BuildGame || mg instanceof ChopGame;
 }
 
 /** The hands-on work for each recipe. */
@@ -69,8 +80,8 @@ export const RECIPE_MINIGAMES: Record<string, MinigameSpec> = {
   bow: { kind: 'carve', passes: 2, make: 'shaft' },
   arrows: { kind: 'carve', passes: 1, make: 'shaft' },
   shaft: { kind: 'carve', passes: 2, make: 'shaft' },
-  kindling_log: { kind: 'strike', variant: 'split', hits: 3 },
-  split_planks: { kind: 'strike', variant: 'split', hits: 3 },
+  kindling_plank: { kind: 'chop', variant: 'kindling' },
+  split_planks: { kind: 'chop', variant: 'planks' },
   saw_planks: { kind: 'saw', cuts: 4 },
   wooden_shovel: { kind: 'carve', passes: 1, wide: true, make: 'wooden_shovel' },
   clay_jar: { kind: 'center' },
@@ -139,6 +150,7 @@ export function minigameVerb(spec: MinigameSpec): string {
     case 'strike': return { split: 'split', knap: 'knap', forge: 'hammer', nail: 'nail', haft: 'haft' }[spec.variant];
     case 'carve': return 'carve';
     case 'build': return 'build';
+    case 'chop': return 'split';
     case 'heat': return { roast: 'cook', bake: 'bake', fire: 'fire', brew: 'brew' }[spec.variant];
     case 'place': return 'lay';
     case 'center': return 'throw';
@@ -177,7 +189,7 @@ export class MinigameSession {
     guide: { intro: boolean; coach: boolean } = { intro: false, coach: false }, toolType?: string, world?: { scene: THREE.Scene; camera: THREE.Camera }) {
     this.mg = createMinigame(spec, ease, toolType, world?.camera);
     // Work done on the world itself shows there, under the game's own camera.
-    if (this.mg instanceof BuildGame) world?.scene.add(this.mg.overlay);
+    if (inWorld(this.mg)) world?.scene.add(this.mg.overlay);
     this.coach = guide.coach;
     this.intro = guide.intro ? tutorialFor(spec) : null;
     if (this.intro) {
@@ -276,11 +288,11 @@ export class MinigameSession {
 
   /** The work happens in the world (the game draws it, from this camera). */
   get worldCamera(): THREE.PerspectiveCamera | null {
-    return this.mg instanceof BuildGame && !this.ended ? this.mg.camera : null;
+    return inWorld(this.mg) && !this.ended ? this.mg.camera : null;
   }
 
   render(renderer: THREE.WebGLRenderer) {
-    if (this.ended || this.mg instanceof BuildGame) return;
+    if (this.ended || inWorld(this.mg)) return;
     this.mg.resize();
     renderer.autoClear = false;
     renderer.clearDepth();

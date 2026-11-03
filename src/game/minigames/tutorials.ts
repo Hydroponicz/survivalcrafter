@@ -148,6 +148,15 @@ const T: Record<string, Tutorial> = {
     ],
     quality: 'Clean strikes make sturdier building pieces.',
   },
+  chop: {
+    title: 'Splitting on the block',
+    what: 'Wood is split on your chopping block: the log (or plank) stands on end, and gold lines show where to split it.',
+    steps: [
+      { gesture: 'click', text: 'A ring closes on the gold line. Click when it turns green and meets the small green circle: the hatchet comes down and splits a piece off.' },
+      { gesture: 'click', text: 'Split each line in turn. A log loses a bark slab off each side, then splits into two rough planks; a plank splits into four sticks of kindling.' },
+    ],
+    quality: 'Clean, well-timed blows make better planks and kindling.',
+  },
   build: {
     title: 'Building',
     what: 'You build each piece where it stands, a course at a time: carry the material in, set it in place, and fix it there.',

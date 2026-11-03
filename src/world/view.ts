@@ -855,6 +855,17 @@ export function buildPieceMesh(type: string, state: { lit?: boolean; open?: bool
       }
       break;
     }
+    case 'chopping_block': {
+      // A round of log on end: bark round the sides, the top end-grain scarred by the axe.
+      tex(new THREE.CylinderGeometry(0.3, 0.33, 0.5, 14), 'rough_wood', 0, 0.25, 0);
+      add(new THREE.CylinderGeometry(0.29, 0.29, 0.012, 14), 0xb48a58, 0, 0.502, 0, { roughness: 0.95 });
+      for (const [r, c] of [[0.2, 0x9c7646], [0.11, 0xa98250]] as const) add(new THREE.RingGeometry(r - 0.012, r, 20).rotateX(-Math.PI / 2), c, 0, 0.509, 0, { roughness: 1 });
+      for (let k = 0; k < 3; k++) {
+        const cut = add(new THREE.BoxGeometry(0.22, 0.004, 0.012), 0x6e5232, (k - 1) * 0.06, 0.51, (k - 1) * 0.05, { roughness: 1 });
+        cut.rotation.y = 0.5 + k * 0.7;
+      }
+      break;
+    }
     case 'quern':
       tex(new THREE.CylinderGeometry(0.55, 0.6, 0.3, 16), 'stone', 0, 0.15, 0);
       tex(new THREE.CylinderGeometry(0.5, 0.5, 0.25, 16), 'stone', 0, 0.42, 0, { tint: 0xe0dcd6 });

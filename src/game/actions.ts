@@ -1063,6 +1063,10 @@ function withGear(g: Game, spec: MinigameSpec | undefined): MinigameSpec | undef
   const s = g.smithy();
   const blow = s.bellows ? bellowsGrade(s.bellows) : 0;
   if (spec.kind === 'bellows' || spec.kind === 'pour') return { ...spec, gear: blow };
+  if (spec.kind === 'chop') {
+    const b = g.nearestStation('chopping_block');
+    return { ...spec, block: b ? { x: b.x, y: b.y, z: b.z, top: b.y + 0.51 } : undefined };
+  }
   if (spec.kind === 'strike' && spec.variant === 'forge') {
     return { ...spec, gear: s.anvil ? anvilGrade(s.anvil) : 0, heat: blow, iron: s.anvil?.type === 'iron_anvil' };
   }

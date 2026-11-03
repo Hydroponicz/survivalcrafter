@@ -685,6 +685,18 @@ export class Game {
     return isIdentified(type) ? this.inv.count(type) : 0;
   }
 
+  /** The nearest built station of a kind within reach (for work done at it). */
+  nearestStation(kind: StationKind): StructureObj | undefined {
+    const p = this.player.pos;
+    let best: StructureObj | undefined, bd = 4;
+    for (const o of this.world.near(p.x, p.z, 4)) {
+      if (o.kind !== 'structure' || !o.built || STRUCTURES[o.type].station !== kind) continue;
+      const d = Math.hypot(o.x - p.x, o.z - p.z);
+      if (d <= bd) { bd = d; best = o; }
+    }
+    return best;
+  }
+
   stationNear(kind: StationKind): boolean {
     // A forge only gets hot enough for metal with bellows blowing into it.
     if (kind === 'forge') return !!this.smithy().bellows;
@@ -1627,6 +1639,8 @@ export class Game {
       // Work in the world (building) is seen through its own view of the piece.
       const wc = this.working?.session.worldCamera;
       if (wc) { this.camera.position.copy(wc.position); this.camera.quaternion.copy(wc.quaternion); }
+      // At the chopping block the view looks past where you stand: keep your own body out of the way.
+      if (wc && (this.working?.session.mg as { hidesPlayer?: boolean }).hidesPlayer) p.model.visible = false;
       this.tickLife(dt);
       return;
     }
