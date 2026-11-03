@@ -241,6 +241,8 @@ export class Game {
     this.applyGraphics();
     this.scene.add(this.groundCover.group, this.fireflies.points);
     this.view.onStructure = (o) => this.groundCover.invalidate(o.x, o.z, 3);
+    // A find turning up (or going) where the grass is already drawn: redraw that patch round it.
+    this.view.onLowFind = (o) => this.groundCover.invalidateIfDrawn(o.x, o.z);
 
     const ring = (opacity: number) => new THREE.LineLoop(
       new THREE.BufferGeometry().setFromPoints(Array.from({ length: 48 }, () => new THREE.Vector3())),

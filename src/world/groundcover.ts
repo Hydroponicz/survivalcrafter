@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { LOW_FINDS } from './forageProps';
 import type { ViewCull } from './cull';
 import { hash2, mulberry32 } from './noise';
 import { isRock, Mat } from './terrain';
@@ -340,6 +341,14 @@ export class GroundCover {
     this.dirty = true;
   }
 
+  /** Redraw the patch at a point, only if it's drawn already (for a find turning up there). */
+  invalidateIfDrawn(x: number, z: number) {
+    const key = tkey(Math.floor(x / TILE), Math.floor(z / TILE));
+    if (!this.cache[0].has(key)) return;
+    this.cache[0].delete(key);
+    this.dirty = true;
+  }
+
   /** What can be seen: only patches in view are drawn (none behind you). */
   view?: ViewCull;
   private seen = -1;
@@ -478,6 +487,15 @@ export class GroundCover {
       }
     }
     const covered = (x: number, z: number) => obs.length > 0 && obs.some((o) => inside(o, x, z));
+    // Grass doesn't grow over the finds lying on the ground (stones, flint, branches): you'd never see them.
+    const finds: { x: number; z: number; r2: number }[] = [];
+    if (!far) {
+      for (const o of this.world.near(tx * TILE + TILE / 2, tz * TILE + TILE / 2, TILE)) {
+        const r = o.kind === 'forage' ? LOW_FINDS[o.species] : undefined;
+        if (r) finds.push({ x: o.x, z: o.z, r2: r * r });
+      }
+    }
+    const onFind = (x: number, z: number) => finds.length > 0 && finds.some((f) => (f.x - x) ** 2 + (f.z - z) ** 2 < f.r2);
     const rocks: Boulder[] = [];
 
     if (!far) {
@@ -524,7 +542,7 @@ export class GroundCover {
           }
           continue;
         }
-        if (g.mat !== Mat.Grass || g.slope > 1.1 || blocked(x, g.h, z)) continue;
+        if (g.mat !== Mat.Grass || g.slope > 1.1 || blocked(x, g.h, z) || onFind(x, z)) continue;
         t.surfaceColor(Mat.Grass, x, g.h, z, 1, col);
         const v = rnd(r, 0.85, 1.15) * 1.25;
         let acc = cov.grass;

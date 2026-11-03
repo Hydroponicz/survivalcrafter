@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { leafMaterial, SPECIES, treeGeometries, TREES } from './trees';
 import { FORAGE, FORAGE_SPECIES } from '../data/forage';
-import { forageGeometry, forageScale } from './forageProps';
+import { forageGeometry, forageScale, LOW_FINDS } from './forageProps';
 import { TreeFx, treeScale } from './treefx';
 import { hash2 } from './noise';
 import { CAMPFIRE } from './models/campfire';
@@ -207,6 +207,8 @@ class InstancePool extends CulledInstances {
 export class WorldView implements WorldListener {
   /** Called when a building piece appears or goes (the ground cover around it changes). */
   onStructure?: (o: StructureObj) => void;
+  /** Called when a low-lying find (stones, flint, a branch) appears or goes. */
+  onLowFind?: (o: ForageObj) => void;
   group = Object.assign(new THREE.Group(), { name: 'objects' });
   /** Trees being chopped and felled, chips, leaves and stumps. */
   treeFx: TreeFx;
@@ -316,6 +318,7 @@ export class WorldView implements WorldListener {
       if (!pool) return;
       this.slots.set(o.id, pool.alloc());
       this.updateForage(o);
+      if (LOW_FINDS[o.species]) this.onLowFind?.(o);
     } else {
       this.rebuildMesh(o);
     }

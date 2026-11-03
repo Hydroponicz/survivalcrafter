@@ -104,10 +104,14 @@ export function forageGeometry(species: string): THREE.BufferGeometry {
         paint(new THREE.DodecahedronGeometry(0.06, 0).scale(1, 0.7, 1.1).translate(0.1, 0.035, 0.06), 0x2e2c30),
       ]);
     case 'pebbles':
+      // A little heap of loose stones, paler than the bedrock and the ground's own grit
+      // so they read as something to pick up, and big enough to see in the grass.
       return merge([
-        paint(new THREE.DodecahedronGeometry(0.09).scale(1, 0.6, 1).translate(0, 0.04, 0), 0x8d8a85),
-        paint(new THREE.DodecahedronGeometry(0.07).scale(1, 0.6, 1).translate(0.15, 0.03, 0.05), 0x77746f),
-        paint(new THREE.DodecahedronGeometry(0.06).scale(1, 0.6, 1).translate(-0.1, 0.03, 0.12), 0x9e9a92),
+        paint(new THREE.IcosahedronGeometry(0.12, 1).scale(1, 0.7, 0.9).translate(0, 0.06, 0), 0xaaa294),
+        paint(new THREE.IcosahedronGeometry(0.1, 1).scale(1.1, 0.65, 1).translate(0.17, 0.045, 0.06), 0x8b8377),
+        paint(new THREE.IcosahedronGeometry(0.09, 1).scale(1, 0.7, 1.1).translate(-0.13, 0.045, 0.13), 0xb4ac9e),
+        paint(new THREE.IcosahedronGeometry(0.075, 1).scale(1, 0.75, 1).translate(0.04, 0.04, -0.16), 0x777064),
+        paint(new THREE.IcosahedronGeometry(0.06, 1).scale(1, 0.8, 1).translate(0.07, 0.13, 0.03), 0x9c9486),
       ]);
     case 'penny_bun':
       return cluster(() => mushroom(0x7a4f2a, 0xe8dcc0, 0.09, 0.07, 0.09), [[0, 0, 1], [0.12, 0.05, 0.75]]);
@@ -148,6 +152,9 @@ export function forageGeometry(species: string): THREE.BufferGeometry {
 export function forageScale(category: string): number {
   return category === 'mushroom' ? 1.6 : category === 'herb' ? 1.3 : category === 'food' ? 1.15 : 1;
 }
+
+/** Finds lying low on the ground that the grass is kept off, and how far round them (m). */
+export const LOW_FINDS: Record<string, number> = { pebbles: 0.5, flint: 0.45, fallen_branch: 0.75, driftwood: 0.75 };
 
 /** Rough height of each prop (before scaling), for targeting and markers. */
 export function forageHeight(species: string): number {
