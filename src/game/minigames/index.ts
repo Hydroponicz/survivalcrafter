@@ -7,6 +7,7 @@ import { CarveGame } from './whittle';
 import { BuildGame } from './build';
 import type { StructureObj } from '../../world/world';
 import { StrikeGame, type StrikeVariant } from './strike';
+import { KnapGame, type KnapShape } from './knap';
 import { BellowsGame, BowDrillGame, SawGame } from './stroke';
 import { PourGame, QuenchGame } from './smithy';
 import type { Input } from '../input';
@@ -25,6 +26,7 @@ export type MinigameSpec =
   | { kind: 'place'; variant: PlaceVariant; count: number }
   | { kind: 'center' }
   | { kind: 'cord'; plies: number }
+  | { kind: 'knap'; shape: KnapShape; hits: number }
   | { kind: 'build'; s: StructureObj; material: string };
 
 /**
@@ -46,17 +48,18 @@ export function createMinigame(spec: MinigameSpec, ease: number, toolType?: stri
     case 'place': return new PlaceGame(ease, spec.variant, spec.count);
     case 'center': return new CenterGame(ease);
     case 'cord': return new CordageGame(ease, spec.plies);
+    case 'knap': return new KnapGame(ease, spec.shape, spec.hits);
   }
 }
 
 /** The hands-on work for each recipe. */
 export const RECIPE_MINIGAMES: Record<string, MinigameSpec> = {
   cordage: { kind: 'cord', plies: 6 },
-  stone_knife: { kind: 'strike', variant: 'knap', hits: 3 },
-  stone_hatchet: { kind: 'strike', variant: 'knap', hits: 4 },
-  stone_pickaxe: { kind: 'strike', variant: 'knap', hits: 5 },
-  stone_hammer: { kind: 'strike', variant: 'knap', hits: 4 },
-  stone_spear: { kind: 'strike', variant: 'knap', hits: 4 },
+  stone_knife: { kind: 'knap', shape: 'knife', hits: 3 },
+  stone_hatchet: { kind: 'knap', shape: 'hatchet', hits: 4 },
+  stone_pickaxe: { kind: 'knap', shape: 'pick', hits: 5 },
+  stone_hammer: { kind: 'knap', shape: 'hammer', hits: 4 },
+  stone_spear: { kind: 'knap', shape: 'spear', hits: 4 },
   kindling_branch: { kind: 'carve', passes: 1, make: 'kindling' },
   torch: { kind: 'bowdrill' },
   shaft: { kind: 'carve', passes: 2, make: 'shaft' },
@@ -80,7 +83,7 @@ export const RECIPE_MINIGAMES: Record<string, MinigameSpec> = {
   crucible: { kind: 'center' },
   fire_crucible: { kind: 'heat', variant: 'fire' },
   bellows: { kind: 'strike', variant: 'nail', hits: 4 },
-  stone_anvil: { kind: 'strike', variant: 'knap', hits: 6 },
+  stone_anvil: { kind: 'knap', shape: 'anvil', hits: 6 },
   quench_trough: { kind: 'strike', variant: 'nail', hits: 4 },
   iron_tongs: { kind: 'strike', variant: 'forge', hits: 4 },
   iron_anvil: { kind: 'pour' },
@@ -122,6 +125,7 @@ export function minigameVerb(spec: MinigameSpec): string {
     case 'quench': return 'quench';
     case 'crank': return { grind: 'grind', stir: 'stir', pound: 'pound' }[spec.variant];
     case 'cord': return 'twist and wrap';
+    case 'knap': return 'knap';
     case 'strike': return { split: 'split', knap: 'knap', forge: 'hammer', nail: 'nail' }[spec.variant];
     case 'carve': return 'carve';
     case 'build': return 'build';

@@ -101,6 +101,16 @@ const T: Record<string, Tutorial> = {
     ],
     quality: 'Good timing and aim give clean splits. Misses waste effort.',
   },
+  knap: {
+    title: 'Knapping stone',
+    what: 'Strike flakes off the edge of the stone until what is left has the shape of the tool, outlined in gold.',
+    steps: [
+      { gesture: 'hold', text: 'Aim at the edge of the stone, on the waste outside the gold line. Hold the button to put force behind the blow.' },
+      { gesture: 'release', text: 'Let go to strike: a flake breaks off where you hit. A harder blow, or one further in from the edge, takes a bigger flake.' },
+      { gesture: 'wait', text: 'Work your way round. Keep the force in its band: too hard and a flake can bite into the shape, and bite too much and the stone is spoiled.' },
+    ],
+    quality: 'The closer the finished stone matches the outline, the better the tool.',
+  },
   'strike:knap': {
     title: 'Knapping stone',
     what: 'Strike flakes off the stone to shape a sharp edge.',
