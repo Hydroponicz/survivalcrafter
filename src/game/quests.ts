@@ -146,8 +146,8 @@ const HOME_STEPS: Step[] = [
     progress: (g) => has(g, 'branch', 3),
     targets: (g) => { const f = forage(g, ['fallen_branch', 'driftwood']); return f.length ? f : trees(g, true); },
     far: 'None close by: head into the woods.' },
-  { id: 'stones', title: 'Find loose stones',
-    text: 'Loose pebbles lie on shores and around bare rock. Pick up a few: they become the heads of your tools.',
+  { id: 'stones', title: 'Find small rocks',
+    text: 'Small rocks lie loose on shores and around bare rock. Pick up a few: they become the heads of your tools.',
     progress: (g) => has(g, 'rock_shard', 2),
     targets: (g) => forage(g, ['pebbles']),
     far: 'None close by: look along a shore or at the foot of a rocky slope.' },
@@ -528,10 +528,11 @@ export class QuestLog {
       s.visible = !!t;
       if (!t) return;
       const d = Math.hypot(t.x - cam.x, t.z - cam.z);
-      const k = Math.max(0.9, d / 18);
       s.position.set(t.x, t.y, t.z);
-      s.scale.setScalar(k * (1.1 + Math.sin(this.time * 4 + i) * 0.15));
-      (s.material as THREE.SpriteMaterial).opacity = i === 0 ? 0.95 : 0.6;
+      // A soft halo, not a blaze: you should still see what it is. Fainter
+      // still up close, where the arrow over it is enough.
+      s.scale.setScalar(Math.max(0.5, d / 22) * (0.8 + Math.sin(this.time * 3 + i) * 0.08));
+      (s.material as THREE.SpriteMaterial).opacity = (i === 0 ? 0.32 : 0.2) * Math.min(1, Math.max(0.35, d / 6));
     });
     if (!this.edge) return;
     if (!first) { this.edge.style.display = 'none'; return; }
@@ -539,6 +540,8 @@ export class QuestLog {
     const k = Math.max(1, d / 14);
     this.arrow.position.set(first.x, first.y + 0.9 * k + Math.sin(this.time * 3.5) * 0.15 * k, first.z);
     this.arrow.scale.setScalar(k);
+    // Right by it, the arrow would fill the view: let it fade.
+    (this.arrow.material as THREE.MeshBasicMaterial).opacity = 0.95 * Math.min(1, Math.max(0.2, (d - 1.5) / 4));
     this.arrow.rotation.y = this.time * 1.5;
     // On screen? Otherwise an arrow at the edge, pointing the way.
     const v = new THREE.Vector3(first.x, first.y, first.z).project(g.camera);

@@ -12,9 +12,9 @@ export type { Biome };
 export const BIOMES: Record<Biome, { name: string; hint: string }> = {
   meadow: { name: 'Meadow', hint: 'Open grassland: fiber grass, wild wheat and meadow herbs.' },
   forest: { name: 'Forest floor', hint: 'Under the trees: fallen branches and mushrooms of every kind.' },
-  shore: { name: 'Shore', hint: 'Beaches: pebbles, driftwood and dune grass.' },
+  shore: { name: 'Shore', hint: 'Beaches: small rocks, driftwood and dune grass.' },
   wetland: { name: 'Wetland', hint: 'Damp banks: reeds, mint and things that like wet feet.' },
-  rocky: { name: 'Rocky ground', hint: 'Bare rock: loose pebbles. A pickaxe gets much more.' },
+  rocky: { name: 'Rocky ground', hint: 'Bare rock: small rocks lying loose. A pickaxe gets much more.' },
   bare: { name: 'Bare soil', hint: 'Turned earth. Nothing grows here.' },
 };
 

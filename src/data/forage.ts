@@ -31,7 +31,7 @@ export const FORAGE_SPECIES: ForageSpecies[] = [
     item: 'branch', count: [1, 2], notice: 0, difficulty: 1 },
   { id: 'driftwood', name: 'Driftwood', category: 'material', biomes: { shore: 22 },
     item: 'branch', count: [1, 2], notice: 0, difficulty: 1 },
-  { id: 'pebbles', name: 'Loose pebbles', category: 'material', biomes: { shore: 26, rocky: 40, meadow: 3 },
+  { id: 'pebbles', name: 'Small rocks', category: 'material', biomes: { shore: 26, rocky: 40, meadow: 3 },
     item: 'rock_shard', count: [1, 2], notice: 0, difficulty: 2 },
   { id: 'wild_wheat', name: 'Wild wheat', category: 'food', biomes: { meadow: 10 },
     item: 'wheat_seeds', count: [1, 2], notice: 4, difficulty: 4 },
