@@ -747,7 +747,21 @@ export class Game {
     for (let i = 0; i < count; i++) this.request(ACTION_MAP.craft, ctx);
   }
 
+  /**
+   * Is what an action is aimed at gone? A plant picked, a pile emptied, a
+   * tree felled, a boulder broken up, an animal gone: the action (and any
+   * queued after it on the same thing) has nothing left to work on.
+   */
+  private targetGone(ctx: Ctx): boolean {
+    const t = ctx.t;
+    if (t.kind === 'object') return this.world.objects.get(t.obj.id) !== t.obj;
+    if (t.kind === 'animal') return !this.world.animals.includes(t.animal);
+    if (t.kind === 'rock') return this.world.brokenRocks.has(t.rock.key);
+    return false;
+  }
+
   private begin(def: ActionDef, ctx: Ctx): boolean {
+    if (this.targetGone(ctx)) { this.msg('There is nothing there any more.', 'fail'); return false; }
     if (ctx.tool?.hot && def.toolWear) { this.msg(`The ${itemName(ctx.tool).toLowerCase()} is too hot to work with. Quench it or let it cool.`, 'fail'); return false; }
     const problem = def.check?.(ctx) ?? null;
     if (problem) { this.msg(problem, 'fail'); return false; }
@@ -862,7 +876,12 @@ export class Game {
    * went; without it, the outcome is a plain skill roll.
    */
   private complete(def: ActionDef, ctx: Ctx, seconds: number, perf?: number, atImpact = false) {
-    // Conditions may have changed while working.
+    // Conditions may have changed while working (and what you were working on may be gone).
+    if (this.targetGone(ctx)) {
+      this.msg('There is nothing there any more.', 'fail');
+      if (!atImpact) { this.action = null; this.afterAction(def, ctx, false); }
+      return;
+    }
     const problem = def.check?.(ctx) ?? null;
     if (problem) { this.msg(problem, 'fail'); this.action = null; this.queue = []; return; }
     const quick = !!ctx.quick || !!def.quick;
@@ -913,13 +932,21 @@ export class Game {
   }
 
   /** After an action: start the next queued one, else repeat it while it still makes sense. */
-  private afterAction(def: ActionDef, ctx: Ctx) {
-    const next = this.queue.shift();
-    if (next) { this.begin(next.def, next.ctx); return; }
+  private afterAction(def: ActionDef, ctx: Ctx, mayRepeat = true) {
+    // The next queued action, skipping any whose target has gone (picked, emptied, felled…).
+    let skipped = 0;
+    while (this.queue.length) {
+      const next = this.queue.shift()!;
+      if (this.targetGone(next.ctx)) { skipped++; continue; }
+      if (skipped) this.msg(`${skipped === 1 ? 'A queued action was' : `${skipped} queued actions were`} dropped: there was nothing left there.`, 'info');
+      this.begin(next.def, next.ctx);
+      return;
+    }
+    if (skipped) this.msg(`${skipped === 1 ? 'A queued action was' : `${skipped} queued actions were`} dropped: there was nothing left there.`, 'info');
     const rep = typeof def.repeat === 'function' ? def.repeat(ctx) : def.repeat;
-    if (rep && !this.repeatBlocked) {
+    if (mayRepeat && rep && !this.repeatBlocked) {
       const c = { ...ctx, tool: ctx.tool && this.inv.find(ctx.tool.uid) ? ctx.tool : this.activeItem() };
-      if (!def.check?.(c)) this.begin(def, c);
+      if (!this.targetGone(c) && !def.check?.(c)) this.begin(def, c);
     }
     this.repeatBlocked = false;
   }

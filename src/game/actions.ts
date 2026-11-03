@@ -412,7 +412,7 @@ export const ACTIONS: ActionDef[] = [
   {
     id: 'harvest', label: 'Harvest',
     show: (c) => !!cropAt(c).crop && (!c.tool || toolIs(c, 'scythe')),
-    check: (c) => (c.g.world.cropStage(cropAt(c).crop!) < CROP_STAGES - 1 ? 'The wheat is not ripe yet.' : null),
+    check: (c) => { const crop = cropAt(c).crop; return !crop ? 'There is nothing here to harvest.' : c.g.world.cropStage(crop) < CROP_STAGES - 1 ? 'The wheat is not ripe yet.' : null; },
     time: (c) => (toolIs(c, 'scythe') ? 3 : 5), skill: 'farming', difficulty: 8, stamina: 5, toolWear: 0.1,
     run: (c, o) => {
       const { key, crop } = cropAt(c);
@@ -846,6 +846,7 @@ export const ACTIONS: ActionDef[] = [
   {
     id: 'butcher', label: 'Butcher corpse',
     show: (c) => { const p = obj(c, 'pile'); return !!p && toolIs(c, 'knife') && p.items.some((i) => i.type === 'corpse'); },
+    check: (c) => (obj(c, 'pile')?.items.some((i) => i.type === 'corpse') ? null : 'There is nothing left to butcher.'),
     time: 10, skill: 'butchering', difficulty: 8, stamina: 8, toolWear: 0.2,
     run: (c, o) => {
       const p = obj(c, 'pile') as PileObj;
