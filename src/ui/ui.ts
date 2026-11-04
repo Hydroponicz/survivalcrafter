@@ -18,7 +18,7 @@ import { BIOMES, biomeAt } from '../game/forage';
 import { QUICK_MARGIN, type Game, type MsgKind } from '../game/game';
 import { minigameVerb, RECIPE_MINIGAMES } from '../game/minigames';
 import { MAT_NAMES } from '../world/terrain';
-import { ANIMALS, cropKey, type PileObj, type StructureObj } from '../world/world';
+import { ANIMALS, CART_CAPACITY, cropKey, type CartObj, type PileObj, type StructureObj } from '../world/world';
 
 type WindowName = 'inventory' | 'character' | 'crafting' | 'skills' | 'build' | 'help' | 'container' | 'dev' | 'journal' | 'quests' | 'map';
 
@@ -62,7 +62,7 @@ export class UI {
   private startEl: HTMLElement;
   private started = false;
   private damageEl: HTMLElement;
-  private container: StructureObj | PileObj | null = null;
+  private container: StructureObj | PileObj | CartObj | null = null;
   private craftCategory = 'Primitive';
   private expanded = new Set<string>();
   private refreshTimer = 0;
@@ -364,7 +364,7 @@ export class UI {
     }
   }
 
-  openContainer(o: StructureObj | PileObj) {
+  openContainer(o: StructureObj | PileObj | CartObj) {
     this.container = o;
     this.show('container');
     this.show('inventory');
@@ -441,6 +441,7 @@ export class UI {
       case 'water': return 'Water';
       case 'animal': return ANIMALS[t.animal.species].name;
       case 'rock': return t.rock.sc < 0.6 ? 'Small boulder' : t.rock.sc < 1.1 ? 'Boulder' : 'Large boulder';
+      case 'cart': return t.cart.type === 'ox_cart' ? 'Ox cart' : 'Hand cart';
       case 'none': return '';
       case 'object': {
         const o = t.obj;
@@ -612,7 +613,7 @@ export class UI {
       if (this.open.has('skills')) this.render('skills');
       if (this.open.has('container') && this.container) {
         const c = this.container;
-        if (Math.hypot(c.x - p.pos.x, c.z - p.pos.z) > 5 || !g.world.objects.has(c.id)) this.close('container');
+        if (Math.hypot(c.x - p.pos.x, c.z - p.pos.z) > 5 || (c.kind === 'cart' ? !g.world.carts.includes(c) : !g.world.objects.has(c.id))) this.close('container');
       }
     }
   }
@@ -770,7 +771,7 @@ export class UI {
     body.appendChild(el('div', 'hint', 'Click <b>Use</b> to equip an item (tools, seeds, dirt…). Drag an item onto the hotbar, or hover over it and press <b>1-9</b>, to add it there.'));
     const groups = g.inv.grouped().sort((a, b) => itemDef(a.type).name.localeCompare(itemDef(b.type).name));
     if (!groups.length) body.appendChild(el('div', 'empty', 'Your pack is empty.'));
-    const chest = this.container?.kind === 'structure' ? this.container : null;
+    const chest = this.container?.kind === 'structure' || this.container?.kind === 'cart' ? this.container : null;
     for (const grp of groups) {
       const def = itemDef(grp.type);
       const actions: { label: string; fn: (it: Item) => void }[] = [];
@@ -786,6 +787,7 @@ export class UI {
         actions.push({ label: 'Unload', fn: (it) => { const n = g.unloadQuiver(it); g.msg(`You take ${n} arrow(s) out of the quiver.`, 'info'); g.dressPlayer(); } });
       }
       if (def.places) actions.push({ label: 'Place', fn: (it) => g.startPlacingItem(it) });
+      if (def.cart) actions.push({ label: 'Set down', fn: (it) => g.setDownCart(it) });
       if (grp.type === 'bandage') actions.push({ label: 'Apply', fn: () => g.applyBandage() });
       if (!isIdentified(grp.type)) actions.push({ label: 'Study', fn: (it) => g.request(ACTION_MAP.study, { g, t: { kind: 'none' }, item: it }) });
       if (chest) {
@@ -918,7 +920,7 @@ export class UI {
     if (!c) return;
     const items = c.kind === 'pile' ? c.items : (c.items ??= []);
     const body = el('div');
-    const cap = c.kind === 'structure' ? STRUCTURES[c.type].container : undefined;
+    const cap = c.kind === 'structure' ? STRUCTURES[c.type].container : c.kind === 'cart' ? CART_CAPACITY[c.type] : undefined;
     const w = items.reduce((a, i) => a + itemDef(i.type).weight, 0);
     const held = el('div', 'inv-weight', `${items.length} items · ${w.toFixed(1)}${cap ? ` / ${cap}` : ''} kg`);
     held.dataset.tip = weightTip(items, cap, cap ? 'It holds no more than this.' : '');
@@ -941,7 +943,7 @@ export class UI {
       ];
       body.appendChild(this.itemRow(list, actions));
     }
-    const title = c.kind === 'pile' ? 'Pile on the ground' : STRUCTURES[c.type].name;
+    const title = c.kind === 'pile' ? 'Pile on the ground' : c.kind === 'cart' ? (c.type === 'ox_cart' ? 'Ox cart' : 'Hand cart') : STRUCTURES[c.type].name;
     this.frame('container', title, body);
   }
 
@@ -1169,6 +1171,8 @@ export class UI {
       this.devButton('Grow everything', () => devCommands.growEverything(g)),
       this.devButton('Spawn deer', () => devCommands.spawnAnimal(g, 'deer')),
       this.devButton('Spawn boar', () => devCommands.spawnAnimal(g, 'boar')),
+      this.devButton('Spawn horse', () => devCommands.spawnAnimal(g, 'horse')),
+      this.devButton('Spawn ox', () => devCommands.spawnAnimal(g, 'ox')),
       this.devButton('Clear inventory', () => devCommands.clearInventory(g)),
     );
     body.appendChild(misc);
@@ -1389,6 +1393,7 @@ function targetKey(t: Target): string {
     case 'object': return `o${t.obj.id}`;
     case 'animal': return `a${t.animal.id}`;
     case 'rock': return `r${t.rock.key}`;
+    case 'cart': return `c${t.cart.id}`;
     case 'terrain': return `t${t.mat}`;
     default: return t.kind;
   }

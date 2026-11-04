@@ -6,7 +6,7 @@ import type { SkillId } from '../data/skills';
 import { isRock, isSoft, Mat, MAT_NAMES, Y_MIN } from '../world/terrain';
 import { telemetry } from './telemetry';
 import {
-  ANIMALS, APPLE_AGE, APPLES, CROP_STAGES, cropKey, type AnimalObj, type BushObj, type Crop, type ForageObj, type PileObj, type StructureObj, type TreeObj, type WorldObj,
+  ANIMALS, APPLE_AGE, APPLES, CART_CAPACITY, CROP_STAGES, type CartObj, cropKey, type AnimalObj, type BushObj, type Crop, type ForageObj, type PileObj, type StructureObj, type TreeObj, type WorldObj,
 } from '../world/world';
 import { FORAGE, IDENTIFY } from '../data/forage';
 import type { Boulder } from '../world/groundcover';
@@ -25,6 +25,7 @@ export type Target =
   | { kind: 'object'; obj: WorldObj; point: THREE.Vector3 }
   | { kind: 'animal'; animal: AnimalObj; point: THREE.Vector3 }
   | { kind: 'rock'; rock: Boulder; point: THREE.Vector3 }
+  | { kind: 'cart'; cart: CartObj; point: THREE.Vector3 }
   | { kind: 'none' };
 
 export interface Ctx {
@@ -136,6 +137,13 @@ function cropAt(c: Ctx): { key: number; crop?: Crop } {
   if (!isGround(c)) return { key: -1 };
   const key = cropKey(c.t.point.x, c.t.point.z);
   return { key, crop: c.g.world.crops.get(key) };
+}
+
+/** A tamed ox close to the aimed-at cart (to hitch it to). */
+function nearOx(c: Ctx): AnimalObj | undefined {
+  if (c.t.kind !== 'cart') return undefined;
+  const k = c.t.cart;
+  return c.g.world.animals.find((a) => a.species === 'ox' && a.tamed && Math.hypot(a.x - k.x, a.z - k.z) < 6 && !c.g.world.carts.some((o) => o.hitched === a.id));
 }
 
 /** Earth items to fill with, best first. */
@@ -956,6 +964,64 @@ export const ACTIONS: ActionDef[] = [
     },
   },
 
+  // ===== carts
+  {
+    id: 'open_cart', label: (c) => `Open ${c.t.kind === 'cart' && c.t.cart.type === 'ox_cart' ? 'ox cart' : 'hand cart'}`,
+    show: (c) => c.t.kind === 'cart', time: 0,
+    run: (c) => { if (c.t.kind === 'cart') c.g.ui.openContainer(c.t.cart); },
+  },
+  {
+    id: 'grab_cart', label: 'Grab the handles',
+    show: (c) => c.t.kind === 'cart' && c.t.cart.type === 'hand_cart' && c.g.pushing !== c.t.cart && !c.g.riding,
+    time: 0.4, fixedTime: true,
+    run: (c) => { if (c.t.kind === 'cart') { c.g.pushing = c.t.cart; c.g.msg('You take the handles. Walk to push the cart; press X (or aim at it) to let go.', 'info'); } },
+  },
+  {
+    id: 'let_go_cart', label: 'Let go',
+    show: (c) => c.t.kind === 'cart' && c.g.pushing === c.t.cart, time: 0,
+    run: (c) => { c.g.pushing = null; c.g.msg('You set the cart down.', 'info'); },
+  },
+  {
+    id: 'hitch_world_cart', label: 'Hitch to your ox',
+    show: (c) => c.t.kind === 'cart' && c.t.cart.type === 'ox_cart' && c.t.cart.hitched === undefined && !!nearOx(c),
+    time: 3,
+    run: (c) => {
+      const ox = nearOx(c);
+      if (c.t.kind !== 'cart' || !ox) return;
+      c.t.cart.hitched = ox.id;
+      c.g.msg('You hitch the cart to your ox.', 'good');
+    },
+  },
+  {
+    id: 'unhitch_cart', label: 'Unhitch',
+    show: (c) => c.t.kind === 'cart' && c.t.cart.hitched !== undefined, time: 2,
+    run: (c) => { if (c.t.kind === 'cart') { c.t.cart.hitched = undefined; c.g.msg('You unhitch the cart. It stays here.', 'info'); } },
+  },
+  {
+    id: 'pick_up_cart', label: 'Pick up the cart',
+    show: (c) => c.t.kind === 'cart' && c.t.cart.hitched === undefined && c.g.pushing !== c.t.cart,
+    check: (c) => (c.t.kind === 'cart' && c.t.cart.items.length ? 'Empty it first.' : null),
+    time: 2,
+    run: (c) => {
+      if (c.t.kind !== 'cart') return;
+      const cart = c.t.cart, g = c.g;
+      g.world.carts.splice(g.world.carts.indexOf(cart), 1);
+      const it = makeItem(cart.type, cart.ql);
+      it.dmg = cart.dmg;
+      g.inv.add(it);
+      g.inventoryChanged();
+      g.msg(`You lift the ${cart.type === 'ox_cart' ? 'ox cart' : 'hand cart'} into your pack.`, 'info');
+    },
+  },
+  {
+    id: 'examine_cart', label: 'Examine', show: (c) => c.t.kind === 'cart', time: 0,
+    run: (c) => {
+      if (c.t.kind !== 'cart') return;
+      const k = c.t.cart, w = k.items.reduce((a, i) => a + itemDef(i.type).weight, 0);
+      c.g.msg(`${k.type === 'ox_cart' ? 'An ox cart' : 'A hand cart'}, QL ${k.ql.toFixed(1)}: ${w.toFixed(0)} / ${CART_CAPACITY[k.type]} kg loaded.${k.hitched !== undefined ? ' Hitched to your ox.' : ''}`, 'info');
+    },
+  },
+
   // ===== animals
   {
     id: 'feed_horse', label: (c) => (c.t.kind === 'animal' && c.t.animal.tamed ? 'Feed apple' : 'Offer apple'),
@@ -986,8 +1052,58 @@ export const ACTIONS: ActionDef[] = [
     },
   },
   {
+    id: 'tame_ox', label: 'Tame',
+    show: (c) => c.t.kind === 'animal' && c.t.animal.species === 'ox' && !c.t.animal.tamed,
+    // (It stands still while you work with it: see the game's animal update.)
+    time: 5, skill: 'taming', difficulty: 12, stamina: 2,
+    run: (c) => {
+      if (c.t.kind !== 'animal') return;
+      const a = c.t.animal, g = c.g;
+      if (!g.world.animals.includes(a)) return;
+      const lvl = g.skills.get('taming');
+      const chance = 0.2 + 0.5 * Math.min(1, Math.max(0, (lvl - 1) / 99));
+      telemetry.count('taming:ox');
+      if (Math.random() < chance) {
+        a.tamed = true; a.state = 'idle'; a.hp = a.maxHp;
+        telemetry.event('taming', 'Tamed an ox', { tries: telemetry.counters.get('taming:ox'), skill: +lvl.toFixed(2), chance: +chance.toFixed(2) });
+        g.msg('The ox lowers its great head and lets you scratch its brow. It\'s yours now! Aim at it to Lead it, or hitch an ox cart to it.', 'good');
+      } else {
+        g.msg(`The ox snorts and shakes its head: not yet. Keep at it (about a ${Math.round(chance * 100)}% chance each try).`, 'info');
+      }
+    },
+  },
+  {
+    id: 'lead_ox', label: (c) => (c.t.kind === 'animal' && c.t.animal.state === 'follow' ? 'Stop leading' : 'Lead'),
+    show: (c) => c.t.kind === 'animal' && c.t.animal.species === 'ox' && !!c.t.animal.tamed,
+    time: 0.5, fixedTime: true,
+    run: (c) => {
+      if (c.t.kind !== 'animal') return;
+      const a = c.t.animal;
+      if (a.state === 'follow') { a.state = 'idle'; c.g.msg('You let go of the rope. The ox stays here.', 'info'); }
+      else { for (const o of c.g.world.animals) if (o.state === 'follow') o.state = 'idle'; a.state = 'follow'; c.g.msg('You take the ox by its rope. It follows you.', 'info'); }
+    },
+  },
+  {
+    id: 'hitch_cart', label: 'Hitch ox cart',
+    show: (c) => c.t.kind === 'animal' && c.t.animal.species === 'ox' && !!c.t.animal.tamed && c.g.inv.count('ox_cart') > 0
+      && !c.g.world.carts.some((k) => c.t.kind === 'animal' && k.hitched === c.t.animal.id),
+    time: 3,
+    run: (c) => {
+      if (c.t.kind !== 'animal') return;
+      const a = c.t.animal, g = c.g;
+      const it = g.inv.ofType('ox_cart')[0];
+      if (!it || !g.world.animals.includes(a)) return;
+      g.inv.remove(it.uid);
+      const cart = g.world.addCart('ox_cart', a.x - Math.sin(a.rot) * 2.5, a.z - Math.cos(a.rot) * 2.5, a.rot, it.ql, it.dmg);
+      cart.hitched = a.id;
+      g.inventoryChanged();
+      telemetry.event('cart', 'Hitched an ox cart');
+      g.msg('You back the ox between the shafts and hitch the cart. Lead the ox and the cart rolls along behind; aim at the cart to load it.', 'good');
+    },
+  },
+  {
     id: 'ride_horse', label: 'Ride',
-    show: (c) => c.t.kind === 'animal' && !!c.t.animal.tamed && !c.g.riding,
+    show: (c) => c.t.kind === 'animal' && c.t.animal.species === 'horse' && !!c.t.animal.tamed && !c.g.riding,
     time: 0.6, fixedTime: true,
     run: (c) => { if (c.t.kind === 'animal' && c.g.world.animals.includes(c.t.animal)) c.g.mount(c.t.animal); },
   },
@@ -999,6 +1115,10 @@ export const ACTIONS: ActionDef[] = [
       const d = ANIMALS[a.species];
       const hp = a.hp / a.maxHp;
       const an = c.t.animal;
+      if (an.species === 'ox') {
+        c.g.msg(an.tamed ? 'Your ox. Lead it, or hitch an ox cart to it (with the cart in your pack).' : 'A wild ox: big, slow and calm. Right-click it and choose Tame: it stands still while you work, and your Taming skill helps.', 'info');
+        return;
+      }
       if (an.species === 'horse') {
         c.g.msg(an.tamed ? 'Your horse. Aim at it and choose Ride, or feed it an apple.' : 'A wild horse. It keeps its distance, but hold out an apple and it may let you close enough to feed it. Feed it apples to tame it.', 'info');
         return;
@@ -1159,6 +1279,8 @@ function hotItem(c: Ctx): Item | undefined {
 
 export function craftProblem(g: Game, r: Recipe, tool?: Item): string | null {
   if (g.dev.on('freeCraft')) return null;
+  // An ox cart is made to fit your ox: you need one first.
+  if (r.id === 'ox_cart' && !g.world.animals.some((a) => a.species === 'ox' && a.tamed)) return 'You need a tamed ox first: find a wild ox in the grassland and Tame it.';
   if (r.tool && (!tool || !g.inv.find(tool.uid) || itemDef(tool.type).tool !== r.tool)) return `You need a ${r.tool}.`;
   for (const k of r.needs ?? []) {
     if (!g.toolFor(k)) return `You need a ${TOOL_NAMES[k]} in your pack${k === 'tongs' ? ' to handle the hot metal' : k === 'crucible' ? ' to melt the ore in' : ''}.`;

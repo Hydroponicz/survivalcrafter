@@ -72,6 +72,8 @@ export class Player {
   crouching = false;
   /** On horseback: faster, higher up, no crouching or jumping. */
   riding = false;
+  /** Slowed by what you're doing (pushing a cart). */
+  speedMul = 1;
   /** Seconds since leaving the ground (jumping or falling), since landing, and since being hurt. */
   private airT = -1;
   private landT = -1;
@@ -372,6 +374,7 @@ export class Player {
     if (overweight > 0) speed *= Math.max(0.15, 1 - overweight / 40);
     if (this.stamina <= 0) speed *= 0.6;
     if (busy) speed *= 0.5;
+    speed *= this.speedMul;
 
     let dx = 0, dz = 0;
     if (len > 0) {

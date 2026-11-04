@@ -83,6 +83,8 @@ export const RECIPE_MINIGAMES: Record<string, MinigameSpec> = {
   kindling_plank: { kind: 'chop', variant: 'kindling' },
   split_planks: { kind: 'chop', variant: 'planks' },
   saw_planks: { kind: 'saw', cuts: 4 },
+  hand_cart: { kind: 'strike', variant: 'nail', hits: 5 },
+  ox_cart: { kind: 'strike', variant: 'nail', hits: 7 },
   wooden_shovel: { kind: 'carve', passes: 1, wide: true, make: 'wooden_shovel' },
   clay_jar: { kind: 'center' },
   fire_jar: { kind: 'heat', variant: 'fire' },

@@ -22,7 +22,7 @@ import { perf } from './perf';
 import { telemetry } from './telemetry';
 import { TILE, tileOf, WorldGen } from '../world/worldgen';
 import {
-  ANIMALS, DAY_LENGTH, pointInPiece, toLocal, toWorld, World, type AnimalObj, type ForageObj, type PileObj, type StructureObj, type TreeObj, type WorldObj,
+  ANIMALS, CART_CAPACITY, DAY_LENGTH, pointInPiece, type CartObj, toLocal, toWorld, World, type AnimalObj, type ForageObj, type PileObj, type StructureObj, type TreeObj, type WorldObj,
 } from '../world/world';
 import {
   ACTION_MAP, ACTIONS, COMFORT_REGEN, craftProblem, DIG_RADIUS, EARTH_PER_ITEM, LEVEL_RADIUS, type ActionDef, type Ctx, type Target,
@@ -562,7 +562,7 @@ export class Game {
     this.inventoryChanged();
   }
 
-  takeFromPile(p: PileObj | StructureObj, items: Item[]) {
+  takeFromPile(p: PileObj | StructureObj | CartObj, items: Item[]) {
     let took = 0;
     const list = p.kind === 'pile' ? p.items : (p.items ??= []);
     for (const it of items) {
@@ -578,19 +578,19 @@ export class Game {
       took++;
     }
     if (p.kind === 'pile' && p.items.length === 0) this.world.remove(p);
-    else this.world.changed(p);
+    else if (p.kind !== 'cart') this.world.changed(p);
     if (took) this.msg(`You pick up ${took} item${took > 1 ? 's' : ''}.`, 'info');
     this.inventoryChanged();
   }
 
-  putIntoContainer(s: StructureObj, uids: number[]) {
-    const cap = STRUCTURES[s.type].container ?? 0;
+  putIntoContainer(s: StructureObj | CartObj, uids: number[]) {
+    const cap = s.kind === 'cart' ? CART_CAPACITY[s.type] : STRUCTURES[s.type].container ?? 0;
     s.items ??= [];
     let w = s.items.reduce((a, i) => a + itemDef(i.type).weight, 0);
     for (const u of uids) {
       const it = this.inv.find(u);
       if (!it) continue;
-      if (w + itemDef(it.type).weight > cap) { this.msg('The chest is full.', 'fail'); break; }
+      if (w + itemDef(it.type).weight > cap) { this.msg(s.kind === 'cart' ? 'The cart is full.' : 'The chest is full.', 'fail'); break; }
       this.inv.remove(u);
       delete it.hot;
       s.items.push(it);
@@ -901,6 +901,7 @@ export class Game {
     const t = ctx.t;
     if (t.kind === 'object') return this.world.objects.get(t.obj.id) !== t.obj;
     if (t.kind === 'animal') return !this.world.animals.includes(t.animal);
+    if (t.kind === 'cart') return !this.world.carts.includes(t.cart);
     if (t.kind === 'rock') return this.world.brokenRocks.has(t.rock.key);
     return false;
   }
@@ -1135,7 +1136,7 @@ export class Game {
   /** Turn the body toward what you're working on (third person). */
   private faceToward(t: Target): number | null {
     const p = this.player.pos;
-    const at = t.kind === 'object' ? t.obj : t.kind === 'animal' ? t.animal : t.kind === 'terrain' ? t.point : null;
+    const at = t.kind === 'object' ? t.obj : t.kind === 'animal' ? t.animal : t.kind === 'cart' ? t.cart : t.kind === 'terrain' ? t.point : null;
     if (!at) return null;
     const dx = at.x - p.x, dz = at.z - p.z;
     return Math.hypot(dx, dz) < 0.2 ? null : Math.atan2(dx, dz);
@@ -1220,6 +1221,55 @@ export class Game {
 
   /** The horse you're riding, if any. */
   riding: AnimalObj | null = null;
+  /** The hand cart you're pushing, if any. */
+  pushing: CartObj | null = null;
+
+  /** Set a cart down from your pack, just in front of you. */
+  setDownCart(it: Item) {
+    const def = itemDef(it.type);
+    if (!def.cart || !this.inv.find(it.uid)) return;
+    const p = this.player.pos, f = this.player.forward();
+    const x = p.x + f.x * 1.8, z = p.z + f.z * 1.8;
+    if (this.world.terrain.heightAt(x, z) < this.world.terrain.waterAt(x, z) + 0.1) return this.msg('Not in the water.', 'fail');
+    this.inv.remove(it.uid);
+    if (this.activeUid === it.uid) this.activeUid = null;
+    this.world.addCart(it.type as CartObj['type'], x, z, Math.atan2(f.x, f.z), it.ql, it.dmg);
+    this.inventoryChanged();
+    this.msg(def.cart === 'hand' ? 'You set the hand cart down. Aim at it to grab the handles, or open it to load it.' : 'You set the ox cart down. Bring your ox and hitch it (aim at the cart → Hitch to your ox).', 'info');
+  }
+
+  /** Carts that move: the one you push, and those hitched to oxen (trailing behind). */
+  private updateCarts(dt: number) {
+    const p = this.player;
+    const k = this.pushing;
+    if (k) {
+      if (!this.world.carts.includes(k) || this.riding || p.swimming) this.pushing = null;
+      else {
+        // Out in front of you, rolling the way you go.
+        const v = p.vel, sp = Math.hypot(v.x, v.z);
+        const want = sp > 0.3 ? Math.atan2(v.x, v.z) : k.rot;
+        let d = want - k.rot;
+        while (d > Math.PI) d -= Math.PI * 2;
+        while (d < -Math.PI) d += Math.PI * 2;
+        k.rot += d * Math.min(1, dt * 5);
+        k.x = p.pos.x + Math.sin(k.rot) * 1.45;
+        k.z = p.pos.z + Math.cos(k.rot) * 1.45;
+      }
+    }
+    for (const c of this.world.carts) {
+      if (c.hitched === undefined) continue;
+      const ox = this.world.animals.find((a) => a.id === c.hitched);
+      if (!ox) { c.hitched = undefined; continue; }
+      // Behind the ox, swinging round after it.
+      let d = ox.rot - c.rot;
+      while (d > Math.PI) d -= Math.PI * 2;
+      while (d < -Math.PI) d += Math.PI * 2;
+      c.rot += d * Math.min(1, dt * 3);
+      c.x = ox.x - Math.sin(c.rot) * 2.6;
+      c.z = ox.z - Math.cos(c.rot) * 2.6;
+    }
+    this.player.speedMul = this.pushing ? 0.8 : 1;
+  }
 
   /** Climb onto a tamed horse. */
   mount(a: AnimalObj) {
@@ -1252,7 +1302,7 @@ export class Game {
 
   /** Whether a click on this animal should be friendly (feed or ride it) rather than a blow. */
   friendlyTo(a: AnimalObj): boolean {
-    return a.species === 'horse' && (!!a.tamed || this.activeItem()?.type === 'apple');
+    return (a.species === 'horse' && (!!a.tamed || this.activeItem()?.type === 'apple')) || (a.species === 'ox' && !!a.tamed);
   }
 
   private updateAnimals(dt: number) {
@@ -1269,10 +1319,22 @@ export class Game {
         if (sp > 0.3) a.rot = Math.atan2(v.x, v.z);
         continue;
       }
-      // Your own horse waits where you left it, grazing.
+      // An animal you're working with (taming it) stands still and turns to you.
+      if (this.action?.ctx.t.kind === 'animal' && this.action.ctx.t.animal === a) {
+        a.speed = 0; a.state = 'idle'; a.timer = 2;
+        a.rot = Math.atan2(p.x - a.x, p.z - a.z);
+        continue;
+      }
+      // Your own animals wait where you left them, grazing; one you're leading follows you.
       if (a.tamed) {
-        a.speed = 0; a.state = 'idle';
         if (a.hurt) a.hurt = Math.max(0, a.hurt - dt);
+        if (a.state === 'follow' && toP > 2.8) {
+          a.speed = Math.min(d.speed * (toP > 8 ? 1.6 : 1), 1.2 + toP * 0.5);
+          a.dirX = (p.x - a.x) / toP; a.dirZ = (p.z - a.z) / toP;
+          const nx = a.x + a.dirX * a.speed * dt, nz = a.z + a.dirZ * a.speed * dt;
+          if (t.heightAt(nx, nz) > t.waterAt(nx, nz) + 0.2) { a.x = nx; a.z = nz; }
+          a.rot = Math.atan2(a.dirX, a.dirZ);
+        } else { a.speed = 0; if (a.state !== 'follow') a.state = 'idle'; }
         continue;
       }
       // Wild horses keep their distance, unless you're holding out an apple.
@@ -1402,6 +1464,7 @@ export class Game {
       return off < reachOf(o) + 0.3;
     });
     const animals = this.world.animals.filter((a) => a !== this.riding && Math.hypot(a.x - origin.x, a.z - origin.z) < maxD + 2);
+    const carts = this.world.carts.filter((k) => Math.hypot(k.x - origin.x, k.z - origin.z) < maxD + 3);
     const rocks = this.groundCover.bouldersNear(origin.x, origin.z, maxD + 1);
     const p = new THREE.Vector3();
     for (let d = 0.1; d <= maxD; d += 0.05) {
@@ -1409,12 +1472,18 @@ export class Game {
       const tooFar = third && p.distanceTo(eye) > maxReach + 0.5;
       if (tooFar && d > this.player.camDist + 0.5) break;
       if (!tooFar) {
+        for (const k of carts) {
+          // In the cart's own frame: its bed (and the handles or shafts).
+          const ox = k.type === 'ox_cart', dx = p.x - k.x, dz = p.z - k.z, s = Math.sin(k.rot), c = Math.cos(k.rot);
+          const lx = dx * c - dz * s, lz = dx * s + dz * c, h = p.y - t.heightAt(k.x, k.z);
+          if (Math.abs(lx) < (ox ? 0.85 : 0.55) && Math.abs(lz) < (ox ? 1.1 : 0.7) && h > 0 && h < (ox ? 1.4 : 1.0)) return { kind: 'cart', cart: k, point: p.clone() };
+        }
         for (const a of animals) {
           const g = t.heightAt(a.x, a.z);
-          const tall = a.species === 'horse' ? 2.2 : a.species === 'deer' ? 1.6 : 1.0;
+          const tall = a.species === 'horse' ? 2.2 : a.species === 'ox' ? 1.9 : a.species === 'deer' ? 1.6 : 1.0;
           // A horse is long: test along its body, not just round its middle.
           let near = Math.hypot(p.x - a.x, p.z - a.z) < 0.6;
-          if (!near && a.species === 'horse') {
+          if (!near && (a.species === 'horse' || a.species === 'ox')) {
             const fx = Math.sin(a.rot), fz = Math.cos(a.rot), dx = p.x - a.x, dz = p.z - a.z;
             const along = dx * fx + dz * fz, off = Math.abs(dx * fz - dz * fx);
             near = Math.abs(along) < 1.1 && off < 0.45;
@@ -1926,7 +1995,7 @@ export class Game {
     if (inp.hit('KeyM')) this.ui.toggle('map');
     if (inp.hit('KeyG') && !this.placing) this.request(ACTION_MAP.survey, { g: this, t: { kind: 'none' } });
     if (inp.hit('KeyR')) this.repeatLast();
-    if (inp.hit('KeyX')) { if (this.action) this.cancelAction('You stop what you are doing.'); else if (this.riding) this.dismount(); }
+    if (inp.hit('KeyX')) { if (this.action) this.cancelAction('You stop what you are doing.'); else if (this.riding) this.dismount(); else if (this.pushing) { this.pushing = null; this.msg('You set the cart down.', 'info'); } }
     if (inp.hit('Escape')) this.stopPlacing();
     if (inp.hit('Backquote') || inp.hit('F2')) this.ui.toggle('dev');
     if (inp.hit('Digit0')) this.setActive(null);
@@ -2124,7 +2193,7 @@ export class Game {
     if (!this.quests && !this.tour) this.quests = new QuestLog(this.markerTex);
     if (this.quests && !this.quests.onChange) this.quests.onChange = () => this.ui.refresh();
     this.quests?.update(this, dt);
-    perf.time('animals', () => this.updateAnimals(dt));
+    perf.time('animals', () => { this.updateAnimals(dt); this.updateCarts(dt); });
     perf.time('map', () => this.map.update(dt, p.pos.x, p.pos.z, this.ui.isOpen('map')));
     perf.time('terrain', () => this.world.terrain.update(p.pos.x, p.pos.y, p.pos.z, 6));
     this.world.focus = { x: p.pos.x, z: p.pos.z };
@@ -2205,6 +2274,7 @@ export class Game {
     this.sound.ambience({ wind: a.wind, river: a.water, birds: a.birds, night: a.crickets, frogs: a.frogs }, this.renderDt);
     this.view.updateTreeDetail(this.camera.position.x, this.camera.position.z);
     this.view.syncAnimals(this.elapsed);
+    this.view.syncCarts();
     this.view.updateFires(p.pos.x, p.pos.z, this.elapsed);
     this.updateTorchLight();
     this.frameNo++;

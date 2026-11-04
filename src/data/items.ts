@@ -100,6 +100,10 @@ const defs: ItemDef[] = [
     desc: 'A hide tube slung across your back that holds up to 30 arrows. Wear it to shoot: your bow only draws arrows from your quiver. Arrows you make go straight into it.' },
   { id: 'hide_canteen', name: 'Hide canteen', icon: '🫗', weight: 0.4, wear: { slot: 'belt', armor: 0, colour: 0x5e4028 }, sips: 4,
     desc: 'A waterskin of sealed hide that hangs from your belt. Fill it at any fresh water (aim at the water), then drink from your pack: 4 good drinks.' },
+  { id: 'hand_cart', name: 'Hand cart', icon: '🛒', weight: 14, cart: 'hand',
+    desc: 'A two-wheeled barrow of planks. Set it down from your pack, grab the handles to push it, and load it up: it holds 120 kg.' },
+  { id: 'ox_cart', name: 'Ox cart', icon: '🛞', weight: 30, cart: 'ox',
+    desc: 'A big wagon on two solid wheels, with shafts for an ox. Hitch it to your tamed ox (aim at the ox → Hitch ox cart) and lead the ox: it holds 400 kg.' },
   { id: 'hide_boots', name: 'Hide boots', icon: '🥾', weight: 0.6, wear: { slot: 'feet', armor: 0.04, colour: 0x4a3220 }, desc: 'Soft hide boots, bound at the ankle.' },
 
   // --- tools

@@ -6,7 +6,7 @@ import { TreeCover, VEGETATION, type Species } from './trees';
 import type { WorldGen } from './worldgen';
 
 export type { Species } from './trees';
-export type AnimalSpecies = 'deer' | 'boar' | 'horse';
+export type AnimalSpecies = 'deer' | 'boar' | 'horse' | 'ox';
 
 export interface TreeObj {
   kind: 'tree'; id: number; species: Species; x: number; z: number;
@@ -56,7 +56,7 @@ export interface AnimalObj {
   kind: 'animal'; id: number; species: AnimalSpecies;
   x: number; z: number; rot: number;
   hp: number; maxHp: number;
-  state: 'wander' | 'idle' | 'flee' | 'attack';
+  state: 'wander' | 'idle' | 'flee' | 'attack' | 'follow';
   timer: number; speed: number; dirX: number; dirZ: number;
   attackCooldown: number;
   /** Lowering its head to charge: seconds until the lunge lands (0: not winding up). */
@@ -67,9 +67,21 @@ export interface AnimalObj {
   hurt?: number;
   /** When an animal stranded in water next re-aims for the shore. */
   shoreAt?: number;
-  /** Tamed by you (a horse): it trusts you, stays where you leave it, and can be ridden. */
+  /** Tamed by you (a horse, an ox): it trusts you, stays where you leave it (or follows when led). */
   tamed?: boolean;
 }
+
+/** A cart standing in the world (or hitched to an ox): it holds things, and you can move it. */
+export interface CartObj {
+  kind: 'cart'; id: number; type: 'hand_cart' | 'ox_cart';
+  x: number; z: number; rot: number;
+  items: Item[]; ql: number; dmg: number;
+  /** The ox it's hitched to (an animal id), if any. */
+  hitched?: number;
+}
+
+/** How much each cart holds (kg). */
+export const CART_CAPACITY: Record<CartObj['type'], number> = { hand_cart: 120, ox_cart: 400 };
 
 /** Crops grow on 1 m cells of tilled ground. */
 export interface Crop { planted: number; ql: number; tended: number }
@@ -110,6 +122,7 @@ export const ANIMALS: Record<AnimalSpecies, { name: string; hp: number; speed: n
   deer: { name: 'Deer', hp: 35, speed: 4.5, aggressive: false, meat: 3, damage: 0 },
   boar: { name: 'Wild boar', hp: 40, speed: 3.6, aggressive: true, meat: 4, damage: 4 },
   horse: { name: 'Wild horse', hp: 70, speed: 7, aggressive: false, meat: 6, damage: 0 },
+  ox: { name: 'Wild ox', hp: 110, speed: 3.4, aggressive: false, meat: 9, damage: 0 },
 };
 
 export const cropKey = (x: number, z: number) => cellKey(Math.floor(x), Math.floor(z));
@@ -164,6 +177,8 @@ export class World {
   objects = new Map<number, WorldObj>();
   crops = new Map<number, Crop>();
   animals: AnimalObj[] = [];
+  /** Carts set down in the world or hitched to oxen. */
+  carts: CartObj[] = [];
   stumps: Stump[] = [];
   time = DAY_LENGTH * 0.36; // start in the morning
   /** Boulders you've broken up (by their spot: see groundcover's rockKey). */
@@ -482,9 +497,17 @@ export class World {
       // Wild horses roam the open grassland in small herds; deer and boar keep nearer the woods.
       const zone = this.terrain.zoneAt(x, z), open = zone === 'meadow' || zone === 'heath';
       const r2 = Math.random();
-      if (open && r2 < 0.35) { for (let k = 0, n = 1 + Math.floor(Math.random() * 3); k < n; k++) this.spawnAnimal('horse', x + (Math.random() - 0.5) * 8, z + (Math.random() - 0.5) * 8); continue; }
+      if (open && r2 < 0.12) { for (let k = 0, n = 1 + Math.floor(Math.random() * 2); k < n; k++) this.spawnAnimal('ox', x + (Math.random() - 0.5) * 8, z + (Math.random() - 0.5) * 8); continue; }
+      if (open && r2 < 0.4) { for (let k = 0, n = 1 + Math.floor(Math.random() * 3); k < n; k++) this.spawnAnimal('horse', x + (Math.random() - 0.5) * 8, z + (Math.random() - 0.5) * 8); continue; }
       this.spawnAnimal(r2 < 0.65 ? 'deer' : 'boar', x, z);
     }
+  }
+
+  /** Set a cart down in the world. */
+  addCart(type: CartObj['type'], x: number, z: number, rot: number, ql: number, dmg = 0): CartObj {
+    const c: CartObj = { kind: 'cart', id: this.nextId++, type, x, z, rot, items: [], ql, dmg };
+    this.carts.push(c);
+    return c;
   }
 
   spawnAnimal(species: AnimalSpecies, x: number, z: number): AnimalObj {
@@ -584,6 +607,8 @@ export class World {
         .map(([r, st]) => [r, [...st.removed], [...st.changed.values()]] as [number, number[], WorldObj[]]),
       crops: [...this.crops.entries()].map(([k, c]) => [k, { planted: c.planted, ql: c.ql, tended: c.tended }]),
       animals: this.animals.map((a) => ({ species: a.species, x: a.x, z: a.z, hp: a.hp, rot: a.rot, tamed: a.tamed })),
+      // (A hitched cart is saved with the index of its ox: animals get new ids when loaded.)
+      carts: this.carts.map((c) => ({ ...c, hitched: c.hitched === undefined ? undefined : this.animals.findIndex((a) => a.id === c.hitched) })),
       time: this.time,
       spawn: this.spawn,
       origin: this.origin,
@@ -606,11 +631,17 @@ export class World {
       w.regions.set(r, { removed: new Set(removed), changed: new Map(changed.map((o) => [o.id, o])) });
     }
     for (const [k, c] of data.crops as [number, Crop][]) w.crops.set(k, c);
+    const loadedAnimals: AnimalObj[] = [];
     for (const a of data.animals) {
       const an = w.spawnAnimal(a.species, a.x, a.z);
+      loadedAnimals.push(an);
       an.hp = a.hp;
       if (a.rot !== undefined) an.rot = a.rot;
       if (a.tamed) an.tamed = true;
+    }
+    for (const c of (data as { carts?: CartObj[] }).carts ?? []) {
+      const ox = c.hitched !== undefined && c.hitched >= 0 ? loadedAnimals[c.hitched] : undefined;
+      w.carts.push({ ...c, id: w.nextId++, hitched: ox?.id });
     }
     w.time = data.time;
     w.spawn = data.spawn;

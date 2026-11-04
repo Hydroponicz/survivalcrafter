@@ -582,6 +582,30 @@ export class WorldView implements WorldListener {
   }
 
   // ---------- animals
+  /** Carts: one model each, on the ground where they stand, showing a load when there's something in them. */
+  private cartMeshes = new Map<number, THREE.Group>();
+  syncCarts() {
+    const live = new Set<number>();
+    for (const c of this.world.carts) {
+      live.add(c.id);
+      const loaded = c.items.length > 0;
+      let m = this.cartMeshes.get(c.id);
+      if (m && m.userData.loaded !== loaded) { this.group.remove(m); this.cartMeshes.delete(c.id); m = undefined; }
+      if (!m) {
+        m = cartModel(c.type, loaded);
+        this.cartMeshes.set(c.id, m);
+        this.group.add(m);
+      }
+      m.position.set(c.x, this.world.terrain.heightAt(c.x, c.z), c.z);
+      m.rotation.y = c.rot;
+      // The wheels turn as it rolls.
+      const moved = Math.hypot(c.x - (m.userData.lx ?? c.x), c.z - (m.userData.lz ?? c.z));
+      m.userData.lx = c.x; m.userData.lz = c.z;
+      for (const w of m.userData.wheels as THREE.Object3D[]) w.rotation.x += moved / (m.userData.r as number);
+    }
+    for (const [id, m] of this.cartMeshes) if (!live.has(id)) { this.group.remove(m); this.cartMeshes.delete(id); }
+  }
+
   syncAnimals(time: number) {
     const live = new Set<number>();
     for (const a of this.world.animals) {
@@ -689,11 +713,11 @@ const animalGeos = new Map<string, { body: THREE.BufferGeometry; legs: { geo: TH
  * one mesh, and one mesh per leg (they swing). Built from the part-by-part
  * model the first time each kind is asked for; colours become vertex colours.
  */
-export function animalModel(species: 'deer' | 'boar' | 'horse', seed = 0, tamed = false): THREE.Group {
-  const key = species === 'horse' ? `horse:${Math.abs(seed) % HORSE_COATS.length}:${tamed ? 1 : 0}` : species;
+export function animalModel(species: 'deer' | 'boar' | 'horse' | 'ox', seed = 0, tamed = false): THREE.Group {
+  const key = species === 'horse' ? `horse:${Math.abs(seed) % HORSE_COATS.length}:${tamed ? 1 : 0}` : species === 'ox' ? `ox:${Math.abs(seed) % OX_COATS.length}:${tamed ? 1 : 0}` : species;
   let geos = animalGeos.get(key);
   if (!geos) {
-    const raw = species === 'horse' ? horseModel(seed, tamed) : partsModel(species);
+    const raw = species === 'horse' ? horseModel(seed, tamed) : species === 'ox' ? oxModel(seed, tamed) : partsModel(species);
     raw.updateMatrixWorld(true);
     const legs = raw.userData.legs as THREE.Mesh[];
     const bake = (o: THREE.Object3D, root: THREE.Matrix4): THREE.BufferGeometry[] => {
@@ -728,7 +752,105 @@ export function animalModel(species: 'deer' | 'boar' | 'horse', seed = 0, tamed 
   g.add(body);
   const legs = geos.legs.map(({ geo, pos }) => { const l = new THREE.Mesh(geo, animalMat); l.position.copy(pos); l.castShadow = true; g.add(l); return l; });
   g.userData.legs = legs;
-  if (species === 'horse') g.userData.tamed = tamed;
+  if (species === 'horse' || species === 'ox') g.userData.tamed = tamed;
+  return g;
+}
+
+/**
+ * A cart, in its own frame: it rolls along +z. A hand cart's handles reach
+ * back (−z) to you; an ox cart's shafts reach forward (+z) to the ox.
+ */
+export function cartModel(type: 'hand_cart' | 'ox_cart', loaded: boolean): THREE.Group {
+  const g = new THREE.Group();
+  const ox = type === 'ox_cart';
+  const k = ox ? 1.6 : 1;
+  const wood = (geo: THREE.BufferGeometry, s: Surface, x: number, y: number, z: number) => {
+    const m = new THREE.Mesh(worldUV(geo, s), surfaceMat(s));
+    m.position.set(x, y, z); m.castShadow = true; m.receiveShadow = true; g.add(m); return m;
+  };
+  const r = ox ? 0.55 : 0.32;
+  const bedY = r + 0.12 * k;
+  // The bed: a floor of planks with low sides.
+  wood(new THREE.BoxGeometry(0.9 * k, 0.07, 1.25 * k), 'dark_planks', 0, bedY, 0);
+  for (const s of [-1, 1]) {
+    wood(new THREE.BoxGeometry(0.05, 0.28 * k, 1.25 * k), 'dark_planks', s * 0.45 * k, bedY + 0.16 * k, 0);
+    wood(new THREE.BoxGeometry(0.9 * k, 0.28 * k, 0.05), 'dark_planks', 0, bedY + 0.16 * k, s * 0.62 * k);
+  }
+  // An axle under the middle, and a wheel each side (solid for the ox cart, spoked for the hand cart).
+  wood(new THREE.CylinderGeometry(0.04, 0.04, 1.05 * k, 6).rotateZ(Math.PI / 2), 'rough_wood', 0, r, 0);
+  const wheels: THREE.Object3D[] = [];
+  for (const s of [-1, 1]) {
+    const w = new THREE.Group();
+    w.position.set(s * (0.5 * k + 0.05), r, 0);
+    g.add(w);
+    const disc = new THREE.Mesh(worldUV(new THREE.CylinderGeometry(r, r, 0.07, ox ? 14 : 10).rotateZ(Math.PI / 2), 'rough_wood'), surfaceMat('rough_wood'));
+    disc.castShadow = true;
+    w.add(disc);
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(r, 0.025, 5, 16).rotateY(Math.PI / 2), mat(0x3a3a3c, { metalness: 0.4 }));
+    w.add(rim);
+    if (!ox) for (let i = 0; i < 3; i++) { const sp = new THREE.Mesh(new THREE.BoxGeometry(0.09, r * 1.9, 0.04), mat(0x4e3a24)); sp.rotation.x = (i / 3) * Math.PI; w.add(sp); }
+    wheels.push(w);
+  }
+  // Handles back to you, or shafts forward to the ox.
+  for (const s of [-1, 1]) {
+    const len = ox ? 2.1 : 1.0;
+    const bar = wood(new THREE.CylinderGeometry(0.035, 0.04, len, 6).rotateX(Math.PI / 2), 'rough_wood', s * (ox ? 0.42 : 0.3), bedY + (ox ? 0.15 : 0.05), (ox ? 1 : -1) * (0.62 * k + len / 2 - 0.1));
+    bar.rotation.x = ox ? -0.08 : 0.32;
+  }
+  if (loaded) {
+    // A load under a hide cover.
+    const load = new THREE.Mesh(new THREE.SphereGeometry(0.5, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2).scale(0.82 * k, 0.55 * k, 1.15 * k), mat(0x7a5a3a, { roughness: 1 }));
+    load.position.y = bedY + 0.04;
+    load.castShadow = true;
+    g.add(load);
+  }
+  g.userData.wheels = wheels;
+  g.userData.r = r;
+  g.userData.loaded = loaded;
+  return g;
+}
+
+/** Ox coats: dun, dark brown, black, a pale cream. */
+const OX_COATS = [0x8a6a4a, 0x4e3a2a, 0x2a2420, 0xcabca0];
+
+/** An ox: a deep, heavy body on short stout legs, a big head carried low, wide horns; tamed, a wooden yoke. */
+function oxModel(seed: number, tamed: boolean): THREE.Group {
+  const g = new THREE.Group();
+  const coat = OX_COATS[Math.abs(seed) % OX_COATS.length];
+  const part = (geo: THREE.BufferGeometry, c: number, x: number, y: number, z: number, rx = 0, rz = 0) => {
+    const m = new THREE.Mesh(geo, mat(c));
+    m.position.set(x, y, z); m.rotation.x = rx; m.rotation.z = rz; m.castShadow = true; g.add(m); return m;
+  };
+  part(new THREE.BoxGeometry(0.85, 0.9, 1.75), coat, 0, 1.15, 0);
+  part(new THREE.SphereGeometry(0.5, 10, 8).scale(0.9, 1, 0.8), coat, 0, 1.2, 0.72); // shoulders
+  part(new THREE.BoxGeometry(0.6, 0.35, 0.5), coat, 0, 1.68, 0.55); // the hump over the shoulders
+  part(new THREE.BoxGeometry(0.42, 0.45, 0.55), coat, 0, 1.15, 1.2, 0.35); // the head, held low
+  part(new THREE.BoxGeometry(0.32, 0.26, 0.2), 0x2a201a, 0, 0.98, 1.47, 0.35); // muzzle
+  for (const s of [-1, 1]) {
+    part(new THREE.CylinderGeometry(0.035, 0.06, 0.42, 6), 0xe8e0c8, s * 0.32, 1.42, 1.15, 0, s * -1.15); // horns sweep out...
+    part(new THREE.ConeGeometry(0.035, 0.2, 6), 0xe8e0c8, s * 0.5, 1.55, 1.15, 0, s * -0.3); // ...and up
+  }
+  part(new THREE.BoxGeometry(0.08, 0.8, 0.08).translate(0, -0.4, 0), coat, 0, 1.45, -0.88, -0.15); // tail
+  part(new THREE.SphereGeometry(0.09, 6, 5), 0x2a201a, 0, 0.66, -0.98); // tail tuft
+  const legH = 0.72;
+  const legs: THREE.Mesh[] = [];
+  for (const [x, z] of [[-0.27, 0.62], [0.27, 0.62], [-0.27, -0.62], [0.27, -0.62]]) {
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.2, legH, 0.2).translate(0, -legH / 2, 0), mat(coat));
+    leg.position.set(x, legH, z);
+    const hoof = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.1, 0.24), mat(0x1c1612));
+    hoof.position.y = -legH + 0.05;
+    leg.add(hoof);
+    legs.push(leg);
+    g.add(leg);
+  }
+  if (tamed) {
+    // A wooden yoke across the neck, and a rope halter: this one's yours.
+    part(new THREE.BoxGeometry(1.25, 0.12, 0.14), 0x6e4e30, 0, 1.6, 0.92);
+    for (const s of [-1, 1]) part(new THREE.TorusGeometry(0.2, 0.025, 5, 12), 0x5a4026, s * 0.22, 1.42, 0.92, 0, Math.PI / 2);
+    part(new THREE.TorusGeometry(0.2, 0.02, 5, 12), 0xc8a96e, 0, 1.12, 1.32, 0.35);
+  }
+  g.userData.legs = legs;
+  g.userData.tamed = tamed;
   return g;
 }
 
