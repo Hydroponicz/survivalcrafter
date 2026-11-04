@@ -39,9 +39,9 @@ const gridLines = (k: SettlementKind) => { const n = gridN(k), out: number[] = [
  * terrace and the upper close begin, the upper close ends; how long the ramps
  * up through the terrace walls are.
  */
-const T1_Z = -BLOCK / 2 + STREET / 2, T2_Z = BLOCK * 1.5 + STREET / 2, T2_END = 118, RAMP = 18;
+const T1_Z = -BLOCK / 2 + STREET / 2, T2_Z = BLOCK * 1.5 + STREET / 2, T2_END = 118, RAMP = 22;
 /** A castle city: its palisade (across, and on the castle side), and the castle (how far from the town's centre, its half-size). */
-const PAL_X = gridEdge('city') + 5, PAL_N = 120, CASTLE_Z = 150, CASTLE_HALF = 22;
+const PAL_X = gridEdge('city') + 5, CASTLE_Z = 150, CASTLE_HALF = 22;
 const clampTo = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 const nearestOf = (list: number[], v: number) => list.reduce((a, b) => (Math.abs(b - v) < Math.abs(a - v) ? b : a));
 
@@ -120,6 +120,8 @@ export interface Village {
   facades: Rect[];
   /** Where people go of an evening besides the tavern: the playhouse's yard, the pleasure garden, the gaming den, the baths. */
   venues: Venue[];
+  /** A castle city's terrace levels: the lower town, the middle terrace, the upper close. */
+  tiers?: number[];
   /** The playhouse stage: where the players stand (in front of it), and which way they face. */
   stage?: { x: number; z: number; face: { x: number; z: number } };
   /** Market stalls (where merchants stand). */
@@ -822,9 +824,11 @@ export class Villages {
     let tiers: number[] = [];
     if (city) {
       const L0 = mean(-E, -E, E, T1_Z);
-      const L1 = clampTo(mean(-E, T1_Z, E, T2_Z), L0 + 3.5, L0 + 7);
-      const L2 = clampTo(mean(-E, T2_Z, E, T2_END), L1 + 3.5, L1 + 7);
+      // (Each terrace stands well above the last, whatever the hill would make of it: the climb to the castle is the point.)
+      const L1 = clampTo(mean(-E, T1_Z, E, T2_Z), L0 + 5, L0 + 8);
+      const L2 = clampTo(mean(-E, T2_Z, E, T2_END), L1 + 5, L1 + 8);
       tiers = [L0, L1, L2];
+      v.tiers = tiers;
       for (const [z0, lo, hi] of [[T1_Z, L0, L1], [T2_Z, L1, L2]]) {
         for (const u of lines) {
           const c = pt(u, z0 + RAMP / 2);
@@ -1194,6 +1198,9 @@ export class Villages {
         }
       }
     }
+    // Across the back of the upper close, a parapet (the castle's slope rises behind it), the road up through its gate.
+    for (let x = -E + 1; x < E; x += 2) if (Math.abs(x) > 3) course(x, T2_END + 0.1, 0, L2 + 2, 1);
+    v.gates.push(pt(0, T2_END + 1.5));
   }
 
   /** A grand tavern's insides: a long table and benches, a hearth, a bar by the shelves, tables and stools, barrels, beds to let. */
@@ -1229,7 +1236,8 @@ export class Villages {
     v.castle = C;
     const cat = (lx: number, lz: number) => { const [x, z] = world(C, lx, lz); return { x, z }; };
     // The castle mound: levelled at the hilltop, graded wide.
-    const level = this.gen.height(C.x, C.z);
+    // (Built up into a motte where the hill alone wouldn't lift it well above the upper close.)
+    const level = Math.max(this.gen.height(C.x, C.z), (v.tiers?.[2] ?? -Infinity) + 9);
     v.pads.push({ x: C.x, z: C.z, yaw: C.yaw, hx: H + 3, hz: H + 3, level, fall: 16 });
     v.paved.push({ x: C.x, z: C.z, yaw: C.yaw, hx: H - 1, hz: H - 1 });
     // The road up: from the town's street, out through the palisade, to the gatehouse and into the courtyard.
@@ -1287,9 +1295,11 @@ export class Villages {
 
     // The palisade: two courses of logs round the town and the villas, gates where roads come in (an opening under a lintel).
     const gaps: { side: number; at: number }[] = [];
-    const sides: [number, number, number, number][] = [[-PAL_X, -PAL_X, PAL_X, -PAL_X], [PAL_X, -PAL_X, PAL_X, PAL_N], [PAL_X, PAL_N, -PAL_X, PAL_N], [-PAL_X, PAL_N, -PAL_X, -PAL_X]];
+    // (Round the lower town, meeting the stone walls of the terraces above at either end.)
+    const E = v.edge!;
+    const sides: [number, number, number, number][] = [[-E, T1_Z, -PAL_X, T1_Z], [-PAL_X, T1_Z, -PAL_X, -PAL_X], [-PAL_X, -PAL_X, PAL_X, -PAL_X], [PAL_X, -PAL_X, PAL_X, T1_Z], [PAL_X, T1_Z, E, T1_Z]];
     const toGrid = (p: { x: number; z: number }) => local(F, p.x, p.z);
-    const crossings = [...v.paths.map((sg) => [toGrid({ x: sg.ax, z: sg.az }), toGrid({ x: sg.bx, z: sg.bz })]), [toGrid(P0), toGrid(P1)]];
+    const crossings = v.paths.map((sg) => [toGrid({ x: sg.ax, z: sg.az }), toGrid({ x: sg.bx, z: sg.bz })]);
     sides.forEach(([x0, z0, x1, z1], si) => {
       for (const [[ax, az], [bx, bz]] of crossings) {
         // Where a road crosses this side (in the grid's frame).
