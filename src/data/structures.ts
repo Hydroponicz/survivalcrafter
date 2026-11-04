@@ -43,6 +43,8 @@ export interface StructureDef {
   attach?: 'forge';
   /** Holds this much water (in jars). */
   water?: number;
+  /** Only found in villages (not in the build menu yet). */
+  village?: boolean;
   desc: string;
 }
 
@@ -167,6 +169,12 @@ const defs: StructureDef[] = [
 
 ];
 
+// A village well: a stone ring round deep water, a little roof over the winch.
+defs.push({ id: 'well', name: 'Village well', icon: '🪣', category: 'Crafting', snap: false, village: true,
+  boxes: [box(0, 0.45, 0, 0.85, 0.45, 0.85), box(-0.8, 1.2, 0, 0.08, 1.2, 0.08), box(0.8, 1.2, 0, 0.08, 1.2, 0.08)], snaps: [],
+  materials: [{ item: 'rock_shard', count: 20 }, { item: 'mortar', count: 4 }, { item: 'plank', count: 4 }], tool: 'hammer', skill: 'masonry', difficulty: 15, stepTime: 3,
+  desc: 'The village well: deep, clean water.' });
+
 // A torch planted in the ground: it burns (its fuel is the burn left) and lights the spot.
 defs.push({ id: 'standing_torch', name: 'Torch', icon: '🔥', category: 'Crafting', snap: false, item: 'torch',
   boxes: [box(0, 0.55, 0, 0.09, 0.55, 0.09)], snaps: [], materials: [], skill: 'firemaking', difficulty: 1, stepTime: 0,
@@ -183,7 +191,7 @@ for (const f of FURNITURE) {
 export const STRUCTURES: Record<string, StructureDef> = Object.fromEntries(defs.map((d) => [d.id, d]));
 export const STRUCTURE_LIST = defs;
 /** Pieces you plan and then build step by step (equipment is crafted and placed instead). */
-export const BUILDABLE = defs.filter((d) => !d.item);
+export const BUILDABLE = defs.filter((d) => !d.item && !d.village);
 
 export function totalMaterials(def: StructureDef): number {
   return def.materials.reduce((s, m) => s + m.count, 0);

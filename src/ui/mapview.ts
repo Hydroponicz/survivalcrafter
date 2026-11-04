@@ -1,4 +1,5 @@
 import { STRUCTURES } from '../data/structures';
+import { isGenerated } from '../world/world';
 import type { Game } from '../game/game';
 import type { WorldMap } from './worldmap';
 
@@ -143,10 +144,30 @@ export class MapView {
     this.map.paint(ctx, w, h, this.cx, this.cz, this.scale);
     const toX = (x: number) => (x - this.cx) * this.scale + w / 2, toY = (z: number) => (z - this.cz) * this.scale + h / 2;
 
+    // Villages you've come near: their paths, houses, fields and name.
+    for (const v of this.g.world.terrain.villages.known()) {
+      if (toX(v.x) < -200 || toX(v.x) > w + 200 || toY(v.z) < -200 || toY(v.z) > h + 200) continue;
+      ctx.strokeStyle = 'rgba(120,86,50,0.75)'; ctx.lineWidth = Math.max(1, 1.6 * this.scale); ctx.lineCap = 'round';
+      ctx.beginPath();
+      for (const sg of v.paths) { ctx.moveTo(toX(sg.ax), toY(sg.az)); ctx.lineTo(toX(sg.bx), toY(sg.bz)); }
+      ctx.stroke();
+      const rect = (r: { x: number; z: number; yaw: number; hx: number; hz: number }, fill: string) => {
+        ctx.save();
+        ctx.translate(toX(r.x), toY(r.z));
+        ctx.rotate(-r.yaw);
+        ctx.fillStyle = fill;
+        ctx.fillRect(-r.hx * this.scale, -r.hz * this.scale, 2 * r.hx * this.scale, 2 * r.hz * this.scale);
+        ctx.restore();
+      };
+      for (const f of v.fields) rect(f, 'rgba(140,100,50,0.35)');
+      for (const hs of v.houses) rect({ x: hs.x, z: hs.z, yaw: hs.yaw, hx: hs.tiles, hz: 2 }, 'rgba(74,50,30,0.85)');
+      ctx.fillStyle = INK; ctx.font = 'italic bold 13px Georgia, serif'; ctx.textAlign = 'center';
+      ctx.fillText(v.name, toX(v.x), toY(v.z) - Math.max(14, (v.r - 10) * this.scale));
+    }
     // What you've built: small inked squares.
     ctx.fillStyle = 'rgba(74,50,30,0.8)';
     for (const o of this.g.world.objects.values()) {
-      if (o.kind !== 'structure' || !o.built) continue;
+      if (o.kind !== 'structure' || !o.built || isGenerated(o.id)) continue;
       const s = Math.max(2, 1.6 * this.scale);
       ctx.fillRect(toX(o.x) - s / 2, toY(o.z) - s / 2, s, s);
     }
@@ -155,7 +176,7 @@ export class MapView {
     this.flag(ctx, toX(o.x), toY(o.z));
     let bed: { x: number; z: number; id: number } | null = null;
     for (const s of this.g.world.objects.values()) {
-      if (s.kind === 'structure' && s.built && STRUCTURES[s.type]?.bed && (!bed || s.id < bed.id)) bed = s;
+      if (s.kind === 'structure' && s.built && !isGenerated(s.id) && STRUCTURES[s.type]?.bed && (!bed || s.id < bed.id)) bed = s;
     }
     if (bed) this.house(ctx, toX(bed.x), toY(bed.z));
     // You: a red arrow pointing the way you face (north is up).

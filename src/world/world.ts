@@ -164,6 +164,8 @@ export const GEN_BASE = 100_000_000;
 const LOAD_R = 220;
 const UNLOAD_R = 290;
 export const isGenerated = (id: number) => id >= GEN_BASE;
+/** A region's village pieces are numbered from here (after its trees and forage). */
+const VILLAGE_IDS = 3300;
 const regionOfId = (id: number) => Math.floor((id - GEN_BASE) / 4096);
 
 /** What you've done to a region's wild things: removed some, changed others. */
@@ -320,6 +322,8 @@ export class World {
     const rng = job.rng;
     const cover = this.treeCover ??= new TreeCover(t.seed);
     const x0 = rx * REGION, z0 = rz * REGION;
+    // Villages keep their houses, paths and fields clear, and most trees round them felled long ago.
+    const vil = t.villages, vills = vil.around(x0 + REGION / 2, z0 + REGION / 2, REGION * 0.75);
     for (; job.gz < REGION; job.gz += 2, job.gx = 0) {
       const gz = job.gz;
       for (; job.gx < REGION; job.gx += 2) {
@@ -328,6 +332,7 @@ export class World {
         const gx = job.gx;
         const px = x0 + gx + rng() * 2, pz = z0 + gz + rng() * 2;
         const roll = rng(), roll2 = rng(), roll3 = rng();
+        if (vills.length && vills.some((v) => vil.keepsClear(v, px, pz) || (roll3 < 0.85 && Math.hypot(px - v.x, pz - v.z) < v.r))) continue;
         const h = t.heightAt(px, pz);
         if (h < t.waterAt(px, pz) + 0.5) continue;
         if (t.topAt(px, pz) !== Mat.Grass) continue;
@@ -345,6 +350,20 @@ export class World {
       }
     }
     this.growing = undefined;
+    // The villages' houses and the rest of their pieces anchored here (numbered after the forage).
+    job.k = VILLAGE_IDS;
+    for (const v of vills) {
+      for (const p of vil.piecesIn(v, x0, z0, REGION)) {
+        if (job.k >= 4096) break;
+        const def = STRUCTURES[p.type];
+        if (!def) continue;
+        place<StructureObj>({
+          kind: 'structure', type: p.type, x: p.x, y: p.y, z: p.z, yaw: p.yaw, built: true, ql: 25, fuel: 0, lit: false,
+          consumed: Object.fromEntries(def.materials.map((m) => [m.item, m.count])),
+          items: def.container ? [] : undefined, water: def.water,
+        });
+      }
+    }
     // Everything else the game grows here (forage), numbered after the trees.
     job.k = 1100;
     for (const hook of this.regionHooks) {
@@ -423,6 +442,7 @@ export class World {
     this.terrain.generate(gen);
     this.findSpawn();
     this.origin = { ...this.spawn };
+    this.terrain.villages.settle([this.origin]);
   }
 
   /**
@@ -621,6 +641,8 @@ export class World {
   static load(data: ReturnType<World['serialize']>, gen?: WorldGen): World {
     const w = new World(data.terrain.seed);
     w.terrain.generate(gen);
+    // (Villages keep away from where this world began: settled before any ground is made.)
+    w.terrain.villages.settle([(data as { origin?: { x: number; z: number } }).origin ?? data.spawn]);
     w.terrain.load(data.terrain);
     for (const o of data.objects) {
       // Old saves planned anvils as buildings; they're placed equipment now.

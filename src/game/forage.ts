@@ -71,6 +71,8 @@ function trySpawn(world: World, x: number, z: number, rnd: () => number, id?: nu
   const t = world.terrain;
   const y = t.heightAt(x, z);
   if (y < t.waterAt(x, z) + 0.15) return undefined;
+  // Not on a village's house floors or in its pens.
+  if (t.villages.indoors(x, z)) return undefined;
   // Nothing settles on a cliff face (steeper than about 45°). Heights, not voxels: this runs for whole regions.
   if (Math.abs(t.heightAt(x + 0.5, z) - t.heightAt(x - 0.5, z)) > 1 || Math.abs(t.heightAt(x, z + 0.5) - t.heightAt(x, z - 0.5)) > 1) return undefined;
   const mat = t.topAt(x, z);

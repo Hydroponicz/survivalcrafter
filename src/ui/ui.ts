@@ -1180,6 +1180,7 @@ export class UI {
     misc.append(
       this.devButton('Refill needs', () => devCommands.refill(g)),
       this.devButton('Teleport home', () => devCommands.teleportHome(g)),
+      this.devButton('Teleport to village', () => devCommands.teleportVillage(g)),
       this.devButton('Grow everything', () => devCommands.growEverything(g)),
       this.devButton('Spawn deer', () => devCommands.spawnAnimal(g, 'deer')),
       this.devButton('Spawn boar', () => devCommands.spawnAnimal(g, 'boar')),

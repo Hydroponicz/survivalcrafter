@@ -2,7 +2,7 @@
 
 Everything below is currently drawn procedurally (simple shapes) or synthesized
 (beeps). Upload replacements and they get wired in. Highest impact first in
-each list. (Village and NPC assets will be listed separately when that update starts.)
+each list.
 
 ## Models (`.glb`, put in `assets-src/models/`)
 
@@ -52,6 +52,11 @@ Animals should be rigged if possible (walk, run, idle, graze, death).
   herbs (`yarrow`, `hemlock`, `mint`, `wild_onion`, `wild_wheat`)
 - `wheat_crop` (growth stages)
 
+**Villages** (the houses are built from the normal building pieces, so better wall, roof and log models improve them too)
+- `well.glb` (stone ring, posts, winch, small roof; currently simple shapes)
+- `water_trough.glb` (for animal pens), `hay_bale.glb`, `signpost.glb` (village name at the roads in)
+- `thatch_roof` piece variant with overhanging eaves (village houses use the plain 45° roof)
+
 ## Textures (PBR: `_color`, `_normal`, `_orm`, in `public/textures/`)
 
 - `terrain/sandstone_*` (sandstone ground currently reuses rock)
@@ -62,6 +67,7 @@ Animals should be rigged if possible (walk, run, idle, graze, death).
 - `props/clay_fired_*` (jars, crucible)
 - `animals/horse_*`, `animals/ox_*`, `animals/deer_*`, `animals/boar_*` (if the models come untextured)
 - `building/roof_shingles_*` (optional: a second roof style)
+- `terrain/dirt_path_*` (packed, trodden dirt for village paths; they use the plain dirt ground now)
 
 ## Sounds (`.ogg`/`.mp3`, mono, in `public/sounds/`; ×3 = give 3–5 takes)
 

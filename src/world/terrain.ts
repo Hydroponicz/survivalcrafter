@@ -5,6 +5,7 @@ import { Rock, Strata } from './geology';
 import { GROUND_GLSL, GROUNDS, groundUniforms } from './groundtex';
 import { makeWaterMaterial, waterTime } from './water';
 import { SEA, snowCover, WorldGen, type SoilTop } from './worldgen';
+import { Villages } from './villages';
 
 // Voxel terrain, streamed. Density lives on a 1 m grid of points (0..255,
 // solid at >= 128) and is meshed with Surface Nets, so the ground is smooth
@@ -101,6 +102,8 @@ const cyOf = (y: number) => Math.max(0, Math.min(NCY - 1, Math.floor((y - Y_MIN)
 export class Terrain {
   seed: number;
   gen!: WorldGen;
+  /** The world's villages: they level their house plots and lay their paths and fields into the ground. */
+  villages!: Villages;
   group = Object.assign(new THREE.Group(), { name: 'terrain' });
   private chunks = new Map<number, Chunk>();
   private cols = new Map<number, ColInfo>();
@@ -130,6 +133,7 @@ export class Terrain {
   /** Build the world map (a few seconds). */
   generate(gen = new WorldGen(this.seed)) {
     this.gen = gen;
+    this.villages = new Villages(gen);
     this.strata = new Strata(this.seed);
     this.cave = new Simplex(this.seed + 333);
     this.ore = new Simplex(this.seed ^ 0x5eed);
@@ -147,6 +151,10 @@ export class Terrain {
     const n = CI * CI;
     const h = new Float32Array(n);
     for (let k = 0; k < n; k++) h[k] = g.height(x0 + (k % CI), z0 + Math.floor(k / CI));
+    // A village here levels its plots (and, below, lays its paths and fields).
+    const mx = cx * CH + CH / 2, mz = cz * CH + CH / 2;
+    const vil = this.villages.at(mx, mz, CH);
+    if (vil) for (let k = 0; k < n; k++) h[k] = this.villages.shape(vil, x0 + (k % CI), z0 + Math.floor(k / CI), h[k]);
     const water = new Float32Array(n), soil = new Float32Array(n), fold = new Float32Array(n);
     const top = new Uint8Array(n), under = new Uint8Array(n);
     let minH = Infinity, maxH = -Infinity;
@@ -159,6 +167,10 @@ export class Terrain {
       const s = g.soil(x, z, h[k], slope, water[k]);
       soil[k] = s.soil;
       top[k] = TOP_MAT[s.top];
+      if (vil && s.top === 'grass') {
+        const v = this.villages.surface(vil, x, z);
+        if (v) { top[k] = v === 'path' ? Mat.Dirt : Mat.Field; soil[k] = Math.max(soil[k], 1.2); }
+      }
       under[k] = s.top === 'sand' || s.top === 'clay' || s.top === 'gravel' ? top[k] : Mat.Dirt;
       fold[k] = this.strata.foldAt(x, z);
       minH = Math.min(minH, h[k]); maxH = Math.max(maxH, h[k]);

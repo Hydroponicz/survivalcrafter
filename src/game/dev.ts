@@ -103,6 +103,23 @@ export const devCommands = {
     g.msg('[dev] Teleported home.', 'info');
   },
 
+  /** Go to the nearest village (planning the land round you out to 1.6 km to find one). */
+  teleportVillage(g: Game) {
+    const p = g.player.pos;
+    let best: { x: number; z: number; name: string; d: number } | null = null;
+    for (const v of g.world.terrain.villages.around(p.x, p.z, 1600)) {
+      const d = Math.hypot(v.x - p.x, v.z - p.z);
+      if (d > 30 && (!best || d < best.d)) best = { x: v.x, z: v.z, name: v.name, d };
+    }
+    if (!best) { g.msg('[dev] No village within 1.6 km.', 'info'); return; }
+    g.cancelAction();
+    // Just off the square, on the ground.
+    const x = best.x + 9, z = best.z + 9;
+    g.player.pos.set(x, g.world.terrain.heightAt(x, z) + 0.3, z);
+    g.player.vel.set(0, 0, 0);
+    g.msg(`[dev] Teleported to ${best.name} (${Math.round(best.d)} m away).`, 'info');
+  },
+
   spawnAnimal(g: Game, species: AnimalSpecies) {
     const f = g.player.forward();
     const len = Math.hypot(f.x, f.z) || 1;

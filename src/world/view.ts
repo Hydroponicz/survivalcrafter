@@ -364,6 +364,7 @@ export class WorldView implements WorldListener {
     } else {
       const m = this.meshes.get(o.id);
       if (m) { this.disposeMesh(m); this.meshes.delete(o.id); }
+      this.unbatch(o.id);
     }
   }
 
@@ -440,6 +441,7 @@ export class WorldView implements WorldListener {
     this.berryPool.cull(view);
     this.fruitPool.cull(view);
     for (const p of this.foragePools.values()) p.cull(view);
+    this.flushBatches();
   }
 
   updateTreeDetail(px: number, pz: number) {
@@ -501,9 +503,92 @@ export class WorldView implements WorldListener {
     m.traverse((c) => { if (c instanceof THREE.Mesh) this.flames.delete(c); });
   }
 
+  // ---------- static batches
+  /**
+   * Built pieces that never move (walls, floors, roofs, fences…) are merged,
+   * 32 m of the world at a time, into one mesh per material: a village of
+   * hundreds of pieces costs a handful of draws instead of thousands. A batch
+   * is remade (one a frame) whenever a piece in it comes or goes.
+   */
+  private batches = new Map<string, { ids: Set<number>; meshes: THREE.Mesh[]; dirty: boolean }>();
+  private batchKey = new Map<number, string>();
+
+  private batchable(o: WorldObj): boolean {
+    return o.kind === 'structure' && o.built && BATCHED.has(o.type);
+  }
+
+  private unbatch(id: number) {
+    const k = this.batchKey.get(id);
+    if (k === undefined) return;
+    this.batchKey.delete(id);
+    const b = this.batches.get(k);
+    if (b) { b.ids.delete(id); b.dirty = true; }
+  }
+
+  private toBatch(o: StructureObj) {
+    const k = `${Math.floor(o.x / 32)},${Math.floor(o.z / 32)}`;
+    if (this.batchKey.get(o.id) !== k) this.unbatch(o.id);
+    this.batchKey.set(o.id, k);
+    let b = this.batches.get(k);
+    if (!b) this.batches.set(k, (b = { ids: new Set(), meshes: [], dirty: true }));
+    b.ids.add(o.id);
+    b.dirty = true;
+  }
+
+  /** Remake batches that changed, a few milliseconds' worth a frame (call each frame). */
+  flushBatches(budgetMs = 4) {
+    const until = performance.now() + budgetMs;
+    for (const [k, b] of this.batches) {
+      if (!b.dirty) continue;
+      if (performance.now() > until) return;
+      b.dirty = false;
+      for (const m of b.meshes) { this.group.remove(m); m.geometry.dispose(); }
+      b.meshes = [];
+      if (!b.ids.size) { this.batches.delete(k); continue; }
+      const byMat = new Map<string, { mat: THREE.Material; geos: THREE.BufferGeometry[] }>();
+      for (const id of b.ids) {
+        const o = this.world.objects.get(id);
+        if (!o || o.kind !== 'structure') continue;
+        const g = buildPieceMesh(o.type, { open: o.open, water: o.water });
+        g.position.set(o.x, o.y, o.z);
+        g.rotation.y = o.yaw;
+        g.updateMatrixWorld(true);
+        g.traverse((c) => {
+          if (!(c instanceof THREE.Mesh)) return;
+          const m = c.material as THREE.MeshStandardMaterial;
+          const key = m.userData.tint !== undefined ? m.uuid : `${m.color.getHex()}|${m.roughness}|${m.side}|${m.emissive.getHex()}|${m.transparent}`;
+          let geo = (c.geometry as THREE.BufferGeometry);
+          geo = geo.index ? geo.toNonIndexed() : geo.clone();
+          geo.applyMatrix4(c.matrixWorld);
+          for (const name of Object.keys(geo.attributes)) if (name !== 'position' && name !== 'normal' && name !== 'uv') geo.deleteAttribute(name);
+          if (!geo.attributes.normal) geo.computeVertexNormals();
+          if (!geo.attributes.uv) geo.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(geo.attributes.position.count * 2), 2));
+          let e = byMat.get(key);
+          if (!e) byMat.set(key, (e = { mat: m, geos: [] }));
+          e.geos.push(geo);
+          c.geometry.dispose();
+        });
+      }
+      for (const { mat: m, geos } of byMat.values()) {
+        const merged = mergeGeometries(geos);
+        for (const g of geos) g.dispose();
+        if (!merged) continue;
+        merged.computeBoundingSphere();
+        const mesh = new THREE.Mesh(merged, m);
+        mesh.castShadow = mesh.receiveShadow = true;
+        mesh.matrixAutoUpdate = false;
+        mesh.updateMatrix();
+        b.meshes.push(mesh);
+        this.group.add(mesh);
+      }
+    }
+  }
+
   private rebuildMesh(o: WorldObj) {
     const old = this.meshes.get(o.id);
-    if (old) this.disposeMesh(old);
+    if (old) { this.disposeMesh(old); this.meshes.delete(o.id); }
+    if (this.batchable(o)) { this.toBatch(o as StructureObj); return; }
+    this.unbatch(o.id);
     const m = o.kind === 'structure' ? this.structureMesh(o) : this.pileMesh(o as PileObj);
     this.meshes.set(o.id, m);
     this.group.add(m);
@@ -903,6 +988,9 @@ function animateLegs(m: THREE.Group, a: AnimalObj, time: number) {
 
 const WOOD = 0x8a6440, DARK_WOOD = 0x6e4e30;
 
+/** Pieces that never move once built: drawn merged (see View.flushBatches). */
+const BATCHED = new Set(['floor', 'stone_foundation', 'wood_wall', 'log_wall', 'stone_wall', 'window_wall', 'beam', 'roof', 'gable', 'stairs', 'fence', 'well']);
+
 /**
  * Meshes for a building piece in its local frame (origin at bottom centre).
  * Shared by placed pieces and the placement ghost.
@@ -1108,6 +1196,24 @@ export function buildPieceMesh(type: string, state: { lit?: boolean; open?: bool
       if (level > 0) {
         const w = add(new THREE.CylinderGeometry(0.255, 0.24, 0.42 * level, 16), 0x3f6f8a, 0, 0.06 + 0.21 * level, 0, { transparent: true, opacity: 0.8, roughness: 0.15 });
         w.castShadow = false;
+      }
+      break;
+    }
+    case 'well': {
+      // A ring of stone round dark water, two posts, a winch and a little thatched roof.
+      const ring = new THREE.CylinderGeometry(0.85, 0.9, 0.9, 18, 1, true);
+      tex(ring, 'stone_wall', 0, 0.45, 0);
+      add(new THREE.CylinderGeometry(0.66, 0.66, 0.9, 18, 1, true), 0x4a4640, 0, 0.45, 0, { side: THREE.BackSide, roughness: 1 });
+      tex(new THREE.RingGeometry(0.64, 0.92, 18).rotateX(-Math.PI / 2), 'stone', 0, 0.91, 0, { tint: 0xd8d4cc });
+      add(new THREE.CircleGeometry(0.66, 18).rotateX(-Math.PI / 2), 0x10181c, 0, 0.35, 0, { roughness: 0.15 });
+      for (const x of [-0.8, 0.8]) tex(new THREE.BoxGeometry(0.14, 2.3, 0.14), 'rough_wood', x, 1.15, 0);
+      const axle = tex(new THREE.CylinderGeometry(0.06, 0.06, 1.7, 8), 'rough_wood', 0, 1.75, 0);
+      axle.rotation.z = Math.PI / 2;
+      add(new THREE.CylinderGeometry(0.012, 0.012, 1.1, 4), 0x8a7a5a, 0.1, 1.2, 0, { roughness: 1 });
+      tex(new THREE.CylinderGeometry(0.13, 0.1, 0.22, 10), 'planks', 0.1, 0.62, 0);
+      for (const side of [-1, 1]) {
+        const roof = tex(new THREE.BoxGeometry(2.1, 0.08, 0.95), 'thatch', 0, 2.42, side * 0.33);
+        roof.rotation.x = side * 0.62;
       }
       break;
     }
