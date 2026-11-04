@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { FarForest, type StandInPlan, type StandIns } from './farforest';
+import type { Villages } from './villages';
 import { ViewCull } from './cull';
 import { perf } from '../game/perf';
 import { GROUND_GLSL, groundUniforms } from './groundtex';
@@ -47,6 +48,8 @@ export class DistantLand {
   /** Thin the distant forests by this many levels (a graphics setting). */
   forestThin = 0;
   private forest: FarForest | null;
+  /** The settlements, whose ground the distant forests leave clear. */
+  settlements?: Villages;
   /** Smooth the distant trees' cut-out edges with the multisampling (anti-aliasing on). */
   setAlphaToCoverage(on: boolean) { this.forest?.impostors.setAlphaToCoverage(on); }
   /** Take the distant trees' pictures (once, with the game's renderer). */
@@ -408,7 +411,7 @@ export class DistantLand {
     // The real trees' circle, a little inside so the two overlap, in steps
     // (it moves with you; small moves don't need the forests redone).
     this.nearCut.set(Math.round(nv.x / 20) * 20, Math.round(nv.y / 20) * 20, Math.max(0, nv.z - 25));
-    for (const t of this.tiles.values()) for (const tr of t.trees) tr.cull(this.view, this.nearCut);
+    for (const t of this.tiles.values()) for (const tr of t.trees) tr.cull(this.view, this.nearCut, this.settlements);
   }
 
   /**

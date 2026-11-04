@@ -5,6 +5,7 @@ import { hash2 } from './noise';
 import { ImpostorAtlas } from './impostors';
 import { SPECIES, TreeCover, TREES, VEGETATION, type Species } from './trees';
 import { CELL, PAD, SEA, TILE, TN, type TileData } from './worldgen';
+import type { Villages } from './villages';
 
 // Forests to the horizon. The real trees only stand within a couple of
 // hundred metres of you; beyond that each distant land tile carries
@@ -36,6 +37,10 @@ export class StandIns {
   private seenNear = new THREE.Vector3(NaN, 0, 0);
   /** Each tree's centre and radius (x, y, z, r), for the view test. */
   private spheres: Float32Array;
+  /** Trees standing where a settlement has cleared the ground (as of which of its plans), not drawn. */
+  private cleared: Uint8Array | null = null;
+  private clearedAt = -1;
+  private box = { x0: Infinity, z0: Infinity, x1: -Infinity, z1: -Infinity };
 
   constructor(near: THREE.BufferGeometry, far: THREE.BufferGeometry, material: THREE.Material,
     private mats: Float32Array, private cols: Float32Array, counts: [number, number, number]) {
@@ -63,20 +68,42 @@ export class StandIns {
       this.spheres[i * 4 + 1] = M[o + 1] * c.x + M[o + 5] * c.y + M[o + 9] * c.z + M[o + 13];
       this.spheres[i * 4 + 2] = M[o + 2] * c.x + M[o + 6] * c.y + M[o + 10] * c.z + M[o + 14];
       this.spheres[i * 4 + 3] = r * s;
+      const b = this.box;
+      b.x0 = Math.min(b.x0, M[o + 12]); b.x1 = Math.max(b.x1, M[o + 12]); b.z0 = Math.min(b.z0, M[o + 14]); b.z1 = Math.max(b.z1, M[o + 14]);
     }
   }
 
+  /** Leave out the trees on settlements' ground (their streets, plots, fields, and most of the land round a village). */
+  private clearFor(villages: Villages) {
+    this.clearedAt = villages.version;
+    const b = this.box, cx = (b.x0 + b.x1) / 2, cz = (b.z0 + b.z1) / 2;
+    const vs = villages.knownAround(cx, cz, Math.hypot(b.x1 - b.x0, b.z1 - b.z0) / 2);
+    this.seen = -1;
+    if (!vs.length) { this.cleared = null; return; }
+    const M = this.mats, n = M.length / 16, out = new Uint8Array(n);
+    for (let i = 0; i < n; i++) {
+      const x = M[i * 16 + 12], z = M[i * 16 + 14];
+      for (const v of vs) {
+        const d = Math.hypot(x - v.x, z - v.z);
+        if (d < v.r && (v.kind !== 'village' || d < v.r * 0.85 || villages.keepsClear(v, x, z))) { out[i] = 1; break; }
+      }
+    }
+    this.cleared = out;
+  }
+
   /** Hand to be drawn just the trees in view, outside the circle (x, z, radius) the real trees fill. */
-  cull(view: ViewCull, near: THREE.Vector3) {
+  cull(view: ViewCull, near: THREE.Vector3, villages?: Villages) {
+    if (villages && villages.version !== this.clearedAt) this.clearFor(villages);
     if (this.seen === view.version && this.seenLevel === this.level && this.seenNear.equals(near)) return;
     this.seen = view.version; this.seenLevel = this.level; this.seenNear.copy(near);
     const S = this.spheres, M = this.mats, C = this.cols;
     const a = this.mesh, b = this.outlines;
     const am = a.instanceMatrix.array as Float32Array, ac = a.instanceColor!.array as Float32Array;
     const bm = b.instanceMatrix.array as Float32Array, bc = b.instanceColor!.array as Float32Array;
-    const end = this.counts[this.level];
+    const end = this.counts[this.level], cleared = this.cleared;
     let na = 0, nb = 0;
     for (let i = 0; i < end; i++) {
+      if (cleared && cleared[i]) continue;
       const x = S[i * 4], y = S[i * 4 + 1], z = S[i * 4 + 2], r = S[i * 4 + 3];
       const dx = M[i * 16 + 12] - near.x, dz = M[i * 16 + 14] - near.y, d = Math.hypot(dx, dz);
       if (d < near.z || !view.sphere(x, y, z, r)) continue;

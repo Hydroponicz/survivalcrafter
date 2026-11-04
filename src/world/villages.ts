@@ -240,6 +240,7 @@ export class Villages {
       const s = this.site(cx, cz);
       v = s ? this.layout(s) : null;
       this.cells.set(key, v);
+      if (v) this.version++;
     }
     return v;
   }
@@ -249,6 +250,9 @@ export class Villages {
     const v = this.inCell(Math.floor(x / VCELL), Math.floor(z / VCELL));
     return v && Math.hypot(x - v.x, z - v.z) < v.r + grow ? v : null;
   }
+
+  /** Goes up each time another settlement is planned (the distant forests clear its ground when it does). */
+  version = 0;
 
   /** Settlements already planned (cheap: nothing new is worked out). */
   known(): Village[] {
