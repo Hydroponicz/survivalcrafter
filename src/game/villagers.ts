@@ -39,6 +39,7 @@ const WALK = 1.45;
 
 export const ROLE_NAMES: Record<HouseRole, string> = {
   farmer: 'farmer', shepherd: 'shepherd', woodcutter: 'woodcutter', butcher: 'butcher', smith: 'smith', elder: 'village elder', villager: 'villager',
+  priest: 'priest', mayor: 'mayor', merchant: 'merchant', baker: 'baker', carpenter: 'carpenter',
 };
 
 const NAMES = ['Aldric', 'Edda', 'Osric', 'Maud', 'Wulfric', 'Hilde', 'Godwin', 'Agnes', 'Leofric', 'Bertha', 'Cedric', 'Elfrida', 'Hamon', 'Isolde',
@@ -61,12 +62,18 @@ const KIT: Record<HouseRole, [string, number][]> = {
   smith: [['iron_hammer', 1], ['iron_tongs', 1]],
   elder: [],
   villager: [['iron_knife', 1]],
+  priest: [], mayor: [], merchant: [],
+  baker: [['clay_jar', 2]],
+  carpenter: [['iron_hammer', 1], ['saw', 1]],
 };
 /** What each job is good at (skill levels). */
 const TRADE: Record<HouseRole, SkillId[]> = {
   farmer: ['farming'], shepherd: ['taming'], woodcutter: ['woodcutting', 'carpentry'], butcher: ['butchering'],
   smith: ['smithing', 'firemaking'], elder: ['firemaking'], villager: ['foraging'],
+  priest: ['herbalism'], mayor: ['firemaking', 'cooking'], merchant: [], baker: ['cooking', 'firemaking'], carpenter: ['carpentry'],
 };
+/** What the carpenter makes, in turn. */
+const CARPENTRY = ['stool', 'chair', 'bench', 'table'];
 /** Finds lying about the village that its people gather, and what each gives. */
 const FIND_ITEM: Record<string, string> = { fallen_branch: 'branch', pebbles: 'rock_shard', fiber_grass: 'plant_fiber', flint: 'flint' };
 /** What the smith forges, in turn. */
@@ -368,6 +375,11 @@ export class VillageLife {
       case 'butcher': this.butcher(v); break;
       case 'smith': this.smith(v); break;
       case 'elder': this.elder(v); break;
+      case 'priest': this.priest(v); break;
+      case 'mayor': this.mayor(v); break;
+      case 'merchant': this.merchant(v); break;
+      case 'baker': this.bake(v); break;
+      case 'carpenter': this.carpentry(v); break;
       default: this.gather(v); break;
     }
     if (!v.steps.length) this.loiter(v);
@@ -392,7 +404,7 @@ export class VillageLife {
     const vil = v.village;
     const fire = this.structureAt(vil.fire, 'campfire');
     // The elder sees to the fire; everyone gathers round it.
-    if (v.role === 'elder' && fire) {
+    if ((v.role === 'elder' || v.role === 'mayor') && fire) {
       if (!fire.lit) { this.keepFire(v, fire, 'lighting the evening fire'); if (v.steps.length) return; }
       else if (this.cookSupper(v, fire)) return;
     }
@@ -730,6 +742,113 @@ export class VillageLife {
     }
   }
 
+  // ---------- town trades
+  /** The priest: prays at the altar, and goes out among the people. */
+  private priest(v: Villager) {
+    const altar = v.home.altar;
+    if (altar && Math.random() < 0.7) {
+      this.walkTo(v, altar, 'going to the altar');
+      const [ex, ez] = local(v.home, v.home.tiles, 0);
+      v.steps.push({ kind: 'pose', clip: 'interact', time: 40, face: { x: ex, z: ez }, doing: 'at prayer before the altar' });
+      return;
+    }
+    const vil = v.village;
+    this.walkTo(v, { x: vil.x + (Math.random() - 0.5) * 12, z: vil.z + (Math.random() - 0.5) * 12 }, 'going among the people');
+    v.steps.push({ kind: 'pose', clip: 'interact', time: 15, doing: 'blessing the market' });
+  }
+
+  /** The mayor: inspects the stores at the merchants' hall, holds court on the square, sees to the cathedral. */
+  private mayor(v: Villager) {
+    const vil = v.village, r = Math.random();
+    const sh = vil.store, cath = vil.houses.find((h) => h.kind === 'cathedral');
+    if (r < 0.4 && sh) {
+      const [fx, fz] = local(sh, 0, -1.6);
+      this.walkTo(v, { x: fx, z: fz }, 'going to the merchants\' hall');
+      v.steps.push({ kind: 'pose', clip: 'interact', time: 20, face: sh, doing: 'going over the town\'s accounts' });
+    } else if (r < 0.6 && cath) {
+      this.walkTo(v, cath.route[0], 'calling at the cathedral');
+      v.steps.push({ kind: 'pose', clip: 'idle', time: 12, face: cath, doing: 'looking up at the cathedral' });
+    } else {
+      const b = vil.benches[Math.floor(Math.random() * vil.benches.length)];
+      if (b) this.walkTo(v, { x: b.x + Math.sin(b.yaw) * 0.6, z: b.z + Math.cos(b.yaw) * 0.6 }, 'holding court on the square');
+      v.steps.push({ kind: 'pose', clip: 'interact', time: 25, face: vil, doing: 'holding court on the square' });
+    }
+  }
+
+  /** A merchant: minds a stall on the market square. */
+  private merchant(v: Villager) {
+    const st = v.village.stalls[(v.id + Math.floor(this.g.world.time / 300)) % Math.max(1, v.village.stalls.length)];
+    if (!st) { this.loiter(v); return; }
+    const [bx, bz] = local(st, 0, 0.25), [fx, fz] = local(st, 0, -2);
+    this.walkTo(v, { x: bx, z: bz }, 'opening up the stall');
+    v.steps.push({ kind: 'pose', clip: Math.random() < 0.5 ? 'interact' : 'idle', time: 45, face: { x: fx, z: fz }, doing: 'minding a market stall' });
+  }
+
+  /** The baker: grinds the stores' wheat into flour, mixes dough with well water, bakes bread in the oven, takes it to the stores. */
+  private bake(v: Villager) {
+    const eco = this.g.economy, vil = v.village, b = v.home.bakery;
+    if (!b) { this.gather(v); return; }
+    if (v.inv.count('bread') >= 4) { this.store(v, ['bread'], 'taking bread to the stores'); return; }
+    const quern = this.structureAt(b.quern, 'quern'), oven = this.structureAt(b.oven, 'campfire');
+    if (!quern || !oven) return;
+    const rec = (id: string) => RECIPES.find((x) => x.id === id)!;
+    // Bake what dough there is (the oven lit first).
+    if (v.inv.count('dough') > 0) {
+      if (!oven.lit) { this.keepFire(v, oven, 'firing up the oven'); return; }
+      this.walkTo(v, standBy(oven, quern, 0.9), 'carrying dough to the oven');
+      for (let k = 0; k < v.inv.count('dough'); k++) this.queueAct(v, 'craft', objTarget(oven), undefined, 'baking bread', rec('bread'), 'interact');
+      return;
+    }
+    // Mix flour and water into dough.
+    if (v.inv.count('flour') > 0 && v.inv.count('jar_of_water') > 0) {
+      this.walkTo(v, standBy(quern, oven, 0.8), 'mixing dough');
+      for (let k = 0; k < Math.min(v.inv.count('flour'), v.inv.count('jar_of_water')); k++) this.queueAct(v, 'craft', objTarget(quern), undefined, 'kneading dough', rec('dough'), 'craft');
+      return;
+    }
+    // Water from the well.
+    if (v.inv.count('flour') > 0 && v.inv.count('clay_jar') > 0) {
+      this.walkTo(v, { x: vil.x + 1.2, z: vil.z + 0.4 }, 'fetching water');
+      v.steps.push({ kind: 'pose', clip: 'interact', time: 6, face: vil, doing: 'drawing water at the well' });
+      v.steps.push({ kind: 'call', fn: () => { for (const j of v.inv.ofType('clay_jar')) { v.inv.remove(j.uid); v.inv.add(makeItem('jar_of_water', j.ql)); } } });
+      return;
+    }
+    // Grind wheat into flour.
+    if (v.inv.count('wheat') >= 2) {
+      this.walkTo(v, standBy(quern, oven, 0.8), 'going to the quern');
+      for (let k = 0; k < Math.floor(v.inv.count('wheat') / 2); k++) this.queueAct(v, 'craft', objTarget(quern), undefined, 'grinding flour', rec('flour'), 'interact');
+      return;
+    }
+    if (eco.stock(vil, 'bread') < eco.want(vil, 'bread') * 2 && this.fetch(v, [['wheat', 4]], 'fetching wheat from the stores')) return;
+  }
+
+  /** The carpenter: saws logs from the stores into fine planks, and makes stools, chairs, benches and tables at the bench. */
+  private carpentry(v: Villager) {
+    const eco = this.g.economy, vil = v.village;
+    const made = v.inv.items.filter((i) => CARPENTRY.includes(i.type));
+    if (made.length >= 1) { this.store(v, CARPENTRY, 'delivering furniture to the stores'); return; }
+    const benchAt = v.home.bench && this.structureAt(v.home.bench, 'workbench');
+    if (!benchAt) { this.gather(v); return; }
+    const hammer = v.inv.items.find((i) => i.type === 'iron_hammer'), saw = v.inv.items.find((i) => i.type === 'saw');
+    const stand = standBy(benchAt, v.home, 0.8);
+    // Something the stores want that the carpenter has the timber for.
+    for (const id of CARPENTRY) {
+      const r = RECIPES.find((x) => x.id === id);
+      if (!r || !hammer || eco.stock(vil, id) >= eco.want(vil, id)) continue;
+      if (!r.inputs.every((i) => v.inv.count(i.item) >= i.count)) continue;
+      this.walkTo(v, stand, 'going to the bench');
+      this.queueAct(v, 'craft', objTarget(benchAt), hammer, `making ${/^[aeiou]/.test(r.name.toLowerCase()) ? 'an' : 'a'} ${r.name.toLowerCase()}`, r, 'hammer');
+      return;
+    }
+    // Saw a log into fine planks.
+    if (v.inv.count('log') > 0 && saw) {
+      this.walkTo(v, stand, 'going to the bench');
+      this.queueAct(v, 'craft', objTarget(benchAt), saw, 'sawing planks', RECIPES.find((x) => x.id === 'saw_planks')!, 'craft');
+      return;
+    }
+    if (v.inv.count('refined_plank') < 6 && this.fetch(v, [['log', 2], ['shaft', 3]], 'fetching timber from the stores')) return;
+    if (v.inv.count('shaft') < 2) this.fetch(v, [['shaft', 3]], 'fetching handles from the stores');
+  }
+
   /** Family members: fetch water, pick up branches, stones and fibre about the village, and bring them home. */
   private gather(v: Villager) {
     const vil = v.village;
@@ -746,6 +865,14 @@ export class VillageLife {
         for (let k = 0; k < Math.min(3, v.inv.count('branch')); k++) this.queueAct(v, 'craft', terrainTarget(this.g, { x: bx, z: bz }), knife, 'whittling shafts', r, 'craft');
         return;
       }
+    }
+    // In a town: errands at the market.
+    if (vil.kind === 'town' && vil.stalls.length && Math.random() < 0.5) {
+      const st = vil.stalls[Math.floor(Math.random() * vil.stalls.length)];
+      const [fx, fz] = local(st, 0, -1.4);
+      this.walkTo(v, { x: fx, z: fz }, 'off to the market');
+      v.steps.push({ kind: 'pose', clip: 'interact', time: 15, face: st, doing: 'haggling at the market' });
+      return;
     }
     if (Math.random() < 0.25) {
       this.walkTo(v, { x: vil.x + 1.2, z: vil.z + 0.4 }, 'fetching water');
@@ -913,12 +1040,27 @@ export class VillageLife {
     const walk = (p: Spot) => v.steps.push({ kind: 'walk', to: p, doing });
     if (inHouse && inHouse === destHouse) { walk(to); return; }
     if (inHouse) {
-      walk(this.doorSpot(inHouse, -1.3));
-      v.steps.push({ kind: 'call', fn: () => this.setOpen(this.doorSpot(inHouse, -2), 'door', true) });
+      walk(this.doorSpot(inHouse, 0.7));
+      v.steps.push({ kind: 'call', fn: () => this.setOpen(this.doorSpot(inHouse, 0), 'door', true) });
       walk(inHouse.route[0]);
-      v.steps.push({ kind: 'call', fn: () => this.setOpen(this.doorSpot(inHouse, -2), 'door', false) });
+      v.steps.push({ kind: 'call', fn: () => this.setOpen(this.doorSpot(inHouse, 0), 'door', false) });
     }
     const start: Spot = inHouse ? inHouse.route[0] : from;
+    // A town: along the streets (round the blocks, not through them).
+    if (vil.grid) {
+      const a = inHouse ? inHouse.route[1] : this.streetPoint(vil, start);
+      const end = destHouse ? destHouse.route[1] : this.streetPoint(vil, to);
+      if (inHouse || dist(start, a) > 0.5) walk(a);
+      for (const p of this.streets(vil, a, end)) walk(p);
+      if (destHouse) {
+        walk(destHouse.route[0]);
+        v.steps.push({ kind: 'call', fn: () => this.setOpen(this.doorSpot(destHouse, 0), 'door', true) });
+        walk(this.doorSpot(destHouse, 0.7));
+        v.steps.push({ kind: 'call', fn: () => this.setOpen(this.doorSpot(destHouse, 0), 'door', false) });
+      }
+      walk(to);
+      return;
+    }
     if (destHouse) {
       // From the square (or straight to the door if it's close by).
       const r = destHouse.route;
@@ -927,9 +1069,9 @@ export class VillageLife {
         walk(r[2]); walk(r[1]);
       }
       walk(r[0]);
-      v.steps.push({ kind: 'call', fn: () => this.setOpen(this.doorSpot(destHouse, -2), 'door', true) });
-      walk(this.doorSpot(destHouse, -1.3));
-      v.steps.push({ kind: 'call', fn: () => this.setOpen(this.doorSpot(destHouse, -2), 'door', false) });
+      v.steps.push({ kind: 'call', fn: () => this.setOpen(this.doorSpot(destHouse, 0), 'door', true) });
+      walk(this.doorSpot(destHouse, 0.7));
+      v.steps.push({ kind: 'call', fn: () => this.setOpen(this.doorSpot(destHouse, 0), 'door', false) });
       walk(to);
       return;
     }
@@ -938,12 +1080,48 @@ export class VillageLife {
     walk(to);
   }
 
-  private houseAt(vil: Village, x: number, z: number): House | undefined {
-    return vil.houses.find((h) => { const [lx, lz] = toHouse(h, x, z); return Math.abs(lx) < h.tiles - 0.05 && Math.abs(lz) < 1.95; });
+  /** The nearest point on a town's streets (or its market square) to a spot. */
+  private streetPoint(vil: Village, p: Spot): Spot {
+    const F = vil.grid!;
+    const [lx, lz] = toFrame(F, p.x, p.z);
+    // In the market square: the street alongside it, on the nearest side.
+    if (Math.abs(lx) < STREETS[2] && Math.abs(lz) < STREETS[2]) {
+      const [x, z] = STREETS[2] - Math.abs(lx) < STREETS[2] - Math.abs(lz) ? local(F, Math.sign(lx) * STREETS[2], lz) : local(F, lx, Math.sign(lz) * STREETS[2]);
+      return { x, z };
+    }
+    const nx = nearest(STREETS, lx), nz = nearest(STREETS, lz), lim = STREETS[3];
+    const [x, z] = Math.abs(nx - lx) < Math.abs(nz - lz) ? local(F, nx, clamp(lz, -lim, lim)) : local(F, clamp(lx, -lim, lim), nz);
+    return { x, z };
   }
 
-  private doorSpot(h: House, lz: number): Spot {
-    const [x, z] = local(h, -h.tiles + 1, lz);
+  /** The corners to turn, going from one street point to another along a town's grid. */
+  private streets(vil: Village, a: Spot, b: Spot): Spot[] {
+    const F = vil.grid!;
+    const [ax, az] = toFrame(F, a.x, a.z), [bx, bz] = toFrame(F, b.x, b.z);
+    const onX = (x: number) => STREETS.some((s) => Math.abs(s - x) < 0.6), sq = (x: number, z: number) => Math.abs(x) < STREETS[2] && Math.abs(z) < STREETS[2];
+    const pts: [number, number][] = [];
+    if (sq(ax, az) || sq(bx, bz)) {
+      // To or from the square: by the street it opens onto.
+      const s = sq(ax, az) ? [bx, bz] : [ax, az];
+      if (onX(s[0])) pts.push([s[0], clamp(s[1], -STREETS[2], STREETS[2])]);
+      else pts.push([clamp(s[0], -STREETS[2], STREETS[2]), s[1]]);
+      if (!sq(ax, az)) pts.reverse();
+    } else if (onX(ax) && onX(bx)) {
+      if (Math.abs(ax - bx) > 0.6) { const h = nearest(STREETS, (az + bz) / 2); pts.push([ax, h], [bx, h]); }
+    } else if (!onX(ax) && !onX(bx)) {
+      if (Math.abs(az - bz) > 0.6) { const vv = nearest(STREETS, (ax + bx) / 2); pts.push([vv, az], [vv, bz]); }
+    } else if (onX(ax)) pts.push([ax, bz]);
+    else pts.push([bx, az]);
+    return [...pts.map(([x, z]) => { const [wx, wz] = local(F, x, z); return { x: wx, z: wz }; }), b];
+  }
+
+  private houseAt(vil: Village, x: number, z: number): House | undefined {
+    return vil.houses.find((h) => { const [lx, lz] = toHouse(h, x, z); return Math.abs(lx) < h.tiles - 0.05 && Math.abs(lz) < h.nz - 0.05; });
+  }
+
+  /** By the door: `inward` metres in from the doorway (0: in it). */
+  private doorSpot(h: House, inward: number): Spot {
+    const [x, z] = local(h, h.doorX, -h.nz + inward);
     return { x, z };
   }
 
@@ -1025,6 +1203,14 @@ function dist(a: Spot, b: Spot) { return Math.hypot(a.x - b.x, a.z - b.z); }
 function local(r: { x: number; z: number; yaw: number }, lx: number, lz: number): [number, number] {
   const c = Math.cos(r.yaw), s = Math.sin(r.yaw);
   return [r.x + lx * c + lz * s, r.z - lx * s + lz * c];
+}
+/** A town's street lines (in its grid's own frame). */
+const STREETS = [-39, -13, 13, 39];
+const nearest = (list: number[], v: number) => list.reduce((a, b) => (Math.abs(b - v) < Math.abs(a - v) ? b : a));
+const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
+function toFrame(r: { x: number; z: number; yaw: number }, x: number, z: number): [number, number] {
+  const dx = x - r.x, dz = z - r.z, c = Math.cos(r.yaw), s = Math.sin(r.yaw);
+  return [dx * c - dz * s, dx * s + dz * c];
 }
 function toHouse(h: House, x: number, z: number): [number, number] {
   const dx = x - h.x, dz = z - h.z, c = Math.cos(h.yaw), s = Math.sin(h.yaw);

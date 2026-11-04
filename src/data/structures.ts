@@ -181,6 +181,12 @@ defs.push({ id: 'village_store', name: 'Village storehouse', icon: '🏪', categ
   materials: [{ item: 'plank', count: 16 }, { item: 'log', count: 4 }, { item: 'plant_fiber', count: 12 }], tool: 'hammer', skill: 'carpentry', difficulty: 12, stepTime: 3,
   container: 2000, desc: 'The village\'s shared stores: what its people make, and what they live on. Trade with the village here, and take on its work orders.' });
 
+// A market stall: a counter of goods under a striped awning.
+defs.push({ id: 'market_stall', name: 'Market stall', icon: '⛺', category: 'Crafting', snap: false, village: true,
+  boxes: [box(0, 0.45, -0.4, 1.0, 0.45, 0.3), box(-0.95, 1.1, 0.4, 0.06, 1.1, 0.06), box(0.95, 1.1, 0.4, 0.06, 1.1, 0.06)], snaps: [],
+  materials: [{ item: 'plank', count: 6 }, { item: 'shaft', count: 4 }, { item: 'wool', count: 4 }], tool: 'hammer', skill: 'carpentry', difficulty: 8, stepTime: 2,
+  desc: 'A trader\'s stall on the market square.' });
+
 // A torch planted in the ground: it burns (its fuel is the burn left) and lights the spot.
 defs.push({ id: 'standing_torch', name: 'Torch', icon: '🔥', category: 'Crafting', snap: false, item: 'torch',
   boxes: [box(0, 0.55, 0, 0.09, 0.55, 0.09)], snaps: [], materials: [], skill: 'firemaking', difficulty: 1, stepTime: 0,

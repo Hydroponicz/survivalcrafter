@@ -1,10 +1,13 @@
-// The village economy: each village keeps its goods in a storehouse on the
-// square (a real container in the world: what's in it is what there is).
+// The village economy: each settlement keeps its goods in its stores (kept in
+// its ledger, so the economy runs on whether you're there or not), reached at
+// the storehouse on its square.
 // Villagers bring what they make there and draw what they need from it:
 // seed for the fields, fuel for the fires, iron for the smith, food at meals.
 // A treasury of coins trades with passing merchants each morning (selling
 // what's piled up past need, buying in what the village can't make: iron),
-// and pays you for goods, at prices that follow supply and demand.
+// and pays you for goods, at prices that follow supply and demand. Traders
+// on the roads carry surplus from one settlement to another that's short of
+// it (see traders.ts).
 //
 // Every job a villager does is open to you too: the village posts work orders
 // for what it's short of (planks, wheat, wool, meat, tools...), paid per item
@@ -32,6 +35,8 @@ export interface GoodDef {
 /** Everything a village stores, uses and trades. */
 export const GOODS: Record<string, GoodDef> = {
   wheat: { value: 2, want: 2, perHead: true, job: 'farmer', meals: 0.5 },
+  bread: { value: 6, want: 1, perHead: true, job: 'baker', meals: 1.5 },
+  flour: { value: 3, want: 4, job: 'baker' },
   wheat_seeds: { value: 1, want: 16, job: 'farmer' },
   cooked_meat: { value: 7, want: 1, perHead: true, job: 'butcher', meals: 1 },
   raw_meat: { value: 4, want: 4, job: 'butcher' },
@@ -46,6 +51,11 @@ export const GOODS: Record<string, GoodDef> = {
   rock_shard: { value: 0.5, want: 10, job: 'villager' },
   flint: { value: 1, want: 4, job: 'villager' },
   iron_lump: { value: 12, want: 4 },
+  refined_plank: { value: 4, want: 10, job: 'carpenter' },
+  stool: { value: 18, want: 2, job: 'carpenter' },
+  chair: { value: 24, want: 2, job: 'carpenter' },
+  bench: { value: 26, want: 2, job: 'carpenter' },
+  table: { value: 40, want: 1, job: 'carpenter' },
   iron_knife: { value: 30, want: 2, job: 'smith' },
   iron_hoe: { value: 32, want: 2, job: 'smith' },
   iron_shovel: { value: 38, want: 2, job: 'smith' },
@@ -58,7 +68,12 @@ const START: [string, number][] = [
   ['wheat', 12], ['wheat_seeds', 24], ['cooked_meat', 10], ['raw_meat', 2], ['log', 8], ['plank', 8], ['kindling', 10],
   ['iron_lump', 4], ['shaft', 6], ['branch', 6],
 ];
-const START_TREASURY = 250;
+/** A town's stores are bigger (and it has bread and sawn timber). */
+const TOWN_START: [string, number][] = [
+  ['wheat', 20], ['bread', 16], ['cooked_meat', 8], ['flour', 4], ['log', 12], ['plank', 10], ['refined_plank', 6], ['kindling', 12],
+  ['iron_lump', 6], ['shaft', 10], ['branch', 6], ['wheat_seeds', 6],
+];
+const START_TREASURY = 250, TOWN_TREASURY = 900;
 
 /** A village's books (saved with the game). */
 export interface Ledger {
@@ -71,6 +86,10 @@ export interface Ledger {
   /** Meals missed for want of food (today). */
   hungry: number;
   hungryDay: number;
+  /** What's in its stores. */
+  goods: Item[];
+  /** The traders based here have set out. */
+  traders?: boolean;
 }
 
 /** Something the village wants brought in: so many of an item, paid each, plus a bonus when done. */
@@ -97,11 +116,20 @@ export class Economy {
 
   ledger(v: Village): Ledger {
     let l = this.ledgers.get(key(v));
-    if (!l) this.ledgers.set(key(v), (l = { name: v.name, treasury: START_TREASURY, seeded: false, traded: 0, hungry: 0, hungryDay: 0 }));
+    if (!l) {
+      const town = v.kind === 'town';
+      l = { name: v.name, treasury: town ? TOWN_TREASURY : START_TREASURY, seeded: true, traded: 0, hungry: 0, hungryDay: 0, goods: [] };
+      for (const [type, n] of town ? TOWN_START : START) for (let i = 0; i < n; i++) l.goods.push(makeItem(type, 25 + Math.random() * 15));
+      this.ledgers.set(key(v), l);
+    }
+    l.goods ??= [];
     return l;
   }
 
-  /** The village's storehouse (if its region is loaded), stocked to start with the first time it's found. */
+  /** Is this settlement's ledger open yet (anyone traded with it)? */
+  hasLedger(v: Village): boolean { return this.ledgers.has(key(v)); }
+
+  /** The settlement's storehouse (if its region is loaded): where its stores are reached. */
   storehouse(v: Village): StructureObj | undefined {
     const s = v.store;
     if (!s) return undefined;
@@ -110,11 +138,11 @@ export class Economy {
     const o = this.g.world.near(s.x, s.z, 2).find((x): x is StructureObj => x.kind === 'structure' && x.type === 'village_store' && Math.hypot(x.x - s.x, x.z - s.z) < 0.5);
     if (!o) return undefined;
     this.found.set(key(v), o);
-    o.items ??= [];
-    const l = this.ledger(v);
-    if (!l.seeded) {
-      l.seeded = true;
-      for (const [type, n] of START) for (let i = 0; i < n; i++) o.items.push(makeItem(type, 25 + Math.random() * 15));
+    // (An older save kept the goods in the storehouse itself: they move into the stores.)
+    if (o.items?.length) {
+      const l = this.ledger(v);
+      if (!(l as { migrated?: boolean }).migrated) { l.goods.push(...o.items); (l as { migrated?: boolean }).migrated = true; }
+      o.items = [];
       this.g.world.changed(o);
     }
     return o;
@@ -136,10 +164,8 @@ export class Economy {
   }
 
   stock(v: Village, item: string): number {
-    const s = this.storehouse(v);
-    if (!s?.items) return 0;
     let n = 0;
-    for (const i of s.items) if (i.type === item) n++;
+    for (const i of this.ledger(v).goods) if (i.type === item) n++;
     return n;
   }
 
@@ -158,21 +184,18 @@ export class Economy {
 
   /** Put things in the village's stores. */
   put(v: Village, items: Item[]): number {
-    const s = this.storehouse(v);
-    if (!s) return 0;
-    for (const it of items) { delete it.hot; s.items!.push(it); }
-    this.g.world.changed(s);
+    const l = this.ledger(v);
+    for (const it of items) { delete it.hot; l.goods.push(it); }
     return items.length;
   }
 
   /** Take up to `n` of something out of the stores (the best first). */
   take(v: Village, item: string, n: number): Item[] {
-    const s = this.storehouse(v);
-    if (!s?.items) return [];
-    const picked = s.items.filter((i) => i.type === item).sort((a, b) => b.ql - a.ql).slice(0, n);
+    const l = this.ledger(v);
+    const picked = l.goods.filter((i) => i.type === item).sort((a, b) => b.ql - a.ql).slice(0, n);
     if (!picked.length) return [];
-    s.items = s.items.filter((i) => !picked.includes(i));
-    this.g.world.changed(s);
+    const set = new Set(picked);
+    l.goods = l.goods.filter((i) => !set.has(i));
     return picked;
   }
 
@@ -180,7 +203,7 @@ export class Economy {
   eat(v: Village): boolean {
     const l = this.ledger(v), day = this.g.world.day;
     if (l.hungryDay !== day) { l.hungryDay = day; l.hungry = 0; }
-    for (const food of ['cooked_meat', 'wheat']) {
+    for (const food of ['bread', 'cooked_meat', 'wheat']) {
       const need = Math.ceil(1 / (GOODS[food].meals ?? 1));
       if (this.stock(v, food) >= need) { this.take(v, food, need); return true; }
     }
@@ -202,8 +225,7 @@ export class Economy {
    */
   trade(v: Village) {
     const l = this.ledger(v), day = this.g.world.day;
-    const s = this.storehouse(v);
-    if (!s || l.traded === day || this.g.world.dayFraction < 8 / 24) return;
+    if (l.traded === day || this.g.world.dayFraction < 8 / 24) return;
     l.traded = day;
     let sold = 0, bought = 0;
     for (const [item, d] of Object.entries(GOODS)) {
@@ -227,6 +249,44 @@ export class Economy {
     if (this.stock(v, 'wheat_seeds') < 6) buyIn('wheat_seeds', 10);
     if (this.meals(v) < this.population(v)) buyIn('wheat', this.population(v) * 2, 1.5);
     telemetry.event('economy', `${v.name}: merchants called`, { sold, bought, treasury: l.treasury });
+  }
+
+  // ---------- traders
+  /** How much of something a settlement has to spare (beyond what it wants, with a margin). */
+  surplus(v: Village, item: string): number {
+    return Math.max(0, this.stock(v, item) - Math.ceil(this.want(v, item) * 1.2) - 1);
+  }
+
+  /** How many of something a settlement is short of. */
+  shortfall(v: Village, item: string): number {
+    return Math.max(0, this.want(v, item) - this.stock(v, item));
+  }
+
+  /** A trader buys from a settlement (at its own prices, a little under what it'd charge you). Returns what they got. */
+  traderBuys(v: Village, item: string, n: number, purse: { coins: number }): Item[] {
+    const out: Item[] = [];
+    const l = this.ledger(v);
+    for (let i = 0; i < n; i++) {
+      const p = this.price(v, item, 'sell') * 1.1;
+      if (purse.coins < p) break;
+      const [it] = this.take(v, item, 1);
+      if (!it) break;
+      purse.coins -= p; l.treasury += p;
+      out.push(it);
+    }
+    return out;
+  }
+
+  /** A settlement buys from a trader (what it's short of, as its treasury allows). Returns what it didn't take. */
+  traderSells(v: Village, items: Item[], purse: { coins: number }): Item[] {
+    const l = this.ledger(v), left: Item[] = [];
+    for (const it of items) {
+      const p = this.price(v, it.type, 'sell') * 1.05;
+      if (!GOODS[it.type] || this.shortfall(v, it.type) <= 0 && this.stock(v, it.type) > this.want(v, it.type) * 1.5 || p > l.treasury) { left.push(it); continue; }
+      l.treasury -= p; purse.coins += p;
+      this.put(v, [it]);
+    }
+    return left;
   }
 
   // ---------- work orders

@@ -4,6 +4,7 @@ import { mulberry32 } from './noise';
 import { Mat, Terrain } from './terrain';
 import { TreeCover, VEGETATION, type Species } from './trees';
 import type { WorldGen } from './worldgen';
+import { segDist } from './villages';
 
 export type { Species } from './trees';
 export type AnimalSpecies = 'deer' | 'boar' | 'horse' | 'ox' | 'sheep';
@@ -179,7 +180,7 @@ const LOAD_R = 220;
 const UNLOAD_R = 290;
 export const isGenerated = (id: number) => id >= GEN_BASE;
 /** A region's village pieces are numbered from here (after its trees and forage). */
-const VILLAGE_IDS = 3300;
+const VILLAGE_IDS = 2000;
 const regionOfId = (id: number) => Math.floor((id - GEN_BASE) / 4096);
 
 /** What you've done to a region's wild things: removed some, changed others. */
@@ -340,6 +341,8 @@ export class World {
     const x0 = rx * REGION, z0 = rz * REGION;
     // Villages keep their houses, paths and fields clear, and most trees round them felled long ago.
     const vil = t.villages, vills = vil.around(x0 + REGION / 2, z0 + REGION / 2, REGION * 0.75);
+    // (And the roads between them.)
+    const roads = vil.roadsNear(x0 + REGION / 2, z0 + REGION / 2, REGION * 0.75);
     for (; job.gz < REGION; job.gz += 2, job.gx = 0) {
       const gz = job.gz;
       for (; job.gx < REGION; job.gx += 2) {
@@ -349,6 +352,7 @@ export class World {
         const px = x0 + gx + rng() * 2, pz = z0 + gz + rng() * 2;
         const roll = rng(), roll2 = rng(), roll3 = rng();
         if (vills.length && vills.some((v) => vil.keepsClear(v, px, pz) || (roll3 < 0.85 && Math.hypot(px - v.x, pz - v.z) < v.r))) continue;
+        if (roads.length && roads.some((s) => segDist(s, px, pz) < s.w / 2 + 1.6)) continue;
         const h = t.heightAt(px, pz);
         if (h < t.waterAt(px, pz) + 0.5) continue;
         if (t.topAt(px, pz) !== Mat.Grass) continue;

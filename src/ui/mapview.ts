@@ -144,7 +144,19 @@ export class MapView {
     this.map.paint(ctx, w, h, this.cx, this.cz, this.scale);
     const toX = (x: number) => (x - this.cx) * this.scale + w / 2, toY = (z: number) => (z - this.cz) * this.scale + h / 2;
 
-    // Villages you've come near: their paths, houses, fields and name.
+    // The roads between settlements, and the traders on them.
+    ctx.strokeStyle = 'rgba(120,86,50,0.6)'; ctx.lineWidth = Math.max(1.2, 2.4 * this.scale); ctx.lineCap = 'round';
+    ctx.setLineDash([6, 4]);
+    ctx.beginPath();
+    for (const road of this.g.world.terrain.villages.knownRoads()) {
+      ctx.moveTo(toX(road[0].ax), toY(road[0].az));
+      for (const sg of road) ctx.lineTo(toX(sg.bx), toY(sg.bz));
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = 'rgba(40,70,110,0.9)';
+    for (const tp of this.g.traders.positions()) { ctx.beginPath(); ctx.arc(toX(tp.x), toY(tp.z), 3, 0, Math.PI * 2); ctx.fill(); }
+    // Villages and towns you've come near: their paths and streets, buildings, fields and name.
     for (const v of this.g.world.terrain.villages.known()) {
       if (toX(v.x) < -200 || toX(v.x) > w + 200 || toY(v.z) < -200 || toY(v.z) > h + 200) continue;
       ctx.strokeStyle = 'rgba(120,86,50,0.75)'; ctx.lineWidth = Math.max(1, 1.6 * this.scale); ctx.lineCap = 'round';
@@ -160,9 +172,10 @@ export class MapView {
         ctx.restore();
       };
       for (const f of v.fields) rect(f, 'rgba(140,100,50,0.35)');
-      for (const hs of v.houses) rect({ x: hs.x, z: hs.z, yaw: hs.yaw, hx: hs.tiles, hz: 2 }, 'rgba(74,50,30,0.85)');
-      ctx.fillStyle = INK; ctx.font = 'italic bold 13px Georgia, serif'; ctx.textAlign = 'center';
-      ctx.fillText(v.name, toX(v.x), toY(v.z) - Math.max(14, (v.r - 10) * this.scale));
+      for (const p of v.paved) rect(p, 'rgba(150,140,120,0.45)');
+      for (const hs of v.houses) rect({ x: hs.x, z: hs.z, yaw: hs.yaw, hx: hs.tiles, hz: hs.nz }, hs.kind === 'cathedral' ? 'rgba(90,80,90,0.95)' : 'rgba(74,50,30,0.85)');
+      ctx.fillStyle = INK; ctx.font = v.kind === 'town' ? 'italic bold 16px Georgia, serif' : 'italic bold 13px Georgia, serif'; ctx.textAlign = 'center';
+      ctx.fillText(v.kind === 'town' ? `${v.name} (town)` : v.name, toX(v.x), toY(v.z) - Math.max(14, (v.r - 10) * this.scale));
     }
     // What you've built: small inked squares.
     ctx.fillStyle = 'rgba(74,50,30,0.8)';

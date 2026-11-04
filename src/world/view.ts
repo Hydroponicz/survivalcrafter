@@ -1233,6 +1233,25 @@ export function buildPieceMesh(type: string, state: { lit?: boolean; open?: bool
       }
       break;
     }
+    case 'market_stall': {
+      // A counter piled with goods in front, posts and a striped cloth awning sloping back over it.
+      tex(new THREE.BoxGeometry(2.0, 0.85, 0.6), 'planks', 0, 0.43, -0.4);
+      tex(new THREE.BoxGeometry(2.1, 0.06, 0.7), 'dark_planks', 0, 0.88, -0.4, { turn: true });
+      for (const [x, z, h] of [[-0.95, -0.7, 2.0], [0.95, -0.7, 2.0], [-0.95, 0.4, 2.3], [0.95, 0.4, 2.3]]) tex(new THREE.BoxGeometry(0.08, h, 0.08), 'rough_wood', x, h / 2, z);
+      const stripes = [0xb8402a, 0xe8dcc0];
+      for (let k = 0; k < 6; k++) {
+        const st = add(new THREE.BoxGeometry(0.36, 0.03, 1.4), stripes[k % 2], -0.9 + k * 0.36, 2.15, -0.15, { roughness: 1 });
+        st.rotation.x = -0.22;
+      }
+      // Goods: a basket of apples, a sack, a few loaves, a bolt of cloth.
+      add(new THREE.CylinderGeometry(0.2, 0.16, 0.14, 10), 0x8a6a3a, -0.6, 0.98, -0.4, { roughness: 1 });
+      for (let k = 0; k < 5; k++) add(new THREE.SphereGeometry(0.06, 6, 5), 0xc0281e, -0.66 + (k % 3) * 0.06, 1.07, -0.44 + Math.floor(k / 3) * 0.08, { roughness: 0.5 });
+      add(new THREE.SphereGeometry(0.2, 8, 6).scale(1, 0.8, 0.9), 0xb8a070, 0, 1.06, -0.35, { roughness: 1 });
+      for (let k = 0; k < 3; k++) add(new THREE.SphereGeometry(0.1, 8, 6).scale(1.4, 0.7, 0.9), 0xb07a3a, 0.45 + k * 0.17, 0.97, -0.5, { roughness: 0.9 });
+      const bolt = add(new THREE.CylinderGeometry(0.08, 0.08, 0.5, 10), 0x4a5a8a, 0.62, 1.0, -0.25, { roughness: 1 });
+      bolt.rotation.z = Math.PI / 2;
+      break;
+    }
     case 'village_store': {
       // Posts, a back wall, a thatched lean-to roof; a counter in front, goods behind.
       for (const [x, z] of [[-1.55, -1.1], [1.55, -1.1], [-1.55, 1.1], [1.55, 1.1]]) tex(new THREE.BoxGeometry(0.16, z < 0 ? 2.5 : 2.1, 0.16), 'rough_wood', x, z < 0 ? 1.25 : 1.05, z);

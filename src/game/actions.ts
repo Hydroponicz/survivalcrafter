@@ -16,6 +16,7 @@ import { SPECIES, TREES } from '../world/trees';
 import { ZONE_NAMES } from '../world/climate';
 import type { Game } from './game';
 import type { Villager } from './villagers';
+import type { Trader } from './traders';
 import type { SwingKind } from './tools';
 import { RECIPE_MINIGAMES, type MinigameSpec } from './minigames';
 import { anvilGrade, bellowsGrade, HOT_TIME, smithyCap } from './smithy';
@@ -29,6 +30,7 @@ export type Target =
   | { kind: 'cart'; cart: CartObj; point: THREE.Vector3 }
   | { kind: 'stump'; stump: Stump; point: THREE.Vector3 }
   | { kind: 'villager'; villager: Villager; point: THREE.Vector3 }
+  | { kind: 'trader'; trader: Trader; point: THREE.Vector3 }
   | { kind: 'none' };
 
 export interface Ctx {
@@ -662,9 +664,23 @@ export const ACTIONS: ActionDef[] = [
         smith: ['Keep the forge hot and the trough full.', 'Quench it while it glows, or it\'ll be soft as butter.'],
         elder: ['Welcome, traveller. Mind our fields as you pass.', 'We\'ve kept this village through hard winters. You\'re welcome by the fire of an evening.'],
         villager: ['Always something to fetch and carry.', 'Lovely weather for gathering, isn\'t it?'],
+        priest: ['Peace be with you, traveller.', 'The bells call the town to prayer at dawn and dusk. You\'re welcome under our roof.'],
+        mayor: ['The roads keep this town fed: the traders bring grain from the villages and take our goods back.', 'Mind you pay your dues at the merchants\' hall.'],
+        merchant: ['Finest wares this side of the river!', 'The traders bring the villages\' surplus here. Prices follow what\'s scarce.'],
+        baker: ['Wheat from the villages, water from the well, and a hot oven.', 'Bread\'s best fresh. Ask at the stores.'],
+        carpenter: ['Measure twice, cut once.', 'A good table outlasts the one who made it.'],
       };
       const say = lines[v.role] ?? lines.villager;
       c.g.msg(`${v.name}, the ${v.roleName} (${v.doing}): "${say[Math.floor(Math.random() * say.length)]}"`, 'info');
+    },
+  },
+  {
+    id: 'talk_trader', label: (c) => (c.t.kind === 'trader' ? `Talk to ${c.t.trader.name}` : 'Talk'),
+    show: (c) => c.t.kind === 'trader', time: 0,
+    run: (c) => {
+      if (c.t.kind !== 'trader') return;
+      const lines = ['The roads are long, but the grain\'s worth more in town than where it\'s grown.', 'Buy where it\'s plenty, sell where it\'s wanting: that\'s the whole of the trade.', 'Mind the boar on the road at dusk.'];
+      c.g.msg(`${c.g.traders.describe(c.t.trader)} "${lines[Math.floor(Math.random() * lines.length)]}"`, 'info');
     },
   },
   {

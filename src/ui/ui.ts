@@ -26,6 +26,7 @@ import type { HouseRole } from '../world/villages';
 const JOB_WORDS: Record<HouseRole, string> = {
   farmer: 'farmer\'s work', shepherd: 'shepherd\'s work', woodcutter: 'woodcutter\'s work', butcher: 'butcher\'s work',
   smith: 'smith\'s work', elder: 'odd jobs', villager: 'gathering about the land',
+  priest: 'the church\'s needs', mayor: 'the town\'s needs', merchant: 'trade goods', baker: 'baker\'s work', carpenter: 'carpenter\'s work',
 };
 const fmtCoins = (n: number) => (Number.isInteger(n) ? `${n}` : n.toFixed(1));
 
@@ -467,6 +468,7 @@ export class UI {
       case 'rock': return t.rock.sc < 0.6 ? 'Small boulder' : t.rock.sc < 1.1 ? 'Boulder' : 'Large boulder';
       case 'cart': return t.cart.type === 'ox_cart' ? 'Ox cart' : 'Hand cart';
       case 'villager': return t.villager.lying ? `${t.villager.name} (asleep)` : `${t.villager.name}, ${t.villager.roleName}`;
+      case 'trader': return `${t.trader.name}, travelling trader`;
       case 'stump': return `${t.stump.species[0].toUpperCase()}${t.stump.species.slice(1)} stump`;
       case 'none': return '';
       case 'object': {
@@ -1280,6 +1282,7 @@ export class UI {
       this.devButton('Refill needs', () => devCommands.refill(g)),
       this.devButton('Teleport home', () => devCommands.teleportHome(g)),
       this.devButton('Teleport to village', () => devCommands.teleportVillage(g)),
+      this.devButton('Teleport to town', () => devCommands.teleportVillage(g, 'town')),
       this.devButton('Grow everything', () => devCommands.growEverything(g)),
       this.devButton('Spawn deer', () => devCommands.spawnAnimal(g, 'deer')),
       this.devButton('Spawn boar', () => devCommands.spawnAnimal(g, 'boar')),

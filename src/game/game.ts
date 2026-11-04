@@ -52,6 +52,7 @@ import { Combat } from './combat';
 import { WorldMap } from '../ui/worldmap';
 import { VillageLife } from './villagers';
 import { Economy } from './economy';
+import { Traders } from './traders';
 
 const REACH = 4.5;
 /** Skill above a task's difficulty needed to do it the quick way. */
@@ -108,6 +109,8 @@ export class Game {
   economy = new Economy(this);
   /** Your purse. */
   coins = 20;
+  /** The travelling traders on the roads. */
+  traders = new Traders(this);
   player = new Player();
   inv = new Inventory();
   skills = new Skills();
@@ -228,6 +231,7 @@ export class Game {
     this.scene.add(this.view.group);
     this.life = new VillageLife(this);
     this.scene.add(this.life.group);
+    this.scene.add(this.traders.group);
     this.scene.add(this.player.model);
     // The light of a torch in your hand (always in the scene, dark when unused,
     // so lighting one doesn't make every material rebuild its shader).
@@ -917,6 +921,7 @@ export class Game {
     if (t.kind === 'rock') return this.world.brokenRocks.has(t.rock.key);
     if (t.kind === 'stump') return !this.world.stumps.includes(t.stump);
     if (t.kind === 'villager') return !this.life.villagers.includes(t.villager);
+    if (t.kind === 'trader') return !this.traders.list.includes(t.trader);
     return false;
   }
 
@@ -1529,6 +1534,8 @@ export class Game {
         }
         const person = this.life.hit(p);
         if (person) return { kind: 'villager', villager: person, point: p.clone() };
+        const trader = this.traders.hit(p);
+        if (trader) return { kind: 'trader', trader, point: p.clone() };
         for (const st of stumps) {
           const { r, h } = stumpSize(st), g = t.heightAt(st.x, st.z) - 0.1;
           if (Math.hypot(p.x - st.x, p.z - st.z) < r + 0.05 && p.y > g && p.y < g + h + 0.05) return { kind: 'stump', stump: st, point: p.clone() };
@@ -2242,7 +2249,7 @@ export class Game {
     if (this.quests && !this.quests.onChange) this.quests.onChange = () => this.ui.refresh();
     this.quests?.update(this, dt);
     perf.time('animals', () => { this.updateAnimals(dt); this.updateCarts(dt); });
-    perf.time('villagers', () => this.life.update(dt));
+    perf.time('villagers', () => { this.life.update(dt); this.traders.update(dt); });
     perf.time('map', () => this.map.update(dt, p.pos.x, p.pos.z, this.ui.isOpen('map')));
     perf.time('terrain', () => this.world.terrain.update(p.pos.x, p.pos.y, p.pos.z, 6));
     this.world.focus = { x: p.pos.x, z: p.pos.z };
@@ -2376,6 +2383,7 @@ export class Game {
         tips: [...this.tips],
         explored: this.map.serialize(),
         economy: this.economy.serialize(),
+        traders: this.traders.serialize(),
         coins: this.coins,
       };
       await writeSave(SAVE_KEY, data);
@@ -2527,6 +2535,7 @@ export class Game {
       g.tips = new Set(data.tips ?? []);
       g.map.load(data.explored);
       g.economy.load(data.economy);
+      g.traders.load(data.traders);
       g.coins = data.coins ?? 20;
       const quests = data.quests ?? data.onboarding;
       if (quests) g.quests = QuestLog.load(g.markerTex, quests);

@@ -155,6 +155,8 @@ export class Terrain {
     const mx = cx * CH + CH / 2, mz = cz * CH + CH / 2;
     const vil = this.villages.at(mx, mz, CH);
     if (vil) for (let k = 0; k < n; k++) h[k] = this.villages.shape(vil, x0 + (k % CI), z0 + Math.floor(k / CI), h[k]);
+    // And the roads between settlements running through.
+    const roads = this.villages.roadsNear(mx, mz, CH * 0.75 + 2);
     const water = new Float32Array(n), soil = new Float32Array(n), fold = new Float32Array(n);
     const top = new Uint8Array(n), under = new Uint8Array(n);
     let minH = Infinity, maxH = -Infinity;
@@ -167,9 +169,9 @@ export class Terrain {
       const s = g.soil(x, z, h[k], slope, water[k]);
       soil[k] = s.soil;
       top[k] = TOP_MAT[s.top];
-      if (vil && s.top === 'grass') {
-        const v = this.villages.surface(vil, x, z);
-        if (v) { top[k] = v === 'path' ? Mat.Dirt : Mat.Field; soil[k] = Math.max(soil[k], 1.2); }
+      if ((vil || roads.length) && s.top === 'grass') {
+        const v = this.villages.surface(vil, x, z, roads);
+        if (v) { top[k] = v === 'path' ? Mat.Dirt : v === 'street' ? Mat.Gravel : Mat.Field; soil[k] = Math.max(soil[k], 1.2); }
       }
       under[k] = s.top === 'sand' || s.top === 'clay' || s.top === 'gravel' ? top[k] : Mat.Dirt;
       fold[k] = this.strata.foldAt(x, z);

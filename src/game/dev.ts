@@ -104,14 +104,15 @@ export const devCommands = {
   },
 
   /** Go to the nearest village (planning the land round you out to 1.6 km to find one). */
-  teleportVillage(g: Game) {
+  teleportVillage(g: Game, kind?: 'village' | 'town') {
     const p = g.player.pos;
     let best: { x: number; z: number; name: string; d: number } | null = null;
-    for (const v of g.world.terrain.villages.around(p.x, p.z, 1600)) {
+    for (const v of g.world.terrain.villages.around(p.x, p.z, kind === 'town' ? 2600 : 1600)) {
+      if (kind && v.kind !== kind) continue;
       const d = Math.hypot(v.x - p.x, v.z - p.z);
       if (d > 30 && (!best || d < best.d)) best = { x: v.x, z: v.z, name: v.name, d };
     }
-    if (!best) { g.msg('[dev] No village within 1.6 km.', 'info'); return; }
+    if (!best) { g.msg(`[dev] No ${kind ?? 'village'} within ${kind === 'town' ? '2.6' : '1.6'} km.`, 'info'); return; }
     g.cancelAction();
     // Just off the square, on the ground.
     const x = best.x + 9, z = best.z + 9;
