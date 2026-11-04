@@ -6,7 +6,7 @@ import type { SkillId } from '../data/skills';
 import { isRock, isSoft, Mat, MAT_NAMES, Y_MIN } from '../world/terrain';
 import { telemetry } from './telemetry';
 import {
-  ANIMALS, APPLE_AGE, APPLES, CART_CAPACITY, corpseSpecies, CROP_STAGES, type CartObj, cropKey, type AnimalObj, type BushObj, type Crop, type ForageObj, type PileObj, type StructureObj, type Stump, type TreeObj, type WorldObj,
+  ANIMALS, APPLE_AGE, APPLES, CART_CAPACITY, corpseSpecies, toLocal, toWorld, CROP_STAGES, type CartObj, cropKey, type AnimalObj, type BushObj, type Crop, type ForageObj, type PileObj, type StructureObj, type Stump, type TreeObj, type WorldObj,
 } from '../world/world';
 import { FORAGE, IDENTIFY } from '../data/forage';
 import type { Boulder } from '../world/groundcover';
@@ -160,6 +160,38 @@ function fillItem(g: Game): string | undefined {
 const FILL_MAT: Record<string, Mat> = { dirt: Mat.Dirt, sand: Mat.Sand, clay: Mat.Clay };
 
 // ---------- actions
+/** Torches set down in the world: planted in the ground, or on a wall. */
+const TORCHES = new Set(['standing_torch', 'wall_torch']);
+/** What a torch can be mounted on: walls (built ones), and the faces of town houses. */
+const MOUNTABLE = (type: string) => type === 'wood_wall' || type === 'log_wall' || type === 'stone_wall' || type === 'window_wall' || type.startsWith('th_');
+
+/**
+ * Where a torch would go on the wall you're looking at: on the face toward
+ * you, at the height you aimed (kept clear of the floor and the top), facing
+ * out from it. Null if you aren't looking at a wall's face.
+ */
+function wallFace(c: Ctx): { x: number; y: number; z: number; yaw: number } | null {
+  const s = obj(c, 'structure');
+  if (!s || !s.built || !MOUNTABLE(s.type) || c.t.kind !== 'object') return null;
+  const p = c.t.point, eye = c.g.camera.position;
+  const [lx, ly, lz] = toLocal(s, p.x, p.y, p.z), [ex, , ez] = toLocal(s, eye.x, eye.y, eye.z);
+  // The part of the piece you hit (a windowed wall is several), and its face nearest the hit (on your side of it).
+  const b = STRUCTURES[s.type].boxes.find((q) => Math.abs(lx - q.c[0]) <= q.h[0] + 0.06 && Math.abs(ly - q.c[1]) <= q.h[1] + 0.06 && Math.abs(lz - q.c[2]) <= q.h[2] + 0.06);
+  if (!b) return null;
+  const dx = b.h[0] - Math.abs(lx - b.c[0]), dz = b.h[2] - Math.abs(lz - b.c[2]);
+  const alongZ = dz <= dx;
+  // (Which side: yours, by where your eye is.)
+  const sg = alongZ ? Math.sign(ez - b.c[2]) || 1 : Math.sign(ex - b.c[0]) || 1;
+  const fx = alongZ ? lx : b.c[0] + sg * (b.h[0] + 0.01), fz = alongZ ? b.c[2] + sg * (b.h[2] + 0.01) : lz;
+  const lo = b.c[1] - b.h[1] + 0.5, hi = b.c[1] + b.h[1] - 0.45;
+  if (hi < lo) return null;
+  const fy = Math.max(lo, Math.min(hi, ly));
+  const [x, y, z] = toWorld(s, [fx, fy, fz]);
+  // Its own +z points out of the face: the wall's +z or -z (or +x / -x for a town house's end).
+  const yaw = alongZ ? s.yaw + (sg > 0 ? 0 : Math.PI) : s.yaw + (sg > 0 ? Math.PI / 2 : -Math.PI / 2);
+  return { x, y, z, yaw };
+}
+
 export const ACTIONS: ActionDef[] = [
   // ===== ground
   {
@@ -486,8 +518,27 @@ export const ACTIONS: ActionDef[] = [
     },
   },
   {
+    id: 'mount_torch', label: 'Mount torch on the wall',
+    show: (c) => c.g.activeItem()?.type === 'torch' && !!wallFace(c),
+    check: (c) => {
+      const f = wallFace(c);
+      if (!f) return null;
+      for (const o of c.g.world.near(f.x, f.z, 0.8)) if (o.kind === 'structure' && o.type === 'wall_torch' && Math.hypot(o.x - f.x, o.z - f.z) < 0.6 && Math.abs(o.y - f.y) < 0.8) return 'There is a torch on the wall here already.';
+      return null;
+    },
+    time: 0.8,
+    run: (c) => {
+      const g = c.g, it = g.activeItem(), f = wallFace(c);
+      if (!it || it.type !== 'torch' || !f) return;
+      g.world.add<StructureObj>({ kind: 'structure', type: 'wall_torch', x: f.x, y: f.y, z: f.z, yaw: f.yaw,
+        consumed: {}, built: true, ql: it.ql, dmg: it.dmg, fuel: TORCH_BURN * Math.max(0, 1 - it.dmg / 100), lit: true });
+      g.consumeActive();
+      g.msg('You set the torch in a bracket on the wall. It keeps burning there, and you can take it down any time.', 'info');
+    },
+  },
+  {
     id: 'relight_torch', label: 'Relight torch',
-    show: (c) => { const s = obj(c, 'structure'); return !!s && s.type === 'standing_torch' && !s.lit; },
+    show: (c) => { const s = obj(c, 'structure'); return !!s && TORCHES.has(s.type) && !s.lit; },
     check: (c) => (c.g.inv.count('kindling') === 0 || c.g.inv.count('branch') === 0 ? 'Relighting a torch takes a kindling and a branch.' : null),
     time: 5, skill: 'firemaking', difficulty: 2, stamina: 2,
     minigame: () => ({ kind: 'bowdrill' }),
@@ -925,14 +976,14 @@ export const ACTIONS: ActionDef[] = [
     run: (c) => {
       const s = obj(c, 'structure')!;
       const def = STRUCTURES[s.type];
-      const torch = s.type === 'standing_torch';
+      const torch = TORCHES.has(s.type);
       const it = makeItem(torch && !s.lit ? 'torch_spent' : def.item!, s.ql);
       it.dmg = torch ? (s.lit ? 100 * (1 - s.fuel / TORCH_BURN) : 0) : s.dmg ?? 0;
       c.g.world.remove(s);
       c.g.inv.add(it);
       c.g.inventoryChanged();
       c.g.msg(torch
-        ? (s.lit ? 'You pull up the torch. Hold it, or plant it again in soft ground.' : 'You pull up the spent torch. Relight it with a kindling and a branch.')
+        ? (s.lit ? `You ${s.type === 'wall_torch' ? 'take down' : 'pull up'} the torch. Hold it, plant it in soft ground or mount it on a wall.` : `You ${s.type === 'wall_torch' ? 'take down' : 'pull up'} the spent torch. Relight it with a kindling and a branch.`)
         : `You pick up the ${def.name.toLowerCase()}${(s.water ?? 0) > 0 ? ', spilling the water' : ''}. Place it again from your pack.`, 'info');
     },
   },

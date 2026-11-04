@@ -773,7 +773,8 @@ export class WorldView implements WorldListener {
       if (!f) { l.intensity = 0; return; }
       // A fire's light, or a torch's (weaker, up where its flame is).
       const glow = STRUCTURES[f.type].glow;
-      l.position.set(f.x, f.y + (glow?.height ?? 1.2), f.z);
+      const out = glow?.out ?? 0;
+      l.position.set(f.x + Math.sin(f.yaw) * out, f.y + (glow?.height ?? 1.2), f.z + Math.cos(f.yaw) * out);
       l.intensity = (9 + Math.sin(time * 13 + i) * 1.5 + Math.sin(time * 7.3) * 1) * (glow?.strength ?? 1);
     });
     for (const fl of this.flames) {
@@ -1070,7 +1071,7 @@ const WOOD = 0x8a6440, DARK_WOOD = 0x6e4e30;
  * workbenches...), but not doors and gates (they swing), fires (flames), troughs
  * (water), nor the few pieces made from vertex-coloured models.
  */
-const UNBATCHED = new Set(['campfire', 'forge', 'iron_anvil', 'quench_trough', 'standing_torch']);
+const UNBATCHED = new Set(['campfire', 'forge', 'iron_anvil', 'quench_trough', 'standing_torch', 'wall_torch']);
 function batchedType(type: string): boolean {
   const d = STRUCTURES[type];
   return !!d && !UNBATCHED.has(type) && !d.opens && !d.burns && !d.glow && d.water === undefined;
@@ -1221,6 +1222,33 @@ export function buildPieceMesh(type: string, state: { lit?: boolean; open?: bool
         const core = new THREE.Mesh(new THREE.SphereGeometry(1, 8, 6).translate(0, 0.7, 0).scale(0.03, 0.08, 0.03),
           new THREE.MeshBasicMaterial({ color: 0xfff1b0, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false }));
         flame.position.y = core.position.y = 1.08;
+        flame.userData.flame = core.userData.flame = true;
+        flame.castShadow = core.castShadow = false;
+        g.add(flame, core);
+      }
+      break;
+    }
+    case 'wall_torch': {
+      // An iron plate on the wall, a ring on an arm, and the torch in it leaning out from the wall.
+      add(new THREE.BoxGeometry(0.12, 0.2, 0.02), 0x2a2622, 0, -0.05, 0.01, { roughness: 0.6, metalness: 0.6 });
+      add(new THREE.BoxGeometry(0.025, 0.025, 0.2), 0x2a2622, 0, -0.05, 0.11, { roughness: 0.6, metalness: 0.6 });
+      const ring = add(new THREE.TorusGeometry(0.035, 0.008, 4, 10), 0x2a2622, 0, -0.03, 0.2, { roughness: 0.6, metalness: 0.6 });
+      ring.rotation.x = Math.PI / 2 - 0.4;
+      const stick = new THREE.Group();
+      stick.position.set(0, -0.28, 0.1);
+      stick.rotation.x = 0.4;
+      tex(new THREE.CylinderGeometry(0.02, 0.026, 0.62, 7), 'rough_wood', 0, 0.31, 0, { parent: stick });
+      add(new THREE.CylinderGeometry(0.045, 0.034, 0.12, 8), state.lit ? 0x3a2a1c : 0x1c1814, 0, 0.62, 0, { roughness: 1 }, stick);
+      g.add(stick);
+      if (state.lit) {
+        // (Upright: flames rise whatever the torch's lean.)
+        const tip = new THREE.Vector3(0, 0.66, 0).applyEuler(stick.rotation).add(stick.position);
+        const flame = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 8).translate(0, 0.75, 0).scale(0.06, 0.14, 0.06),
+          new THREE.MeshBasicMaterial({ color: 0xffb347, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false }));
+        const core = new THREE.Mesh(new THREE.SphereGeometry(1, 8, 6).translate(0, 0.7, 0).scale(0.028, 0.075, 0.028),
+          new THREE.MeshBasicMaterial({ color: 0xfff1b0, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false }));
+        flame.position.copy(tip).y -= 0.04;
+        core.position.copy(flame.position);
         flame.userData.flame = core.userData.flame = true;
         flame.castShadow = core.castShadow = false;
         g.add(flame, core);

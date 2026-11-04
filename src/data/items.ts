@@ -83,7 +83,7 @@ const defs: ItemDef[] = [
   { id: 'refined_plank', name: 'Refined plank', icon: '🟧', weight: 2.5, desc: 'A smooth plank cut with an iron saw. Used for workbenches and furniture.', fuel: 120 },
   { id: 'shaft', name: 'Shaft', icon: '🥢', weight: 0.6, desc: 'A straight wooden handle for tools.', fuel: 40 },
   { id: 'kindling', name: 'Kindling', icon: '🔥', weight: 0.3, desc: 'Dry wood chips for starting fires and making torches.', fuel: 60 },
-  { id: 'torch', name: 'Torch', icon: '🔥', weight: 0.6, desc: 'A burning torch. Hold it to light your way, or plant it in soft ground (grass, dirt, sand or clay, not rock). Burns for about 3 days, then relight it with kindling and a branch.' },
+  { id: 'torch', name: 'Torch', icon: '🔥', weight: 0.6, desc: 'A burning torch. Hold it to light your way, plant it in soft ground (grass, dirt, sand or clay, not rock), or mount it on a wall (indoors too). Burns for about 3 days, then relight it with kindling and a branch.' },
   { id: 'torch_spent', name: 'Spent torch', icon: '🪵', weight: 0.5, desc: 'A burnt-out torch. Relight it with a kindling and a branch (Crafting → Primitive).' },
   { id: 'sprout', name: 'Tree sprout', icon: '🌱', weight: 0.2, desc: 'Plant it in grass to grow a new tree.' },
   { id: 'wheat_seeds', name: 'Wheat seeds', icon: '🫘', weight: 0.1, desc: 'Sow them on a tilled field.' },

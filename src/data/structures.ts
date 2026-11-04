@@ -31,7 +31,7 @@ export interface StructureDef {
   opens?: boolean;
   bed?: boolean;
   /** Gives light when lit (the fire light's strength, and how high it sits). */
-  glow?: { strength: number; height: number };
+  glow?: { strength: number; height: number; out?: number };
   /** Fine furniture: makes the room comfortable. Sleeping in a bed near it, you wake rested (see Game, sleep). */
   comfort?: number;
   /**
@@ -224,6 +224,10 @@ defs.push({ id: 'gallows', name: 'Gallows', icon: '🪢', category: 'Crafting', 
 defs.push({ id: 'standing_torch', name: 'Torch', icon: '🔥', category: 'Crafting', snap: false, item: 'torch',
   boxes: [box(0, 0.55, 0, 0.09, 0.55, 0.09)], snaps: [], materials: [], skill: 'firemaking', difficulty: 1, stepTime: 0,
   glow: { strength: 0.55, height: 1.15 }, desc: 'A torch planted in the ground. Burns for about 3 days.' });
+// A torch in an iron bracket on a wall (indoors, or on a house front): its local +z points out from the wall.
+defs.push({ id: 'wall_torch', name: 'Wall torch', icon: '🔥', category: 'Crafting', snap: false, item: 'torch',
+  boxes: [box(0, 0.08, 0.2, 0.08, 0.32, 0.2)], snaps: [], materials: [], skill: 'firemaking', difficulty: 1, stepTime: 0,
+  glow: { strength: 0.55, height: 0.45, out: 0.45 }, desc: 'A torch in a bracket on the wall. Burns for about 3 days.' });
 
 // Fine furniture: made at a workbench and set down from your pack (see data/furniture).
 for (const f of FURNITURE) {
