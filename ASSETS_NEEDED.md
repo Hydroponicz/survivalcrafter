@@ -11,7 +11,7 @@ Animals should be rigged if possible (walk, run, idle, graze, death).
 
 **Animals** (biggest visual win)
 - `horse.glb` (also used saddled when tamed), `ox.glb` (with a yoke when tamed)
-- `deer.glb`, `boar.glb`
+- `deer.glb`, `boar.glb`, `sheep.glb` (woolly and shorn: village flocks are simple shapes now)
 
 **Carts and gear worn on the body**
 - `hand_cart.glb` (two wheels, handles behind), `ox_cart.glb` (solid wheels, shafts forward)
@@ -23,6 +23,8 @@ Animals should be rigged if possible (walk, run, idle, graze, death).
 - `sit` (chairs, benches), `sleep` (lying in bed)
 - `bow_draw` / `bow_shoot`, `push_cart`, `lead_animal`, `drink_canteen`
 - `swim`, `carry_heavy` (a log on the shoulder)
+- `sit_bench` and `talk` (villagers at the fire and at doors), `shear` (shearing a sheep), `sow` (scattering seed)
+- villager clothing/face variations on the same rig (they reuse the player body, recoloured)
 
 **Iron tools and weapons** (the stone ones are done)
 - `iron_hatchet.glb`, `iron_pickaxe.glb`, `iron_shovel.glb`, `iron_hammer.glb`, `iron_knife.glb`
@@ -99,7 +101,10 @@ Animals should be rigged if possible (walk, run, idle, graze, death).
 
 **Combat and animals**
 - `swing` ×2, `hit_flesh` ×3, `bow_draw`, `bow_release`, `arrow_hit` ×2, `player_hurt` ×2,
-  `boar_grunt` ×3, `boar_squeal`, `deer_call`, `deer_run`
+  `boar_grunt` ×3, `boar_squeal`, `deer_call`, `deer_run`, `sheep_bleat` ×3
+
+**Villages**
+- `village_chatter` (loop: voices at the evening fire), `shears` ×2, `anvil_distant` (the smith at work, heard across the village)
 
 **Interface**
 - `ui_click`, `ui_open`, `map_open` (parchment unrolling), `quest_new`, `quest_complete`,
