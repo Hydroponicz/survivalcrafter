@@ -55,6 +55,8 @@ export interface Village {
   /** Everything of it lies within this distance of its centre. */
   r: number;
   square: { x: number; z: number; r: number };
+  /** The storehouse on the square (the village's shared stores), facing in. */
+  store?: { x: number; z: number; yaw: number };
   /** The campfire in the square, and the benches round it. */
   fire: { x: number; z: number };
   benches: { x: number; z: number; yaw: number }[];
@@ -131,6 +133,7 @@ export class Villages {
   /** Places villages keep away from (where the world began). Set before anything is asked. */
   private avoid: { x: number; z: number }[] = [];
   private ready = false;
+  private storePiece?: VPiece;
 
   constructor(private gen: WorldGen) {}
 
@@ -321,6 +324,10 @@ export class Villages {
         if (rects().some((o) => path.some((s) => segHits(s, o, 0.4)))) continue;
         const level = hs.reduce((s, h) => s + h, 0) / hs.length;
         v.pads.push({ ...pad, level });
+      // (The square's things settle on the ground as it now lies.)
+      for (const pc of v.pieces) {
+        if (Math.hypot(pc.x - x, pc.z - z) < sq.r + 8 && ['well', 'campfire', 'bench', 'barrel'].includes(pc.type)) pc.y = ground(pc.x, pc.z) - (pc.type === 'well' ? 0.05 : 0);
+      }
         v.paths.push(...path);
         const house: House = { x: hx, z: hz, yaw, y: level, tiles, role, door: { x: dx, z: dz }, route: [{ x: dx, z: dz }, { x: mx, z: mz }, { x: ex, z: ez }], beds: [], chest: { x: hx, z: hz } };
         v.houses.push(house);
@@ -378,11 +385,35 @@ export class Villages {
     const bx = x + Math.cos(ba) * (sq.r - 0.8), bz = z + Math.sin(ba) * (sq.r - 0.8);
     v.pieces.push({ type: 'barrel', x: bx, y: ground(bx, bz), z: bz, yaw: rnd() * 6 });
 
+    // The storehouse: on the square's edge, where no path comes in (always planned last,
+    // so the pieces before it keep their numbers).
+    {
+      const starts = v.paths.filter((s) => Math.hypot(s.ax - x, s.az - z) < sq.r + 1).map((s) => Math.atan2(s.az - z, s.ax - x));
+      starts.push(fa);
+      let best = 0, gap = -1;
+      for (let k = 0; k < 36; k++) {
+        const a = (k / 36) * Math.PI * 2;
+        let g = Math.PI;
+        for (const s of starts) { let d = Math.abs(a - s) % (Math.PI * 2); if (d > Math.PI) d = Math.PI * 2 - d; g = Math.min(g, d); }
+        if (g > gap) { gap = g; best = a; }
+      }
+      const d = sq.r + 1.6, stx = x + Math.cos(best) * d, stz = z + Math.sin(best) * d;
+      // Its open front (local -z) toward the well.
+      const syaw = Math.atan2(-(x - stx), -(z - stz));
+      v.store = { x: stx, z: stz, yaw: syaw };
+      // Levelled to stand on.
+      const pad: Rect = { x: stx, z: stz, yaw: syaw, hx: 1.9, hz: 1.4 };
+      const hs = [...corners(pad), [stx, stz] as [number, number]].map(([qx, qz]) => g.height(qx, qz));
+      const level = hs.reduce((a, b) => a + b, 0) / hs.length;
+      v.pads.push({ ...pad, level });
+      this.storePiece = { type: 'village_store', x: stx, y: level, z: stz, yaw: syaw };
+    }
     // How far it all reaches.
     let reach = sq.r;
     for (const r of rects()) for (const [qx, qz] of corners(r)) reach = Math.max(reach, Math.hypot(qx - x, qz - z));
     for (const s of v.paths) reach = Math.max(reach, Math.hypot(s.bx - x, s.bz - z) + s.w);
     v.r = reach + FALL;
+    if (this.storePiece) { v.pieces.push(this.storePiece); this.storePiece = undefined; }
     return v;
   }
 

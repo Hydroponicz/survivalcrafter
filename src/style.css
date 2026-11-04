@@ -128,6 +128,9 @@ button { font: inherit; cursor: pointer; }
 .window-inventory { right: 24px; top: 60px; width: 430px; }
 .window-character { right: 470px; top: 60px; width: 460px; }
 .window-container { left: 24px; top: 60px; width: 380px; }
+.window-store { right: 24px; top: 60px; width: 440px; max-height: 80vh; }
+.store-head { display: flex; flex-direction: column; gap: 2px; padding: 6px 8px; margin-bottom: 6px; background: rgba(232, 181, 98, 0.08); border-radius: 6px; font-size: 13px; }
+.window-store button[disabled] { opacity: 0.4; cursor: default; }
 .window-crafting { left: 24px; top: 60px; width: 560px; }
 .window-build { left: 24px; top: 60px; width: 560px; }
 .window-skills { left: 50%; top: 80px; width: 380px; transform: translateX(-50%); }

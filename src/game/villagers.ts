@@ -9,7 +9,8 @@
 // the same checks, timings, skills, results and animations. Each villager
 // has a stand-in for the game (Hands) that the actions act through, holding
 // their own inventory and skills, so what they make is real: crops in the
-// ground, logs on a pile, tools in their chest, meat and wool to be found.
+// ground, logs on a pile, and goods in the village's storehouse, which is
+// also where they get what they work with and eat (see economy.ts).
 //
 // Villagers live while you're near their village; leave, and they're let go
 // (their work stays done), to be woken again, going about their day, when
@@ -48,21 +49,26 @@ const SKIN = [0xc99474, 0xb07a58, 0xe0b090, 0x8a5a3c, 0xd8a07c];
 const HAIR = [0x3b2a1e, 0x1e1612, 0x6a4a2a, 0xa07040, 0x7a7068, 0xc8b890];
 const CLOTH = [0x8c7b5e, 0x6a5a40, 0x5a6a4a, 0x7a4a3a, 0x4a5a6a, 0x9a8a6a, 0x6a3a2a, 0x5a4a5a];
 
-/** Tools and stores each job starts with (and is restocked with each morning). */
+/**
+ * The tools of each trade (kept, and replaced if lost). Everything else they
+ * work with (seed, iron, fuel) comes out of the village's stores.
+ */
 const KIT: Record<HouseRole, [string, number][]> = {
-  farmer: [['iron_hoe', 1], ['scythe', 1], ['wheat_seeds', 24]],
+  farmer: [['iron_hoe', 1], ['scythe', 1]],
   shepherd: [['iron_knife', 1]],
   woodcutter: [['iron_hatchet', 1]],
   butcher: [['iron_knife', 1]],
-  smith: [['iron_hammer', 1], ['iron_tongs', 1], ['iron_lump', 3], ['shaft', 3], ['log', 3], ['kindling', 3]],
-  elder: [['log', 4], ['kindling', 3]],
-  villager: [],
+  smith: [['iron_hammer', 1], ['iron_tongs', 1]],
+  elder: [],
+  villager: [['iron_knife', 1]],
 };
 /** What each job is good at (skill levels). */
 const TRADE: Record<HouseRole, SkillId[]> = {
   farmer: ['farming'], shepherd: ['taming'], woodcutter: ['woodcutting', 'carpentry'], butcher: ['butchering'],
   smith: ['smithing', 'firemaking'], elder: ['firemaking'], villager: ['foraging'],
 };
+/** Finds lying about the village that its people gather, and what each gives. */
+const FIND_ITEM: Record<string, string> = { fallen_branch: 'branch', pebbles: 'rock_shard', fiber_grass: 'plant_fiber', flint: 'flint' };
 /** What the smith forges, in turn. */
 const SMITH_WORK = ['iron_knife', 'iron_hoe', 'iron_shovel', 'iron_hatchet', 'iron_pickaxe'];
 
@@ -135,6 +141,10 @@ export class Villager {
   private held = new THREE.Group();
   private heldKey = '';
   readonly hands: Hands;
+  /** Missed their last meal (the stores were bare): slower at work. */
+  hungry = false;
+  /** The day they last had supper. */
+  supper = -1;
   /** The last day they were restocked, and how many trees felled / beasts slaughtered that day. */
   day = -1;
   felled = 0;
@@ -208,6 +218,7 @@ export class VillageLife {
     this.checkT -= dt;
     if (this.checkT <= 0) { this.checkT = 1; this.refresh(); }
     const p = this.g.player.pos;
+    for (const [, list] of this.active) { const vil = list[0]?.village; if (vil) this.g.economy.trade(vil); }
     for (const v of this.villagers) {
       try {
         this.tick(v, dt);
@@ -290,7 +301,7 @@ export class VillageLife {
     telemetry.event('villagers', `${vil.name} comes to life: ${list.length} villagers`, { roles: list.map((v) => v.role) });
   }
 
-  /** Each morning: a fresh day's stores (bought, bartered, brought in: the wider world isn't simulated). */
+  /** Each morning: their tools seen to (a lost one replaced), and the day's counts reset. */
   private restock(v: Villager) {
     const day = this.g.world.day;
     if (v.day === day) return;
@@ -373,17 +384,43 @@ export class VillageLife {
     const a = (v.id * 2.399) % (Math.PI * 2);
     const spot = b && v.id % 3 === 0 ? { x: b.x + Math.sin(b.yaw) * 0.6, z: b.z + Math.cos(b.yaw) * 0.6 } : { x: vil.fire.x + Math.cos(a) * 3, z: vil.fire.z + Math.sin(a) * 3 };
     this.walkTo(v, spot, 'off to lunch');
-    v.steps.push({ kind: 'pose', clip: 'eat', time: 40, face: vil.fire, doing: 'eating lunch in the square' });
+    v.steps.push({ kind: 'call', fn: () => this.meal(v) });
+    v.steps.push({ kind: 'pose', clip: v.hungry ? 'idle' : 'eat', time: 40, face: vil.fire, doing: v.hungry ? 'waiting for a meal that isn\'t coming' : 'eating lunch in the square' });
   }
 
   private evening(v: Villager) {
     const vil = v.village;
     const fire = this.structureAt(vil.fire, 'campfire');
     // The elder sees to the fire; everyone gathers round it.
-    if (v.role === 'elder' && fire && !fire.lit) { this.keepFire(v, fire, 'lighting the evening fire'); if (v.steps.length) return; }
+    if (v.role === 'elder' && fire) {
+      if (!fire.lit) { this.keepFire(v, fire, 'lighting the evening fire'); if (v.steps.length) return; }
+      else if (this.cookSupper(v, fire)) return;
+    }
+    // Supper (once an evening) from the stores.
+    if (v.supper !== this.g.world.day) { v.supper = this.g.world.day; v.steps.push({ kind: 'call', fn: () => this.meal(v) }); }
     const a = (v.id * 2.399 + Math.floor(this.g.world.time / 60)) % (Math.PI * 2), r = 2.4 + (v.id % 3) * 0.5;
     this.walkTo(v, { x: vil.fire.x + Math.cos(a) * r, z: vil.fire.z + Math.sin(a) * r }, 'heading to the fire');
     v.steps.push({ kind: 'pose', clip: v.id % 4 === 0 ? 'interact' : 'idle', time: 30 + Math.random() * 30, face: vil.fire, doing: 'sitting out the evening by the fire' });
+  }
+
+  /** A meal from the village's stores (or none, if they're bare). */
+  private meal(v: Villager) {
+    v.hungry = !this.g.economy.eat(v.village);
+  }
+
+  /** The elder cooks the village's supper over the square's fire: meat from the stores, cooked and put back. */
+  private cookSupper(v: Villager, fire: StructureObj): boolean {
+    const eco = this.g.economy, vil = v.village;
+    if (v.inv.count('raw_meat') === 0) {
+      if (eco.stock(vil, 'raw_meat') === 0 || eco.stock(vil, 'cooked_meat') >= eco.want(vil, 'cooked_meat')) return false;
+      this.fetch(v, [['raw_meat', 4]], 'fetching meat for the pot');
+      return true;
+    }
+    const r = RECIPES.find((x) => x.id === 'cooked_meat')!;
+    this.walkTo(v, standBy(fire, v.pos, 1.0), 'cooking supper');
+    for (let k = 0; k < v.inv.count('raw_meat'); k++) this.queueAct(v, 'craft', objTarget(fire), undefined, 'cooking supper over the fire', r, 'interact');
+    this.store(v, ['cooked_meat'], 'putting supper by');
+    return true;
   }
 
   private goToBed(v: Villager) {
@@ -424,9 +461,19 @@ export class VillageLife {
   /** The farmer: reap what's ripe, sow what's bare, weed what's growing, plough what's gone back to grass. */
   private farm(v: Villager) {
     const w = this.g.world, t = w.terrain;
-    if (v.inv.count('wheat') >= 12) { this.store(v, ['wheat'], 'taking the harvest home'); return; }
+    const eco = this.g.economy;
+    if (v.inv.count('wheat') >= 12 || v.inv.count('wheat_seeds') > 30) {
+      // The harvest to the stores (keeping a bag of seed back for sowing).
+      const spare = v.inv.ofType('wheat_seeds').slice(20).map((i) => i.uid);
+      this.store(v, ['wheat'], 'taking the harvest to the stores');
+      if (spare.length) v.steps.push({ kind: 'call', fn: () => { const items = spare.map((u) => v.inv.remove(u)).filter((i): i is Item => !!i); eco.put(v.village, items); } });
+      return;
+    }
     const cells = fieldCells(v.village);
     if (!cells.length) return;
+    // Seed for sowing, from the stores.
+    if (v.inv.count('wheat_seeds') === 0 && cells.some((c) => !w.crops.has(cropKey(c.x, c.z)) && t.topAt(c.x, c.z) === Mat.Field)
+      && this.fetch(v, [['wheat_seeds', 12]], 'fetching seed from the stores')) return;
     const hoe = v.inv.items.find((i) => i.type === 'iron_hoe'), scythe = v.inv.items.find((i) => i.type === 'scythe');
     type Job = { cell: Spot; id: string; tool?: Item; doing: string; rank: number };
     const jobs: Job[] = [];
@@ -464,9 +511,19 @@ export class VillageLife {
   /** The woodcutter: split the logs in hand at the block, store planks, else fell a tree out past the houses (two a day), and plant a sprout for it. */
   private cutWood(v: Villager) {
     const block = v.home.block && this.structureAt(v.home.block, 'chopping_block');
-    if (v.inv.count('plank') >= 6) { this.store(v, ['plank'], 'stacking planks'); return; }
+    const eco = this.g.economy, vil = v.village;
+    if (v.inv.count('plank') >= 6 || v.inv.count('kindling') >= 8) { this.store(v, ['plank', 'kindling'], 'taking planks to the stores'); return; }
     const hatchet = v.inv.items.find((i) => i.type === 'iron_hatchet');
     if (!hatchet) return;
+    // Firewood running short in the stores: logs go in whole.
+    if (v.inv.count('log') > 0 && eco.stock(vil, 'log') < eco.want(vil, 'log') / 2) { this.store(v, ['log'], 'taking firewood to the stores'); return; }
+    // Kindling running short: a plank split down.
+    if (v.inv.count('plank') > 0 && block && eco.stock(vil, 'kindling') < eco.want(vil, 'kindling') / 2) {
+      const r = RECIPES.find((x) => x.id === 'kindling_plank')!;
+      this.walkTo(v, standBy(block, v.pos, 0.75), 'splitting kindling');
+      this.queueAct(v, 'craft', objTarget(block), hatchet, 'splitting kindling', r, 'chop');
+      return;
+    }
     if (v.inv.count('log') > 0 && block) {
       const r = RECIPES.find((x) => x.id === 'split_planks')!;
       this.walkTo(v, standBy(block, v.pos, 0.75), 'carrying a log to the block');
@@ -614,7 +671,11 @@ export class VillageLife {
     if (!forge || !anvil) return;
     const made = v.inv.items.filter((i) => SMITH_WORK.includes(i.type) && !i.hot);
     if (made.length >= 2) { this.store(v, SMITH_WORK, 'taking the new tools in'); return; }
-    if (!forge.lit) { this.keepFire(v, forge, 'firing up the forge'); return; }
+    if (!forge.lit) { this.keepFire(v, forge, 'firing up the forge'); if (v.steps.length) return; }
+    // Iron and handles from the stores.
+    if ((v.inv.count('iron_lump') === 0 || v.inv.count('shaft') === 0) && !v.inv.items.some((i) => i.hot)
+      && this.fetch(v, [['iron_lump', 2], ['shaft', 2]], 'fetching iron from the stores')) return;
+    if (!forge.lit) return;
     const hot = v.inv.items.find((i) => i.hot);
     const trough = this.g.world.near(sm.anvil.x, sm.anvil.z, 4).find((o): o is StructureObj => o.kind === 'structure' && o.type === 'quench_trough');
     if (hot && trough) {
@@ -639,6 +700,10 @@ export class VillageLife {
   /** Feed a fire (a forge or the square's) and light it: the player's Add fuel and Light fire. */
   private keepFire(v: Villager, s: StructureObj, doing: string) {
     const stand = standBy(s, v.pos, 1.0);
+    const fuel = v.inv.count('log') + v.inv.count('branch') + v.inv.count('plank');
+    if ((s.fuel < 400 && fuel === 0) || (!s.lit && v.inv.count('kindling') === 0)) {
+      if (this.fetch(v, [[['log', 'plank', 'branch'], 3], ['kindling', 2]], 'fetching fuel from the stores')) return;
+    }
     if (s.fuel < 400 && (v.inv.count('log') + v.inv.count('branch') + v.inv.count('plank')) > 0) {
       this.walkTo(v, stand, doing);
       this.queueAct(v, 'add_fuel', objTarget(s), undefined, doing);
@@ -669,14 +734,27 @@ export class VillageLife {
   private gather(v: Villager) {
     const vil = v.village;
     const haul = v.inv.items.filter((i) => ['branch', 'rock_shard', 'small_rock', 'plant_fiber', 'flint'].includes(i.type)).length;
-    if (haul >= 8) { this.store(v, ['branch', 'rock_shard', 'small_rock', 'plant_fiber', 'flint'], 'bringing in what they gathered'); return; }
+    if (haul >= 8 || v.inv.count('shaft') >= 3) { this.store(v, ['branch', 'rock_shard', 'small_rock', 'plant_fiber', 'flint', 'shaft'], 'bringing in what they gathered'); return; }
+    // Whittle shafts (for tool handles) from branches in the stores, when the smith is short.
+    const eco = this.g.economy, knife = v.inv.items.find((i) => i.type === 'iron_knife');
+    if (knife && eco.stock(vil, 'shaft') < eco.want(vil, 'shaft') && vil.store) {
+      if (v.inv.count('branch') === 0) { if (this.fetch(v, [['branch', 3]], 'fetching branches to whittle')) return; }
+      else {
+        const r = RECIPES.find((x) => x.id === 'shaft')!;
+        const [bx, bz] = local(vil.store, 0.9, -1.5);
+        this.walkTo(v, { x: bx, z: bz }, 'whittling shafts');
+        for (let k = 0; k < Math.min(3, v.inv.count('branch')); k++) this.queueAct(v, 'craft', terrainTarget(this.g, { x: bx, z: bz }), knife, 'whittling shafts', r, 'craft');
+        return;
+      }
+    }
     if (Math.random() < 0.25) {
       this.walkTo(v, { x: vil.x + 1.2, z: vil.z + 0.4 }, 'fetching water');
       v.steps.push({ kind: 'pose', clip: 'interact', time: 8, face: vil, doing: 'drawing water at the well' });
       return;
     }
-    const finds = this.g.world.near(vil.x, vil.z, vil.r + 30).filter((o) => o.kind === 'forage'
-      && ['fallen_branch', 'pebbles', 'fiber_grass', 'flint'].includes(o.species));
+    // Only what the stores are short of.
+    const wanted = Object.entries(FIND_ITEM).filter(([, item]) => eco.stock(vil, item) < eco.want(vil, item) * 1.5).map(([sp]) => sp);
+    const finds = this.g.world.near(vil.x, vil.z, vil.r + 30).filter((o) => o.kind === 'forage' && wanted.includes(o.species));
     let at: Spot = v.pos;
     for (let k = 0; k < 4 && finds.length; k++) {
       finds.sort((a, b) => dist(a, at) - dist(b, at));
@@ -689,6 +767,20 @@ export class VillageLife {
 
   /** Carry these things home and put them in the chest. */
   private store(v: Villager, types: string[], doing: string) {
+    const vil = v.village, sh = vil.store;
+    // To the village's storehouse (into the shared stores)...
+    if (sh && this.g.economy.storehouse(vil)) {
+      const [fx, fz] = local(sh, 0, -1.25);
+      this.walkTo(v, { x: fx, z: fz }, doing);
+      v.steps.push({ kind: 'pose', clip: 'interact', time: 1.5, face: sh, doing });
+      v.steps.push({ kind: 'call', fn: () => {
+        const goods = v.inv.items.filter((it) => types.includes(it.type) && !it.hot);
+        for (const it of goods) v.inv.remove(it.uid);
+        if (this.g.economy.put(vil, goods) < goods.length) for (const it of goods) v.inv.add(it);
+      } });
+      return;
+    }
+    // ...or, if it isn't about, home to the chest.
     const h = v.home;
     this.walkTo(v, standBy(h.chest, { x: h.x, z: h.z }, 0.7), doing, true);
     v.steps.push({ kind: 'pose', clip: 'interact', time: 1.5, face: h.chest, doing });
@@ -709,6 +801,23 @@ export class VillageLife {
     } });
   }
 
+  /**
+   * Fetch what's needed from the village's stores (as many as there are, up to
+   * so many of each; the first of a list of alternatives that's in stock).
+   * False if there's none of anything to be had.
+   */
+  private fetch(v: Villager, wants: [string | string[], number][], doing: string): boolean {
+    const vil = v.village, sh = vil.store, eco = this.g.economy;
+    if (!sh || !eco.storehouse(vil)) return false;
+    const pick = wants.map(([t, n]) => [(Array.isArray(t) ? t : [t]).find((x) => eco.stock(vil, x) > 0), n] as const).filter(([t]) => !!t);
+    if (!pick.length) return false;
+    const [fx, fz] = local(sh, 0, -1.25);
+    this.walkTo(v, { x: fx, z: fz }, doing);
+    v.steps.push({ kind: 'pose', clip: 'interact', time: 1.5, face: sh, doing });
+    v.steps.push({ kind: 'call', fn: () => { for (const [t, n] of pick) for (const it of eco.take(vil, t!, n)) v.inv.add(it); } });
+    return true;
+  }
+
   // ---------- doing an action, the player's way
   private queueAct(v: Villager, id: string, t: Target, tool: Item | undefined | (() => Item | undefined), doing: string, recipe?: Recipe, clip?: Clip) {
     v.steps.push({ kind: 'call', fn: () => {
@@ -726,7 +835,7 @@ export class VillageLife {
       // The same checks the player meets (crafting's are about the player's own stations: the job has seen to its own).
       const problem = s.id === 'craft' ? (s.recipe && s.recipe.inputs.every((i) => v.inv.count(i.item) >= i.count) ? null : 'nothing to work') : def.check?.(ctx) ?? null;
       if (problem) { v.steps.shift(); return; }
-      s.total = def.instant ? 0.75 : this.duration(v, def, ctx);
+      s.total = def.instant ? 0.75 : this.duration(v, def, ctx) * (v.hungry ? 1.4 : 1);
     }
     v.doing = s.doing ?? v.doing;
     s.elapsed += dt;

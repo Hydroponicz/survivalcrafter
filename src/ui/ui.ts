@@ -19,8 +19,17 @@ import { QUICK_MARGIN, type Game, type MsgKind } from '../game/game';
 import { minigameVerb, RECIPE_MINIGAMES } from '../game/minigames';
 import { MAT_NAMES } from '../world/terrain';
 import { ANIMALS, CART_CAPACITY, cropKey, type CartObj, type PileObj, type StructureObj } from '../world/world';
+import { GOODS } from '../game/economy';
+import type { HouseRole } from '../world/villages';
 
-type WindowName = 'inventory' | 'character' | 'crafting' | 'skills' | 'build' | 'help' | 'container' | 'dev' | 'journal' | 'quests' | 'map';
+/** Whose work a good is, as a work order puts it. */
+const JOB_WORDS: Record<HouseRole, string> = {
+  farmer: 'farmer\'s work', shepherd: 'shepherd\'s work', woodcutter: 'woodcutter\'s work', butcher: 'butcher\'s work',
+  smith: 'smith\'s work', elder: 'odd jobs', villager: 'gathering about the land',
+};
+const fmtCoins = (n: number) => (Number.isInteger(n) ? `${n}` : n.toFixed(1));
+
+type WindowName = 'inventory' | 'character' | 'crafting' | 'skills' | 'build' | 'help' | 'container' | 'dev' | 'journal' | 'quests' | 'map' | 'store';
 
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, html?: string) => {
   const e = document.createElement(tag);
@@ -63,6 +72,8 @@ export class UI {
   private started = false;
   private damageEl: HTMLElement;
   private container: StructureObj | PileObj | CartObj | null = null;
+  /** The village storehouse being traded at. */
+  private storeObj: StructureObj | null = null;
   private craftCategory = 'Primitive';
   private expanded = new Set<string>();
   private refreshTimer = 0;
@@ -126,7 +137,7 @@ export class UI {
       this.bars[k] = b.querySelector('.bar-fill')!;
     }
 
-    for (const name of ['inventory', 'character', 'crafting', 'skills', 'build', 'help', 'container', 'dev', 'journal', 'quests', 'map'] as WindowName[]) {
+    for (const name of ['inventory', 'character', 'crafting', 'skills', 'build', 'help', 'container', 'dev', 'journal', 'quests', 'map', 'store'] as WindowName[]) {
       const w = el('div', `window window-${name}`);
       w.style.display = 'none';
       w.addEventListener('mousedown', (e) => {
@@ -351,6 +362,7 @@ export class UI {
     this.lastHtml.delete(name);
     this.pendingRender.delete(name);
     if (name === 'container') this.container = null;
+    if (name === 'store') this.storeObj = null;
     if (name === 'inventory') this.hoveredItem = null;
     if (!this.anyWindowOpen() && !this.g.input.locked) this.wantsRelock = true;
   }
@@ -369,6 +381,11 @@ export class UI {
     if (e.code === 'Escape' && this.open.size) {
       for (const n of [...this.open]) this.close(n);
     }
+  }
+
+  openStore(o: StructureObj) {
+    this.storeObj = o;
+    this.show('store');
   }
 
   openContainer(o: StructureObj | PileObj | CartObj) {
@@ -625,6 +642,11 @@ export class UI {
       this.refreshTimer = 0.5;
       if (this.open.has('crafting')) this.render('crafting');
       if (this.open.has('skills')) this.render('skills');
+      if (this.open.has('store') && this.storeObj) {
+        const s = this.storeObj;
+        if (Math.hypot(s.x - p.pos.x, s.z - p.pos.z) > 6 || !g.world.objects.has(s.id)) this.close('store');
+        else this.render('store');
+      }
       if (this.open.has('container') && this.container) {
         const c = this.container;
         if (Math.hypot(c.x - p.pos.x, c.z - p.pos.z) > 5 || (c.kind === 'cart' ? !g.world.carts.includes(c) : !g.world.objects.has(c.id))) this.close('container');
@@ -735,6 +757,7 @@ export class UI {
       case 'build': return this.renderBuild();
       case 'help': return this.renderHelp();
       case 'container': return this.renderContainer();
+      case 'store': return this.renderStore();
       case 'dev': return this.renderDev();
       case 'journal': return this.renderJournal();
       case 'quests': return this.renderQuests();
@@ -779,7 +802,7 @@ export class UI {
     const g = this.g;
     const body = el('div');
     const w = g.inv.weight();
-    const carrying = el('div', 'inv-weight', `Carrying <b>${w.toFixed(1)}</b> / ${g.carryCapacity()} kg${w > g.carryCapacity() ? ' — <span class="warn">overloaded, you move slowly</span>' : ''}`);
+    const carrying = el('div', 'inv-weight', `Carrying <b>${w.toFixed(1)}</b> / ${g.carryCapacity()} kg${w > g.carryCapacity() ? ' — <span class="warn">overloaded, you move slowly</span>' : ''} · Purse: <b>${fmtCoins(g.coins)}</b> coins`);
     carrying.dataset.tip = weightTip(g.inv.items, g.carryCapacity(), 'Over this you move slowly.');
     body.appendChild(carrying);
     body.appendChild(el('div', 'hint', 'Click <b>Use</b> to equip an item (tools, seeds, dirt…). Drag an item onto the hotbar, or hover over it and press <b>1-9</b>, to add it there.'));
@@ -959,6 +982,80 @@ export class UI {
     }
     const title = c.kind === 'pile' ? 'Pile on the ground' : c.kind === 'cart' ? (c.type === 'ox_cart' ? 'Ox cart' : 'Hand cart') : STRUCTURES[c.type].name;
     this.frame('container', title, body);
+  }
+
+  /** The village storehouse: its treasury, its work orders, and its goods to buy and sell. */
+  private renderStore() {
+    const g = this.g, s = this.storeObj;
+    if (!s) return;
+    const eco = g.economy, v = eco.villageOf(s);
+    const body = el('div');
+    if (!v) { body.appendChild(el('div', 'empty', 'This storehouse belongs to no village.')); this.frame('store', 'Storehouse', body); return; }
+    const l = eco.ledger(v);
+    const meals = eco.meals(v), pop = eco.population(v);
+    body.appendChild(el('div', 'store-head',
+      `<span>Your purse: <b>${fmtCoins(g.coins)}</b> coins</span><span>Village treasury: <b>${fmtCoins(l.treasury)}</b></span>`
+      + `<span>Food: <b>${Math.floor(meals)}</b> meals for ${pop} people${meals < pop ? ' <span class="warn">(running short)</span>' : ''}${l.hungry ? ` · <span class="warn">${l.hungry} went hungry today</span>` : ''}</span>`));
+    const btn = (label: string, tip: string, fn: () => void, off = false) => {
+      const b = el('button', '', label);
+      b.dataset.tip = tip;
+      if (off) b.setAttribute('disabled', '');
+      b.addEventListener('click', (e) => { e.stopPropagation(); fn(); this.refresh(); });
+      return b;
+    };
+    // Work you've taken on here.
+    const mine = eco.orders.filter((o) => o.village === `${v.cx},${v.cz}`);
+    if (mine.length) {
+      body.appendChild(el('h3', '', 'Your work orders'));
+      for (const o of mine) {
+        const have = g.inv.count(o.item);
+        const row = el('div', 'item-row');
+        row.innerHTML = `<span class="icon">${itemIcon(o.item)}</span><span class="name">${esc(itemDef(o.item).name)} <b>${o.delivered}/${o.count}</b>`
+          + `<small>${o.each} coins each, +${o.bonus} when done · you have ${have}</small></span>`;
+        const b = el('span', 'btns');
+        b.append(
+          btn('Deliver', `Hand over what you have (up to ${o.count - o.delivered}), and get paid.`, () => eco.sell(v, g.inv.ofType(o.item).slice(0, o.count - o.delivered)), have === 0),
+          btn('Drop', 'Give up this work order.', () => eco.dropOrder(o)),
+        );
+        row.appendChild(b);
+        body.appendChild(row);
+      }
+    }
+    // What the village wants brought in.
+    const open = eco.openOrders(v).slice(0, 8);
+    body.appendChild(el('h3', '', 'Work wanted'));
+    body.appendChild(el('div', 'hint', 'The village is short of these. Take on an order and bring them here: paid per item, with a bonus when it\'s done. It\'s the work its own people do, open to you.'));
+    if (!open.length) body.appendChild(el('div', 'empty', 'Nothing wanted just now: the stores are full.'));
+    for (const o of open) {
+      const row = el('div', 'item-row');
+      const who = o.job ? JOB_WORDS[o.job] : 'bought in from merchants (bring your own)';
+      row.innerHTML = `<span class="icon">${itemIcon(o.item)}</span><span class="name">${o.count} × ${esc(itemDef(o.item).name)}`
+        + `<small>${esc(who)} · ${o.each} coins each, +${o.bonus} bonus</small></span>`;
+      const b = el('span', 'btns');
+      b.append(btn('Take on', 'Take on this work order. Your work orders are listed in the quest log (J).', () => eco.takeOrder(o)));
+      row.appendChild(b);
+      body.appendChild(row);
+    }
+    // Goods: what's in store, what it wants, what it pays and asks.
+    body.appendChild(el('h3', '', 'Goods'));
+    body.appendChild(el('div', 'hint', 'Prices follow supply and demand: what the village is short of, it pays well for (and charges well for).'));
+    const goods = Object.keys(GOODS).sort((a, b) => itemDef(a).name.localeCompare(itemDef(b).name));
+    for (const item of goods) {
+      const stock = eco.stock(v, item), want = eco.want(v, item), have = g.inv.count(item);
+      if (!stock && !have) continue;
+      const buy = eco.price(v, item, 'buy'), sell = eco.price(v, item, 'sell');
+      const row = el('div', 'item-row');
+      row.innerHTML = `<span class="icon">${itemIcon(item)}</span><span class="name">${esc(itemDef(item).name)} <b>${stock}</b><small>wants ${want} · buy ${buy} · sells to it for ${sell}${have ? ` · you have ${have}` : ''}</small></span>`;
+      const b = el('span', 'btns');
+      b.append(
+        btn(`Buy (${buy})`, `Buy one for ${buy} coins.`, () => eco.buy(v, item), !stock || g.coins < buy),
+        btn('Sell 1', `Sell one for ${sell} coins.`, () => eco.sell(v, g.inv.ofType(item).slice(-1)), !have),
+        btn('Sell all', `Sell all ${have} for about ${fmtCoins(sell * have)} coins.`, () => eco.sell(v, g.inv.ofType(item)), have < 2),
+      );
+      row.appendChild(b);
+      body.appendChild(row);
+    }
+    this.frame('store', `${esc(v.name)} storehouse`, body);
   }
 
   private recipeRow(r: Recipe): HTMLElement {
@@ -1218,6 +1315,14 @@ export class UI {
     const g = this.g, log = g.quests;
     const body = el('div');
     body.appendChild(el('div', 'hint', 'You can have multiple quests active. <b>Track</b> the one you\'re working on to mark its objectives in the world. <b>Pinned</b> quests show in the panel on screen; unpin one to hide it (you keep your progress).'));
+    // Village work orders you've taken on.
+    if (g.economy.orders.length) {
+      body.appendChild(el('h3', '', 'Village work orders'));
+      for (const o of g.economy.orders) {
+        body.appendChild(el('div', 'quest-row quest-active', `<div class="quest-row-head"><b>${o.count} × ${esc(itemDef(o.item).name)} for ${esc(o.villageName)}</b> <small>${o.delivered}/${o.count} delivered</small></div>`
+          + `<div class="quest-summary">Bring them to ${esc(o.villageName)}'s storehouse (Trade and work orders). ${o.each} coins each, +${o.bonus} when done. You have ${g.inv.count(o.item)}.</div>`));
+      }
+    }
     if (!log || !log.quests.length) {
       body.appendChild(el('div', 'quest-none', 'No quests yet.'));
       this.frame('quests', 'Quests', body);

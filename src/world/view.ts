@@ -1233,6 +1233,25 @@ export function buildPieceMesh(type: string, state: { lit?: boolean; open?: bool
       }
       break;
     }
+    case 'village_store': {
+      // Posts, a back wall, a thatched lean-to roof; a counter in front, goods behind.
+      for (const [x, z] of [[-1.55, -1.1], [1.55, -1.1], [-1.55, 1.1], [1.55, 1.1]]) tex(new THREE.BoxGeometry(0.16, z < 0 ? 2.5 : 2.1, 0.16), 'rough_wood', x, z < 0 ? 1.25 : 1.05, z);
+      tex(new THREE.BoxGeometry(3.2, 2.1, 0.12), 'dark_planks', 0, 1.05, 1.1);
+      for (const x of [-1.55, 1.55]) tex(new THREE.BoxGeometry(0.1, 1.0, 2.1), 'dark_planks', x, 0.5, 0);
+      const roof = tex(new THREE.BoxGeometry(3.6, 0.14, 2.9), 'thatch', 0, 2.38, 0);
+      roof.rotation.x = -0.2;
+      tex(new THREE.BoxGeometry(3.0, 0.9, 0.5), 'planks', 0, 0.45, -0.55);
+      tex(new THREE.BoxGeometry(3.1, 0.08, 0.62), 'dark_planks', 0, 0.94, -0.55, { turn: true });
+      // Goods: crates, a barrel, sacks of grain, a stack of planks.
+      for (const [x, y, s] of [[-1.0, 0.25, 0.5], [-1.0, 0.75, 0.45], [-0.45, 0.22, 0.44]]) tex(new THREE.BoxGeometry(s, s, s), 'planks', x, y, 0.65);
+      tex(new THREE.CylinderGeometry(0.28, 0.3, 0.75, 12), 'dark_planks', 0.25, 0.38, 0.6);
+      for (const [x, z] of [[0.9, 0.55], [1.15, 0.75], [1.0, 0.25]]) {
+        const sack = add(new THREE.SphereGeometry(0.26, 8, 6).scale(1, 0.85, 1), 0xb8a070, x, 0.22, z, { roughness: 1 });
+        sack.rotation.y = x;
+      }
+      for (let k = 0; k < 4; k++) tex(new THREE.BoxGeometry(1.2, 0.05, 0.22), 'planks', 0.4, 1.05 + k * 0.05, 0.85, { turn: true });
+      break;
+    }
     case 'well': {
       // A ring of stone round dark water, two posts, a winch and a little thatched roof.
       const ring = new THREE.CylinderGeometry(0.85, 0.9, 0.9, 18, 1, true);

@@ -768,7 +768,7 @@ export const ACTIONS: ActionDef[] = [
   },
   {
     id: 'demolish', label: 'Demolish',
-    show: (c) => { const s = obj(c, 'structure'); return !!s && s.built && !STRUCTURES[s.type].item && (toolIs(c, 'hammer') || toolIs(c, 'hatchet')); },
+    show: (c) => { const s = obj(c, 'structure'); return !!s && s.built && !STRUCTURES[s.type].item && s.type !== 'village_store' && (toolIs(c, 'hammer') || toolIs(c, 'hatchet')); },
     time: 12, skill: 'carpentry', difficulty: 5, stamina: 15, toolWear: 0.2,
     run: (c) => {
       const s = obj(c, 'structure')!;
@@ -844,9 +844,16 @@ export const ACTIONS: ActionDef[] = [
   },
   {
     id: 'open_container', label: 'Open',
-    show: (c) => { const s = obj(c, 'structure'); return !!s && s.built && !!STRUCTURES[s.type].container; },
+    show: (c) => { const s = obj(c, 'structure'); return !!s && s.built && !!STRUCTURES[s.type].container && s.type !== 'village_store'; },
     time: 0,
     run: (c) => c.g.ui.openContainer(obj(c, 'structure')!),
+  },
+  {
+    // The village's stores: buy and sell, and take on its work.
+    id: 'open_store', label: 'Trade and work orders',
+    show: (c) => obj(c, 'structure')?.type === 'village_store',
+    time: 0,
+    run: (c) => c.g.ui.openStore(obj(c, 'structure')!),
   },
   {
     id: 'toggle_open', label: (c) => `${obj(c, 'structure')!.open ? 'Close' : 'Open'} ${obj(c, 'structure')!.type === 'gate' ? 'gate' : 'door'}`,

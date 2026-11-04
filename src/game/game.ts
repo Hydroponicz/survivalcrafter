@@ -51,6 +51,7 @@ import { QuestLog } from './quests';
 import { Combat } from './combat';
 import { WorldMap } from '../ui/worldmap';
 import { VillageLife } from './villagers';
+import { Economy } from './economy';
 
 const REACH = 4.5;
 /** Skill above a task's difficulty needed to do it the quick way. */
@@ -103,6 +104,10 @@ export class Game {
   view: WorldView;
   /** The villagers of the villages near you. */
   life!: VillageLife;
+  /** The villages' stores, treasuries and your work orders. */
+  economy = new Economy(this);
+  /** Your purse. */
+  coins = 20;
   player = new Player();
   inv = new Inventory();
   skills = new Skills();
@@ -2370,6 +2375,8 @@ export class Game {
         quests: this.quests?.serialize() ?? null,
         tips: [...this.tips],
         explored: this.map.serialize(),
+        economy: this.economy.serialize(),
+        coins: this.coins,
       };
       await writeSave(SAVE_KEY, data);
       telemetry.count('save:ok');
@@ -2519,6 +2526,8 @@ export class Game {
       g.setActive(data.active);
       g.tips = new Set(data.tips ?? []);
       g.map.load(data.explored);
+      g.economy.load(data.economy);
+      g.coins = data.coins ?? 20;
       const quests = data.quests ?? data.onboarding;
       if (quests) g.quests = QuestLog.load(g.markerTex, quests);
       return g;

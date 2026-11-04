@@ -175,6 +175,12 @@ defs.push({ id: 'well', name: 'Village well', icon: '🪣', category: 'Crafting'
   materials: [{ item: 'rock_shard', count: 20 }, { item: 'mortar', count: 4 }, { item: 'plank', count: 4 }], tool: 'hammer', skill: 'masonry', difficulty: 15, stepTime: 3,
   desc: 'The village well: deep, clean water.' });
 
+// The village storehouse: an open-fronted shed of crates, sacks and barrels on the square.
+defs.push({ id: 'village_store', name: 'Village storehouse', icon: '🏪', category: 'Crafting', snap: false, village: true,
+  boxes: [box(0, 1.1, 1.05, 1.6, 1.1, 0.12), box(0, 0.5, 0.45, 1.5, 0.5, 0.55), box(-1.55, 1.1, 0, 0.08, 1.1, 1.15), box(1.55, 1.1, 0, 0.08, 1.1, 1.15)], snaps: [],
+  materials: [{ item: 'plank', count: 16 }, { item: 'log', count: 4 }, { item: 'plant_fiber', count: 12 }], tool: 'hammer', skill: 'carpentry', difficulty: 12, stepTime: 3,
+  container: 2000, desc: 'The village\'s shared stores: what its people make, and what they live on. Trade with the village here, and take on its work orders.' });
+
 // A torch planted in the ground: it burns (its fuel is the burn left) and lights the spot.
 defs.push({ id: 'standing_torch', name: 'Torch', icon: '🔥', category: 'Crafting', snap: false, item: 'torch',
   boxes: [box(0, 0.55, 0, 0.09, 0.55, 0.09)], snaps: [], materials: [], skill: 'firemaking', difficulty: 1, stepTime: 0,
