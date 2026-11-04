@@ -160,6 +160,16 @@ function fillItem(g: Game): string | undefined {
 const FILL_MAT: Record<string, Mat> = { dirt: Mat.Dirt, sand: Mat.Sand, clay: Mat.Clay };
 
 // ---------- actions
+/** Floors a torch can be stood on (in a ring of stones). */
+const FLOORS = new Set(['floor', 'stone_foundation']);
+/** The top of the floor you're looking at, if you're looking down onto one (null otherwise). */
+function floorTop(c: Ctx): number | null {
+  const s = obj(c, 'structure');
+  if (!s || !s.built || !FLOORS.has(s.type) || c.t.kind !== 'object') return null;
+  const b = STRUCTURES[s.type].boxes[0], top = s.y + b.c[1] + b.h[1];
+  return Math.abs(c.t.point.y - top) < 0.12 ? top : null;
+}
+
 /** Torches set down in the world: planted in the ground, or on a wall. */
 const TORCHES = new Set(['standing_torch', 'wall_torch']);
 /** What a torch can be mounted on: walls (built ones), and the faces of town houses. */
@@ -183,10 +193,23 @@ function wallFace(c: Ctx): { x: number; y: number; z: number; yaw: number } | nu
   // (Which side: yours, by where your eye is.)
   const sg = alongZ ? Math.sign(ez - b.c[2]) || 1 : Math.sign(ex - b.c[0]) || 1;
   const fx = alongZ ? lx : b.c[0] + sg * (b.h[0] + 0.01), fz = alongZ ? b.c[2] + sg * (b.h[2] + 0.01) : lz;
-  const lo = b.c[1] - b.h[1] + 0.5, hi = b.c[1] + b.h[1] - 0.45;
+  // Heights over the whole piece (a windowed wall is a sill, two posts and a lintel), off the floor and the top.
+  const boxes = STRUCTURES[s.type].boxes;
+  const lo = Math.min(...boxes.map((q) => q.c[1] - q.h[1])) + 0.5, hi = Math.max(...boxes.map((q) => q.c[1] + q.h[1])) - 0.45;
   if (hi < lo) return null;
-  const fy = Math.max(lo, Math.min(hi, ly));
-  const [x, y, z] = toWorld(s, [fx, fy, fz]);
+  let fy = Math.max(lo, Math.min(hi, ly)), fu = alongZ ? fx : fz;
+  // Not hanging in a window: onto the nearest solid part of the face.
+  const ax = alongZ ? 0 : 2, inside = (q: typeof b) => Math.abs(fu - q.c[ax]) <= q.h[ax] && Math.abs(fy - q.c[1]) <= q.h[1];
+  if (!boxes.some(inside)) {
+    let best = Infinity, bu = fu, bv = fy;
+    for (const q of boxes) {
+      const u = Math.max(q.c[ax] - q.h[ax] + 0.1, Math.min(q.c[ax] + q.h[ax] - 0.1, fu)), v = Math.max(Math.max(lo, q.c[1] - q.h[1]), Math.min(Math.min(hi, q.c[1] + q.h[1]), fy));
+      const d = Math.hypot(u - fu, v - fy);
+      if (d < best && v >= lo - 0.01 && v <= hi + 0.01) { best = d; bu = u; bv = v; }
+    }
+    fu = bu; fy = bv;
+  }
+  const [x, y, z] = toWorld(s, alongZ ? [fu, fy, fz] : [fx, fy, fu]);
   // Its own +z points out of the face: the wall's +z or -z (or +x / -x for a town house's end).
   const yaw = alongZ ? s.yaw + (sg > 0 ? 0 : Math.PI) : s.yaw + (sg > 0 ? Math.PI / 2 : -Math.PI / 2);
   return { x, y, z, yaw };
@@ -497,24 +520,28 @@ export const ACTIONS: ActionDef[] = [
   // ===== torches
   {
     id: 'plant_torch', label: 'Plant torch here',
-    show: (c) => isGround(c) && c.g.activeItem()?.type === 'torch',
+    show: (c) => c.g.activeItem()?.type === 'torch' && (isGround(c) || !!floorTop(c)),
     check: (c) => {
-      if (!isGround(c)) return null;
-      if (!isSoft(c.t.mat) || c.t.mat === Mat.Gravel) return 'A torch can only be planted in soft ground: grass, dirt, sand or clay, not rock or gravel.';
-      if (c.t.normal.y < 0.6) return 'The ground is too steep to plant a torch here.';
-      if (c.t.point.y < c.g.world.terrain.waterAt(c.t.point.x, c.t.point.z)) return 'Not under water.';
+      if (isGround(c)) {
+        if (c.t.normal.y < 0.6) return 'The ground is too steep to stand a torch here.';
+        if (c.t.point.y < c.g.world.terrain.waterAt(c.t.point.x, c.t.point.z)) return 'Not under water.';
+      }
       return null;
     },
     time: 0.6,
     run: (c) => {
-      if (!isGround(c)) return;
       const g = c.g, it = g.activeItem();
       if (!it || it.type !== 'torch') return;
-      const p = c.t.point;
-      g.world.add<StructureObj>({ kind: 'structure', type: 'standing_torch', x: p.x, y: g.world.terrain.groundBelow(p.x, p.y + 0.3, p.z), z: p.z, yaw: Math.random() * 6.28,
+      const p = c.t.kind === 'none' ? null : c.t.point, floor = floorTop(c);
+      if (!p) return;
+      // In soft ground it's pushed in; on rock, gravel or a floor it stands in a ring of stones.
+      const soft = isGround(c) && isSoft(c.t.mat) && c.t.mat !== Mat.Gravel;
+      const y = floor ?? g.world.terrain.groundBelow(p.x, p.y + 0.3, p.z);
+      g.world.add<StructureObj>({ kind: 'structure', type: 'standing_torch', x: p.x, y, z: p.z, yaw: Math.random() * 6.28,
         consumed: {}, built: true, ql: it.ql, dmg: it.dmg, fuel: TORCH_BURN * Math.max(0, 1 - it.dmg / 100), lit: true });
       g.consumeActive();
-      g.msg('You plant the torch in the ground. It keeps burning there, and you can pick it back up any time.', 'info');
+      g.msg(soft ? 'You plant the torch in the ground. It keeps burning there, and you can pick it back up any time.'
+        : `You stand the torch up in a ring of stones on the ${floor !== null ? 'floor' : 'rock'}. It keeps burning there, and you can pick it back up any time.`, 'info');
     },
   },
   {
@@ -983,7 +1010,7 @@ export const ACTIONS: ActionDef[] = [
       c.g.inv.add(it);
       c.g.inventoryChanged();
       c.g.msg(torch
-        ? (s.lit ? `You ${s.type === 'wall_torch' ? 'take down' : 'pull up'} the torch. Hold it, plant it in soft ground or mount it on a wall.` : `You ${s.type === 'wall_torch' ? 'take down' : 'pull up'} the spent torch. Relight it with a kindling and a branch.`)
+        ? (s.lit ? `You ${s.type === 'wall_torch' ? 'take down' : 'pull up'} the torch. Hold it, set it down again or mount it on a wall.` : `You ${s.type === 'wall_torch' ? 'take down' : 'pull up'} the spent torch. Relight it with a kindling and a branch.`)
         : `You pick up the ${def.name.toLowerCase()}${(s.water ?? 0) > 0 ? ', spilling the water' : ''}. Place it again from your pack.`, 'info');
     },
   },

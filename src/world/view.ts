@@ -1213,8 +1213,13 @@ export function buildPieceMesh(type: string, state: { lit?: boolean; open?: bool
       break;
     }
     case 'standing_torch': {
-      // A branch stuck upright in the ground, its wrapped head burning (or charred, once spent).
+      // A branch stuck upright in the ground (a ring of stones round its foot to hold it), its wrapped head burning (or charred, once spent).
       tex(new THREE.CylinderGeometry(0.022, 0.03, 1.0, 7), 'rough_wood', 0, 0.5, 0);
+      for (let k = 0; k < 5; k++) {
+        const a = (k / 5) * Math.PI * 2;
+        const st = tex(new THREE.DodecahedronGeometry(0.055 + (k % 2) * 0.015), 'stone', Math.cos(a) * 0.09, 0.03, Math.sin(a) * 0.09, { tint: 0x9a948c });
+        st.scale.y = 0.7;
+      }
       add(new THREE.CylinderGeometry(0.05, 0.038, 0.14, 8), state.lit ? 0x3a2a1c : 0x1c1814, 0, 1.03, 0, { roughness: 1 });
       if (state.lit) {
         const flame = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 8).translate(0, 0.75, 0).scale(0.065, 0.15, 0.065),
