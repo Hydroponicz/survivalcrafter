@@ -4,7 +4,7 @@ import { pieceBoxes, STRUCTURES } from '../data/structures';
 import { buildToolMesh, HELD_ITEMS, swingPose, type SwingKind } from './tools';
 import { Y_MIN, type Terrain } from '../world/terrain';
 import { toLocal, type World } from '../world/world';
-import { treeScale, TRUNK } from '../world/treefx';
+import { stumpSize, treeScale, TRUNK } from '../world/treefx';
 import type { Input } from './input';
 import { CharacterRig, HOLD, loadCharacter, SEGMENTS, segmentTime, type Clip, type Pose, type Region } from './character';
 
@@ -301,6 +301,13 @@ export class Player {
     for (const h of [STEP + 0.05, 1.1, HEIGHT - 0.1]) {
       if (t.solidAt(x, y + h, z)) score += 2;
       for (const [ox, oz] of RING) if (t.solidAt(x + ox * RADIUS, y + h, z + oz * RADIUS)) score++;
+    }
+    // Stumps: solid, unless low enough to step over.
+    for (const st of world.stumpsNear(x, z, 2)) {
+      const { r, h } = stumpSize(st);
+      const top = t.heightAt(st.x, st.z) - 0.1 + h;
+      if (top <= y + STEP) continue;
+      score += Math.max(0, RADIUS + r - Math.hypot(x - st.x, z - st.z)) * 10;
     }
     for (const o of world.near(x, z, 2.5)) {
       if (o.kind === 'tree') {

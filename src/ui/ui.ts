@@ -449,6 +449,7 @@ export class UI {
       case 'animal': return ANIMALS[t.animal.species].name;
       case 'rock': return t.rock.sc < 0.6 ? 'Small boulder' : t.rock.sc < 1.1 ? 'Boulder' : 'Large boulder';
       case 'cart': return t.cart.type === 'ox_cart' ? 'Ox cart' : 'Hand cart';
+      case 'stump': return `${t.stump.species[0].toUpperCase()}${t.stump.species.slice(1)} stump`;
       case 'none': return '';
       case 'object': {
         const o = t.obj;

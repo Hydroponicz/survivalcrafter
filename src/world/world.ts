@@ -402,6 +402,19 @@ export class World {
     }
   }
 
+  /** Stumps within `r` of a point. */
+  stumpsNear(x: number, z: number, r: number): Stump[] {
+    const out: Stump[] = [];
+    for (const st of this.stumps) if (Math.abs(st.x - x) < r && Math.abs(st.z - z) < r) out.push(st);
+    return out;
+  }
+
+  /** Take a stump out of the ground (dug out). */
+  removeStump(st: Stump) {
+    const i = this.stumps.indexOf(st);
+    if (i >= 0) this.stumps.splice(i, 1);
+  }
+
   /** Objects anchored within the cells overlapping a radius. */
   near(x: number, z: number, r: number): WorldObj[] {
     const out: WorldObj[] = [];

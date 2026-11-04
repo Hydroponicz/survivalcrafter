@@ -16,6 +16,11 @@ const HEARTWOOD = new THREE.Color(0xf6dfae);
 /** Height of the felling notch above the ground, in the trunk's local units. */
 const NOTCH_Y = 0.7;
 
+/** A stump's size: its radius and how tall it stands (the same the drawing uses). */
+export function stumpSize(st: Stump): { r: number; h: number } {
+  return { r: TRUNK[st.species].r0 * st.s, h: NOTCH_Y * st.s };
+}
+
 /** Model multiplier for a typical full-grown tree of each kind (oaks ~20 m, spruces ~30 m). */
 export const GROWN = Object.fromEntries(SPECIES.map((s) => [s, TREES[s].grown])) as Record<Species, number>;
 

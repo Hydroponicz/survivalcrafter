@@ -31,7 +31,7 @@ import { DevSettings } from './dev';
 import { distVol, Sound } from './sound';
 import { HELD_ITEMS, type SwingKind } from './tools';
 import { ViewModel } from './viewmodel';
-import { treeScale } from '../world/treefx';
+import { stumpSize, treeScale } from '../world/treefx';
 import { CharacterRig, characterLoaded, SEGMENTS, type Clip } from './character';
 import { MinigameSession, minigameVerb, type MinigameSpec } from './minigames';
 import { TutorialProgress, tutorialKey } from './minigames/tutorials';
@@ -120,6 +120,8 @@ export class Game {
 
   target: Target | null = null;
   action: RunningAction | null = null;
+  /** An instant pickup's reach down (seconds in, and which way to face). */
+  private reach: { t: number; yaw: number | null } | null = null;
   queue: QueuedAction[] = [];
   lastAction: { def: ActionDef; recipe?: Recipe } | null = null;
   activeUid: number | null = null;
@@ -903,6 +905,7 @@ export class Game {
     if (t.kind === 'animal') return !this.world.animals.includes(t.animal);
     if (t.kind === 'cart') return !this.world.carts.includes(t.cart);
     if (t.kind === 'rock') return this.world.brokenRocks.has(t.rock.key);
+    if (t.kind === 'stump') return !this.world.stumps.includes(t.stump);
     return false;
   }
 
@@ -916,6 +919,12 @@ export class Game {
     const base = typeof def.time === 'function' ? def.time(ctx) : def.time;
     if (base <= 0) {
       this.runAction(def, ctx, { success: true, ql: 0, toolQl: 0 });
+      return true;
+    }
+    // Picked straight up: a quick reach down, no waiting (skill and quality work as usual).
+    if (def.instant) {
+      this.reach = { t: 0, yaw: this.faceToward(ctx.t) };
+      this.complete(def, ctx, base);
       return true;
     }
     const instant = this.dev.on('instantActions') || (this.dev.on('instantCraft') && def.id === 'craft');
@@ -1136,7 +1145,7 @@ export class Game {
   /** Turn the body toward what you're working on (third person). */
   private faceToward(t: Target): number | null {
     const p = this.player.pos;
-    const at = t.kind === 'object' ? t.obj : t.kind === 'animal' ? t.animal : t.kind === 'cart' ? t.cart : t.kind === 'terrain' ? t.point : null;
+    const at = t.kind === 'object' ? t.obj : t.kind === 'animal' ? t.animal : t.kind === 'cart' ? t.cart : t.kind === 'stump' ? t.stump : t.kind === 'terrain' ? t.point : null;
     if (!at) return null;
     const dx = at.x - p.x, dz = at.z - p.z;
     return Math.hypot(dx, dz) < 0.2 ? null : Math.atan2(dx, dz);
@@ -1471,6 +1480,7 @@ export class Game {
     const animals = this.world.animals.filter((a) => a !== this.riding && Math.hypot(a.x - origin.x, a.z - origin.z) < maxD + 2);
     const carts = this.world.carts.filter((k) => Math.hypot(k.x - origin.x, k.z - origin.z) < maxD + 3);
     const rocks = this.groundCover.bouldersNear(origin.x, origin.z, maxD + 1);
+    const stumps = this.world.stumpsNear(origin.x, origin.z, maxD + 1);
     const p = new THREE.Vector3();
     for (let d = 0.1; d <= maxD; d += 0.05) {
       p.copy(origin).addScaledVector(dir, d);
@@ -1498,6 +1508,10 @@ export class Game {
         for (const o of objs) {
           if (skipPieces && o.kind === 'structure') continue;
           if (this.hitObject(o, p)) return { kind: 'object', obj: o, point: p.clone() };
+        }
+        for (const st of stumps) {
+          const { r, h } = stumpSize(st), g = t.heightAt(st.x, st.z) - 0.1;
+          if (Math.hypot(p.x - st.x, p.z - st.z) < r + 0.05 && p.y > g && p.y < g + h + 0.05) return { kind: 'stump', stump: st, point: p.clone() };
         }
         // Boulders: squat lumps (half a metre across at scale 1, flattened).
         for (const b of rocks) {
@@ -2106,6 +2120,15 @@ export class Game {
     } else {
       p.swing = 0;
     }
+    // The quick reach of an instant pickup.
+    if (this.reach) {
+      this.reach.t += dt;
+      if (this.reach.t >= REACH_TIME || this.action) this.reach = null;
+      else if (!p.work) {
+        p.work = { clip: 'pickup', phase: this.reach.t / REACH_TIME, impactAt: 0.5 };
+        if (this.reach.yaw !== null) p.faceYaw = this.reach.yaw;
+      }
+    }
     perf.time('combat', () => this.combat.update(dt));
 
     this.tickLife(dt);
@@ -2523,11 +2546,14 @@ function makeGlowTexture(): THREE.Texture {
   return tex;
 }
 
+/** How long the quick reach of an instant pickup takes (seconds). */
+const REACH_TIME = 0.75;
+
 /** What the body does for each job (null: stands at ease). `minigame`: the hands-on version. */
 function workClip(id: string, _c?: Ctx): Clip | null {
   switch (id) {
     case 'cut_tree': return 'chop';
-    case 'mine': case 'break_rock': case 'dig': case 'level': case 'raise': case 'smooth': case 'cultivate': return 'mine';
+    case 'mine': case 'break_rock': case 'dig': case 'dig_stump': case 'level': case 'raise': case 'smooth': case 'cultivate': return 'mine';
     case 'harvest': return 'sickle';
     case 'pick_forage': case 'collect_branch': case 'pick_sprout': case 'pick_berries': case 'sow': case 'tend': case 'plant_sprout': case 'butcher': return 'gather';
     case 'pick_up': case 'take_all': case 'place_item': case 'fill_jar': return 'pickup';

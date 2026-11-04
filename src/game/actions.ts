@@ -6,12 +6,12 @@ import type { SkillId } from '../data/skills';
 import { isRock, isSoft, Mat, MAT_NAMES, Y_MIN } from '../world/terrain';
 import { telemetry } from './telemetry';
 import {
-  ANIMALS, APPLE_AGE, APPLES, CART_CAPACITY, CROP_STAGES, type CartObj, cropKey, type AnimalObj, type BushObj, type Crop, type ForageObj, type PileObj, type StructureObj, type TreeObj, type WorldObj,
+  ANIMALS, APPLE_AGE, APPLES, CART_CAPACITY, CROP_STAGES, type CartObj, cropKey, type AnimalObj, type BushObj, type Crop, type ForageObj, type PileObj, type StructureObj, type Stump, type TreeObj, type WorldObj,
 } from '../world/world';
 import { FORAGE, IDENTIFY } from '../data/forage';
 import type { Boulder } from '../world/groundcover';
 import { BIOMES, biomeAt, type Biome } from './forage';
-import { treeScale } from '../world/treefx';
+import { stumpSize, treeScale } from '../world/treefx';
 import { SPECIES, TREES } from '../world/trees';
 import { ZONE_NAMES } from '../world/climate';
 import type { Game } from './game';
@@ -26,6 +26,7 @@ export type Target =
   | { kind: 'animal'; animal: AnimalObj; point: THREE.Vector3 }
   | { kind: 'rock'; rock: Boulder; point: THREE.Vector3 }
   | { kind: 'cart'; cart: CartObj; point: THREE.Vector3 }
+  | { kind: 'stump'; stump: Stump; point: THREE.Vector3 }
   | { kind: 'none' };
 
 export interface Ctx {
@@ -72,6 +73,8 @@ export interface ActionDef {
   quick?: boolean;
   /** Highest quality the work can reach with the equipment at hand. */
   qualityCap?: (c: Ctx) => number | undefined;
+  /** Done at once with a quick reach (no progress bar): picking things up off the ground. */
+  instant?: boolean;
   /** Re-queue automatically after completing, while still valid. */
   repeat?: boolean | ((c: Ctx) => boolean);
   run(c: Ctx, o: Outcome): void;
@@ -180,19 +183,12 @@ export const ACTIONS: ActionDef[] = [
   {
     id: 'pick_forage', label: (c) => `Pick ${forageName(obj(c, 'forage')!).toLowerCase()}`,
     show: (c) => !!obj(c, 'forage'),
-    time: (c) => 2 + FORAGE[obj(c, 'forage')!.species].difficulty * 0.25,
+    // Picked straight up (skill still sets the quality and grows as you gather).
+    time: (c) => 2 + FORAGE[obj(c, 'forage')!.species].difficulty * 0.25, instant: true,
     skill: 'foraging', difficulty: (c) => FORAGE[obj(c, 'forage')!.species].difficulty, stamina: 1,
     run: (c, o) => {
       const node = obj(c, 'forage')!;
       const g = c.g, sp = FORAGE[node.species];
-      if (!o.success) {
-        // Fumbling can spoil the find, but usually you just have to try again.
-        if (Math.random() < 0.25) {
-          g.world.remove(node);
-          return g.msg(`You fumble and ruin the ${forageName(node).toLowerCase()}.`, 'fail');
-        }
-        return g.msg(`You couldn't pull the ${forageName(node).toLowerCase()} free. Try again.`, 'fail');
-      }
       g.world.remove(node);
       if (sp.category === 'mushroom') g.quests?.note('picked_mushroom');
       const n = sp.count[0] + Math.floor(Math.random() * (sp.count[1] - sp.count[0] + 1)) + (Math.random() < g.skills.get('foraging') / 150 ? 1 : 0);
@@ -628,6 +624,30 @@ export const ACTIONS: ActionDef[] = [
       c.g.give('branch', o.ql, 1);
       c.g.msg('You snap off a branch.', 'info');
     },
+  },
+  // ===== stumps left after felling
+  {
+    id: 'dig_stump', label: 'Dig out stump',
+    show: (c) => c.t.kind === 'stump' && toolIs(c, 'shovel'),
+    // Bigger stumps have deeper roots.
+    time: (c) => (c.t.kind === 'stump' ? 7 + stumpSize(c.t.stump).r * 22 : 8),
+    swing: 'dig', skill: 'digging', difficulty: 8, stamina: 10, toolWear: 0.5,
+    run: (c, o) => {
+      if (c.t.kind !== 'stump') return;
+      const st = c.t.stump, g = c.g;
+      g.world.removeStump(st);
+      g.view.treeFx.syncStumps(g.world.stumps);
+      // The stump and its roots: firewood.
+      const big = stumpSize(st).r > 0.28;
+      if (big) g.give('log', o.ql, 1);
+      g.give('branch', o.ql, big ? 2 : 3);
+      g.msg(`You dig out the stump and pull it free${big ? ': a log and some roots for firewood' : ', roots and all'}.`, 'good');
+    },
+  },
+  {
+    id: 'examine_stump', label: 'Examine stump',
+    show: (c) => c.t.kind === 'stump', time: 0,
+    run: (c) => c.g.msg('A tree stump, its roots still in the ground. Dig it out with a shovel to clear the spot.', 'info'),
   },
   {
     id: 'pick_sprout', label: 'Pick sprout',
