@@ -1315,7 +1315,8 @@ export const ACTIONS: ActionDef[] = [
       // (Some things don't take an s: kindling, flour, dough...)
       const plural = r.output.count > 1 && !name.endsWith('s') && !/kindling|flour|dough|meat|bread|cordage/.test(name) ? 's' : '';
       g.msg(`You made ${article}${name}${plural} (QL ${ql.toFixed(1)}).`, 'good');
-      telemetry.event('craft', `Made ${r.output.count} ${r.output.item}`, { recipe: r.id, ql: +ql.toFixed(1), success: o.success });
+      // (Yours only: villagers craft all day, and would bury the log.)
+      if (!(g as { isVillager?: boolean }).isVillager) telemetry.event('craft', `Made ${r.output.count} ${r.output.item}`, { recipe: r.id, ql: +ql.toFixed(1), success: o.success });
       if (hot) g.msg(g.smithy().trough
         ? 'It\'s still glowing hot! Dip it in the quench trough now to harden it.'
         : 'It is still glowing. Quench it in a water trough before it cools to harden it.', 'info');

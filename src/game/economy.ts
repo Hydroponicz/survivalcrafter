@@ -228,6 +228,8 @@ export class Economy {
     if (l.traded === day || this.g.world.dayFraction < 8 / 24) return;
     l.traded = day;
     let sold = 0, bought = 0;
+    // A town's (and a city's) market dues, tolls and rents: what keeps its treasury in coin to feed it.
+    if (v.kind !== 'village') l.treasury += this.population(v) * (v.kind === 'city' ? 8 : 6);
     for (const [item, d] of Object.entries(GOODS)) {
       const have = this.stock(v, item), want = this.want(v, item);
       if (have > want * 2 + 2) {
@@ -247,7 +249,9 @@ export class Economy {
     };
     if (this.stock(v, 'iron_lump') < 2) buyIn('iron_lump', 3);
     if (this.stock(v, 'wheat_seeds') < 6) buyIn('wheat_seeds', 10);
-    if (this.meals(v) < this.population(v)) buyIn('wheat', this.population(v) * 2, 1.5);
+    // Enough grain for everyone's two meals a day (a town has no fields of its own: it lives on what comes in).
+    const short = this.population(v) * 2 - this.meals(v);
+    if (short > 0) buyIn('wheat', Math.ceil(short / (GOODS.wheat.meals ?? 0.5)), 1.25);
     telemetry.event('economy', `${v.name}: merchants called`, { sold, bought, treasury: l.treasury });
   }
 

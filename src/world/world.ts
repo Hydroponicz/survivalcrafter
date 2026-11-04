@@ -549,7 +549,8 @@ export class World {
       const h = g.height(x, z);
       if (h < 1 || !Number.isNaN(g.water(x, z, h)) || g.temperature(x, h, z) < 0.25) continue;
       // Wild horses roam the open grassland in small herds; deer and boar keep nearer the woods.
-      const zone = this.terrain.zoneAt(x, z), open = zone === 'meadow' || zone === 'heath';
+      // (From the world map, not the voxel ground: that far off, the ground may not be worked out yet, and working it out would stall the frame.)
+      const zone = g.zone(x, z, h), open = zone === 'meadow' || zone === 'heath';
       const r2 = Math.random();
       if (open && r2 < 0.12) { for (let k = 0, n = 1 + Math.floor(Math.random() * 2); k < n; k++) this.spawnAnimal('ox', x + (Math.random() - 0.5) * 8, z + (Math.random() - 0.5) * 8); continue; }
       if (open && r2 < 0.4) { for (let k = 0, n = 1 + Math.floor(Math.random() * 3); k < n; k++) this.spawnAnimal('horse', x + (Math.random() - 0.5) * 8, z + (Math.random() - 0.5) * 8); continue; }

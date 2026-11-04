@@ -295,7 +295,7 @@ export class Player {
    * terrain samples inside the ground, plus how deep it sits in trees and pieces.
    * Zero means the spot is clear.
    */
-  penetration(world: World, x: number, y: number, z: number): number {
+  penetration(world: World, x: number, y: number, z: number, people = true): number {
     const t = world.terrain;
     let score = 0;
     for (const h of [STEP + 0.05, 1.1, HEIGHT - 0.1]) {
@@ -303,7 +303,7 @@ export class Player {
       for (const [ox, oz] of RING) if (t.solidAt(x + ox * RADIUS, y + h, z + oz * RADIUS)) score++;
     }
     // Villagers: you bump into them.
-    for (const pp of world.people) {
+    if (people) for (const pp of world.people) {
       if (Math.abs(pp.x - x) > 1 || Math.abs(pp.z - z) > 1 || Math.abs(pp.y - y) > 1.6) continue;
       score += Math.max(0, RADIUS + 0.28 - Math.hypot(x - pp.x, z - pp.z)) * 10;
     }

@@ -264,24 +264,39 @@ class SeaFloor {
    * Keep the map around (x, z); `ground` gives the land height at a point (NaN
    * where unknown, counted as deep water).
    */
+  /** A redraw under way: worked a band of rows a frame into a spare map, which is swapped in when it's done. */
+  private job: { x0: number; z0: number; row: number; buf: Uint8Array } | null = null;
+
   update(x: number, z: number, dt: number, ground: (x: number, z: number) => number, sea: number) {
     const span = SeaFloor.N * SeaFloor.CELL;
     const step = span / 8;
     const cx = Math.round(x / step) * step, cz = Math.round(z / step) * step;
     this.wait -= dt;
     const moved = cx !== this.cx || cz !== this.cz;
-    if (!moved && !(this.dirty && this.wait <= 0)) return;
-    this.cx = cx; this.cz = cz; this.dirty = false; this.wait = 4;
-    const x0 = cx - span / 2, z0 = cz - span / 2, N = SeaFloor.N, C = SeaFloor.CELL;
-    for (let j = 0; j < N; j++) {
+    if (moved || (this.dirty && this.wait <= 0 && !this.job)) {
+      // (Begun again from the top if you've moved on meanwhile.)
+      this.cx = cx; this.cz = cz; this.dirty = false; this.wait = 4;
+      this.job = { x0: cx - span / 2, z0: cz - span / 2, row: 0, buf: this.job?.buf ?? new Uint8Array(SeaFloor.N * SeaFloor.N) };
+    }
+    const job = this.job;
+    if (!job) return;
+    const N = SeaFloor.N, C = SeaFloor.CELL;
+    // The first map is made whole (there's nothing to show yet); after that, 32 rows a frame (16 frames).
+    const first = !Number.isFinite(this.area.value.x) || this.area.value.x === 1e9;
+    const end = first ? N : Math.min(N, job.row + 32);
+    for (let j = job.row; j < end; j++) {
       for (let i = 0; i < N; i++) {
-        const h = ground(x0 + (i + 0.5) * C, z0 + (j + 0.5) * C);
+        const h = ground(job.x0 + (i + 0.5) * C, job.z0 + (j + 0.5) * C);
         const d = Number.isNaN(h) ? MAX_DEPTH : Math.max(0, Math.min(MAX_DEPTH, sea - h));
-        this.data[j * N + i] = Math.round((d / MAX_DEPTH) * 255);
+        job.buf[j * N + i] = Math.round((d / MAX_DEPTH) * 255);
       }
     }
+    job.row = end;
+    if (job.row < N) return;
+    this.data.set(job.buf);
     this.texture.value.needsUpdate = true;
-    this.area.value.set(x0, z0, span, 0);
+    this.area.value.set(job.x0, job.z0, span, 0);
+    this.job = null;
   }
 }
 

@@ -1373,6 +1373,9 @@ export class Game {
         } else { a.speed = 0; if (a.state !== 'follow') a.state = 'idle'; }
         continue;
       }
+      // Far off (out of sight), wild animals wait where they are: their wanderings there would only make the
+      // ground be worked out for nothing.
+      if (toP > 150 && a.state !== 'flee' && a.state !== 'attack') { a.speed = 0; continue; }
       // Wild horses are calm: you can walk right up to them. They only bolt when hurt
       // (see provoke) or when you keep sprinting about close by.
       if (a.species === 'horse' && a.state !== 'flee' && toP < 6 && this.sprintNear > 1.2) { a.state = 'flee'; a.timer = 3; }
@@ -1959,7 +1962,7 @@ export class Game {
       }
       // Fallen through the ground, or stuck inside it.
       const ground = t.heightAt(p.pos.x, p.pos.z);
-      if (!this.dev.on('fly') && (p.pos.y < ground - 6 || (p.penetration(this.world, p.pos.x, p.pos.y, p.pos.z) > 0.35 && !p.swimming))) {
+      if (!this.dev.on('fly') && (p.pos.y < ground - 6 || (p.penetration(this.world, p.pos.x, p.pos.y, p.pos.z, false) > 0.35 && !p.swimming))) {
         fix('player', 'Fell through or got stuck in the ground; freed.', { y: p.pos.y, ground });
         this.unstuck();
       }

@@ -21,6 +21,8 @@ import {
 const mat = (color: number, extra: THREE.MeshStandardMaterialParameters = {}) =>
   new THREE.MeshStandardMaterial({ color, roughness: 0.9, metalness: 0, ...extra });
 
+/** Animals (by |dx|+|dz|) and crops further than this from you aren't drawn. */
+const SHOW_ANIMALS = 220, SHOW_CROPS = 240;
 /** Trees within this distance (metres) are drawn with full crowns. */
 const TREE_DETAIL = 55;
 
@@ -233,6 +235,8 @@ export class WorldView implements WorldListener {
   /** Crops: one instanced pool per growth stage (a village's fields hold hundreds). */
   private cropPools: InstancePool[] = [];
   private cropSlots = new Map<number, { stage: number; slot: number }>();
+  /** Crops too far off to draw (picked up again as you come near). */
+  private farCrops = new Set<number>();
   private animalMeshes = new Map<number, THREE.Group>();
   private fireLights: THREE.PointLight[] = [];
   private flames = new Set<THREE.Mesh>();
@@ -383,7 +387,13 @@ export class WorldView implements WorldListener {
     const crop = this.world.crops.get(k);
     const old = this.cropSlots.get(k);
     if (old) { this.cropPools[old.stage].release(old.slot); this.cropSlots.delete(k); }
+    this.farCrops.delete(k);
     if (!crop) return;
+    // Far off (a village's fields you've left behind): drawn when you come back.
+    {
+      const { x, z } = cropPos(k);
+      if (Number.isFinite(this.lodAt.x) && Math.hypot(x - this.lodAt.x, z - this.lodAt.z) > SHOW_CROPS) { this.farCrops.add(k); return; }
+    }
     const stage = this.world.cropStage(crop);
     const slot = this.cropPools[stage].alloc();
     if (slot < 0) return;
@@ -452,6 +462,10 @@ export class WorldView implements WorldListener {
   updateTreeDetail(px: number, pz: number) {
     if (Math.hypot(px - this.lodAt.x, pz - this.lodAt.z) < 6) return;
     this.lodAt = { x: px, z: pz };
+    for (const k of [...this.farCrops]) {
+      const c = cropPos(k);
+      if (Math.hypot(c.x - px, c.z - pz) < SHOW_CROPS - 15) this.cropsChanged(k);
+    }
     for (const [id, o] of this.trees) {
       const d = Math.hypot(o.x - px, o.z - pz), lo = this.far.has(id);
       if (lo && d < TREE_DETAIL - 8) this.far.delete(id);
@@ -519,7 +533,7 @@ export class WorldView implements WorldListener {
   private batchKey = new Map<number, string>();
 
   private batchable(o: WorldObj): boolean {
-    return o.kind === 'structure' && o.built && BATCHED.has(o.type);
+    return o.kind === 'structure' && o.built && batchedType(o.type);
   }
 
   private unbatch(id: number) {
@@ -698,6 +712,8 @@ export class WorldView implements WorldListener {
   syncAnimals(time: number) {
     const live = new Set<number>();
     for (const a of this.world.animals) {
+      // Only those near you are drawn (a village's flock kilometres off costs nothing, nor makes the ground there be worked out).
+      if (Number.isFinite(this.lodAt.x) && Math.abs(a.x - this.lodAt.x) + Math.abs(a.z - this.lodAt.z) > SHOW_ANIMALS) continue;
       live.add(a.id);
       let m = this.animalMeshes.get(a.id);
       // (A horse gets its saddle when it's tamed.)
@@ -1022,8 +1038,17 @@ function animateLegs(m: THREE.Group, a: AnimalObj, time: number) {
 
 const WOOD = 0x8a6440, DARK_WOOD = 0x6e4e30;
 
-/** Pieces that never move once built: drawn merged (see View.flushBatches). */
-const BATCHED = new Set(['floor', 'stone_foundation', 'wood_wall', 'log_wall', 'stone_wall', 'window_wall', 'beam', 'roof', 'gable', 'stairs', 'fence', 'well']);
+/**
+ * Whether a built piece is drawn merged with its neighbours (see View.flushBatches):
+ * anything that never moves or changes look (walls, roofs, furniture, stalls,
+ * workbenches...), but not doors and gates (they swing), fires (flames), troughs
+ * (water), nor the few pieces made from vertex-coloured models.
+ */
+const UNBATCHED = new Set(['campfire', 'forge', 'iron_anvil', 'quench_trough', 'standing_torch']);
+function batchedType(type: string): boolean {
+  const d = STRUCTURES[type];
+  return !!d && !UNBATCHED.has(type) && !d.opens && !d.burns && !d.glow && d.water === undefined;
+}
 
 /**
  * Meshes for a building piece in its local frame (origin at bottom centre).

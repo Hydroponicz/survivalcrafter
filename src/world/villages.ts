@@ -14,7 +14,7 @@
 // take apart or build onto.
 
 import { hash2, mulberry32 } from './noise';
-import { SEA, type WorldGen } from './worldgen';
+import { BLEND, SEA, TILE, type WorldGen } from './worldgen';
 
 /** Settlements are planned one (at most) per square of this size. */
 export const VCELL = 512;
@@ -249,6 +249,42 @@ export class Villages {
     const me = this.site(v.cx, v.cz);
     if (!me) return [];
     return this.siteLinks(me).map((s) => this.inCell(s.cx, s.cz)).filter((x): x is Village => !!x);
+  }
+
+  /**
+   * The settlements a settlement has roads to that can be worked out from map
+   * tiles already made (no tile is made on the spot: those not ready yet are
+   * asked for in the background, and join in once they're here). For things
+   * that roam far (traders), so they never hold up a frame.
+   */
+  readyNeighbours(v: Village): Village[] {
+    const reach = Math.ceil(LINK / VCELL), out: Village[] = [];
+    for (let cz = v.cz - reach; cz <= v.cz + reach; cz++) {
+      for (let cx = v.cx - reach; cx <= v.cx + reach; cx++) {
+        if ((cx === v.cx && cz === v.cz) || !this.cellReady(cx, cz)) continue;
+        const o = this.inCell(cx, cz);
+        if (o && Math.hypot(o.x - v.x, o.z - v.z) < LINK) out.push(o);
+      }
+    }
+    return out;
+  }
+
+  /** Settlements already planned within `r` of a point (nothing new is worked out). */
+  knownAround(x: number, z: number, r: number): Village[] {
+    return this.known().filter((v) => Math.hypot(v.x - x, v.z - z) < r + v.r);
+  }
+
+  /** Can a grid square's settlement be planned without making any map tile on the spot? (Asks for the missing ones.) */
+  private cellReady(cx: number, cz: number): boolean {
+    const key = cellKey(cx, cz);
+    if (this.cells.has(key)) return true;
+    let ready = true;
+    const t0x = Math.floor((cx * VCELL - BLEND) / TILE) - 1, t1x = Math.floor(((cx + 1) * VCELL + BLEND) / TILE) + 1;
+    const t0z = Math.floor((cz * VCELL - BLEND) / TILE) - 1, t1z = Math.floor(((cz + 1) * VCELL + BLEND) / TILE) + 1;
+    for (let tz = t0z; tz <= t1z; tz++) for (let tx = t0x; tx <= t1x; tx++) {
+      if (!this.gen.hasTile(tx, tz)) { ready = false; this.gen.want(tx, tz); }
+    }
+    return ready;
   }
 
   /** Sites within road distance of a site. */

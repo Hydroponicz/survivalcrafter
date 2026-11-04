@@ -24,6 +24,8 @@ const PACE = 1.25, CAPACITY = 100, REST = 70;
 const SHOW_R = 120;
 /** Settlements within this distance of you send out their traders (if they haven't yet). */
 const SEND_R = 1400;
+/** Traders set out only from settlements within this distance of you (beyond, they wait). */
+const ROAM_R = 2600;
 
 const NAMES = ['Wat', 'Gilbert', 'Adela', 'Roger', 'Simon', 'Margery', 'Piers', 'Alys', 'Ralf', 'Cecily', 'Jocelyn', 'Odo', 'Emma', 'Baldwin', 'Avice', 'Hamo'];
 
@@ -83,7 +85,8 @@ export class Traders {
   /** Settlements near you that haven't sent out their traders yet do so (one each, two from a town). */
   private send() {
     const p = this.g.player.pos, eco = this.g.economy;
-    for (const v of this.g.world.terrain.villages.around(p.x, p.z, SEND_R)) {
+    // (Only settlements already planned: sending traders never makes the map be worked out on the spot.)
+    for (const v of this.g.world.terrain.villages.knownAround(p.x, p.z, SEND_R)) {
       const l = eco.ledger(v);
       if (l.traders) continue;
       l.traders = true;
@@ -158,7 +161,10 @@ export class Traders {
   private setOut(t: Trader) {
     const here = this.village(t.from), eco = this.g.economy;
     if (!here) { t.rest = REST; return; }
-    const near = this.g.world.terrain.villages.neighbours(here);
+    // Far from you, the roads go quiet (a trader waits where they are till you come nearer).
+    const p = this.g.player.pos;
+    if (Math.hypot(here.x - p.x, here.z - p.z) > ROAM_R) { t.rest = REST; return; }
+    const near = this.g.world.terrain.villages.readyNeighbours(here);
     if (!near.length) { t.rest = REST * 3; return; }
     let best = near[Math.floor(Math.random() * near.length)], bestScore = 0;
     for (const n of near) {

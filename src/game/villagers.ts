@@ -96,6 +96,7 @@ type Step =
  * and position, the shared world. (Only what the actions villagers do use.)
  */
 class Hands {
+  readonly isVillager = true;
   readonly dev = { on: () => false };
   readonly quests = undefined;
   readonly knowledge = { handled: () => false };
@@ -224,7 +225,11 @@ export class VillageLife {
 
   constructor(private g: Game) {}
 
+  /** Bodies dressed this frame (a few a frame, so a city's people don't all arrive in one stalled frame). */
+  private dressed = 0;
+
   update(dt: number) {
+    this.dressed = 0;
     this.checkT -= dt;
     if (this.checkT <= 0) { this.checkT = 1; this.refresh(); }
     const p = this.g.player.pos;
@@ -261,7 +266,8 @@ export class VillageLife {
   // ---------- coming and going
   private refresh() {
     const p = this.g.player.pos, vil = this.g.world.terrain.villages;
-    for (const v of vil.around(p.x, p.z, ACTIVE_R)) {
+    // (Settlements already planned: the ground round you has planned those near enough to wake by now.)
+    for (const v of vil.knownAround(p.x, p.z, ACTIVE_R)) {
       const key = `${v.cx},${v.cz}`;
       if (!this.active.has(key) && Math.hypot(v.x - p.x, v.z - p.z) < ACTIVE_R + v.r * 0.3) this.wake(key, v);
     }
@@ -289,7 +295,6 @@ export class VillageLife {
         const night = this.night();
         if (night) this.toBed(v);
         else { const d = h.door; v.pos.set(d.x + (rnd() - 0.5), this.groundY(v, d.x, d.z), d.z + (rnd() - 0.5)); }
-        v.dress();
         list.push(v);
         this.villagers.push(v);
         this.group.add(v.model);
@@ -1283,7 +1288,7 @@ export class VillageLife {
 
   // ---------- the body
   private animate(v: Villager, dt: number, far: number) {
-    if (!v.rig && !v.dress()) {
+    if (!v.rig && (this.dressed >= 2 || (this.dressed++, !v.dress()))) {
       v.model.position.copy(v.pos);
       v.model.rotation.set(0, v.yaw, 0);
       return;

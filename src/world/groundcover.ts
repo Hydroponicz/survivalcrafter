@@ -4,7 +4,20 @@ import type { ViewCull } from './cull';
 import { hash2, mulberry32 } from './noise';
 import { isRock, Mat } from './terrain';
 import type { Zone } from './climate';
-import { pointInPiece, type World } from './world';
+import { pointInPiece, type StructureObj, type World } from './world';
+import { STRUCTURES } from '../data/structures';
+
+/** How far a kind of piece reaches from its anchor (in plan), worked out once. */
+const pieceRadii = new Map<string, number>();
+function pieceRadius(type: string): number {
+  let r = pieceRadii.get(type);
+  if (r === undefined) {
+    r = 0.5;
+    for (const b of STRUCTURES[type]?.boxes ?? []) r = Math.max(r, Math.hypot(Math.abs(b.c[0]) + b.h[0], Math.abs(b.c[2]) + b.h[2]));
+    pieceRadii.set(type, r);
+  }
+  return r;
+}
 
 /** How far round a building piece the ground is kept clear of grass and stones (m). */
 export const PIECE_MARGIN = 0.35;
@@ -357,7 +370,7 @@ export class GroundCover {
   private seen = -1;
 
   /** Per frame: wind, and rebuilding the instances when you cross into a new tile or look elsewhere. */
-  update(cam: THREE.Vector3, time: number, wind: [number, number], strength: number, budgetMs = 4) {
+  update(cam: THREE.Vector3, time: number, wind: [number, number], strength: number, budgetMs = 3) {
     shared.time.value = time;
     shared.wind.value.set(wind[0], wind[1]);
     shared.windStrength.value = strength;
@@ -479,8 +492,21 @@ export class GroundCover {
     };
     // Nothing grows in or right against a building piece, planned or built: no grass poking up through a
     // floor or into a wall. (A hand's breadth round its shape, near the ground; a roof up high clears nothing.)
-    const blocked = (x: number, y: number, z: number) => pieces.length > 0
-      && (this.world.blockedAt(x, y + 0.12, z) || pieces.some((s) => pointInPiece(s, x, y + 0.15, z, PIECE_MARGIN)));
+    // (Pieces bucketed by 2 m square first: a town's tile holds hundreds, and each plant need only test its neighbours.)
+    const buckets = new Map<number, StructureObj[]>();
+    for (const s of pieces) {
+      const r = pieceRadius(s.type) + PIECE_MARGIN;
+      for (let bz = Math.floor((s.z - r) / 2); bz <= Math.floor((s.z + r) / 2); bz++) for (let bx = Math.floor((s.x - r) / 2); bx <= Math.floor((s.x + r) / 2); bx++) {
+        const k = bz * 65536 + bx, list = buckets.get(k);
+        if (list) list.push(s); else buckets.set(k, [s]);
+      }
+    }
+    const blocked = (x: number, y: number, z: number) => {
+      if (!pieces.length) return false;
+      const near = buckets.get(Math.floor(z / 2) * 65536 + Math.floor(x / 2));
+      if (!near) return false;
+      return this.world.blockedAt(x, y + 0.12, z) || near.some((s) => pointInPiece(s, x, y + 0.15, z, PIECE_MARGIN));
+    };
 
     // Logs and boulders lying here (they can reach in from the next tile, too).
     const obs: Obstacle[] = [];
