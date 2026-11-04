@@ -2044,7 +2044,12 @@ export class Game {
     if (inp.hit('KeyC')) this.ui.toggle('crafting');
     if (inp.hit('KeyK')) this.ui.toggle('skills');
     if (inp.hit('KeyB')) this.ui.toggle('build');
-    if (inp.hit('KeyH') || inp.hit('F1')) this.ui.toggle('help');
+    if (inp.hit('KeyH')) this.ui.toggle('help');
+    // F1: hide everything on screen but the world (for screenshots); again to bring it back.
+    if (inp.hit('F1')) {
+      const hidden = this.ui.root.classList.toggle('no-hud');
+      if (!hidden) this.msg('Interface shown (F1 hides it).', 'info');
+    }
     if (inp.hit('KeyJ')) this.ui.toggle('journal');
     if (inp.hit('KeyL')) this.ui.toggle('quests');
     if (inp.hit('KeyM')) this.ui.toggle('map');
