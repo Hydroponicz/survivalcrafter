@@ -1305,8 +1305,12 @@ export class Game {
     return (a.species === 'horse' && (!!a.tamed || this.activeItem()?.type === 'apple')) || (a.species === 'ox' && !!a.tamed);
   }
 
+  /** Seconds you've kept sprinting (it fades when you stop): skittish animals bolt from a lot of it close by. */
+  private sprintNear = 0;
+
   private updateAnimals(dt: number) {
     const w = this.world, t = w.terrain, p = this.player.pos;
+    this.sprintNear = this.player.sprinting ? this.sprintNear + dt : Math.max(0, this.sprintNear - dt * 2);
     // Off the horse if you end up swimming.
     if (this.riding && (this.player.swimming || !w.animals.includes(this.riding))) this.dismount();
     for (const a of w.animals) {
@@ -1337,8 +1341,9 @@ export class Game {
         } else { a.speed = 0; if (a.state !== 'follow') a.state = 'idle'; }
         continue;
       }
-      // Wild horses keep their distance, unless you're holding out an apple.
-      if (a.species === 'horse' && a.state !== 'flee' && ((toP < 6 && this.activeItem()?.type !== 'apple') || (toP < 10 && this.player.sprinting))) { a.state = 'flee'; a.timer = 3; }
+      // Wild horses are calm: you can walk right up to them. They only bolt when hurt
+      // (see provoke) or when you keep sprinting about close by.
+      if (a.species === 'horse' && a.state !== 'flee' && toP < 6 && this.sprintNear > 1.2) { a.state = 'flee'; a.timer = 3; }
       a.timer -= dt;
       a.attackCooldown -= dt;
       if (a.hurt) a.hurt = Math.max(0, a.hurt - dt);

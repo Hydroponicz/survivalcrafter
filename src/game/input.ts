@@ -17,7 +17,7 @@ export class Input {
       if (!this.keys.has(e.code)) this.pressed.add(e.code);
       this.keys.add(e.code);
       // (Alt shows the cursor: don't let it also open the browser's menu bar.)
-      if (['Space', 'Tab', 'F1', 'F2', 'AltLeft'].includes(e.code)) e.preventDefault();
+      if (['Space', 'Tab', 'F1', 'F2', 'AltLeft', 'ControlLeft'].includes(e.code)) e.preventDefault();
     });
     window.addEventListener('keyup', (e) => { this.keys.delete(e.code); if (e.code === 'AltLeft') e.preventDefault(); });
     window.addEventListener('blur', () => this.keys.clear());

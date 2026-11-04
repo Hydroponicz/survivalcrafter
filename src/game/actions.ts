@@ -1120,7 +1120,7 @@ export const ACTIONS: ActionDef[] = [
         return;
       }
       if (an.species === 'horse') {
-        c.g.msg(an.tamed ? 'Your horse. Aim at it and choose Ride, or feed it an apple.' : 'A wild horse. It keeps its distance, but hold out an apple and it may let you close enough to feed it. Feed it apples to tame it.', 'info');
+        c.g.msg(an.tamed ? 'Your horse. Aim at it and choose Ride, or feed it an apple.' : 'A wild horse. Calm enough to walk up to (don\'t sprint around it or hurt it, or it bolts). Hold an apple and feed it: each apple may tame it.', 'info');
         return;
       }
       c.g.msg(`A ${d.name.toLowerCase()}. ${hp > 0.8 ? 'It looks healthy.' : hp > 0.4 ? 'It is wounded.' : 'It is badly hurt.'}${d.aggressive ? ' It looks aggressive.' : ''}`, 'info');

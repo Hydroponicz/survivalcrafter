@@ -366,7 +366,9 @@ export class Player {
     }
     const len = Math.hypot(mx, mz);
     this.moving = len > 0;
-    if (allowMove && input.hit('KeyZ') && !this.riding) this.crouching = !this.crouching;
+    // Left Ctrl (or Z) taps crouching on and off. (A toggle, not held: holding Ctrl while you
+    // press W would close the browser tab, and no web page can stop that.)
+    if (allowMove && (input.hit('KeyZ') || input.hit('ControlLeft')) && !this.riding) this.crouching = !this.crouching;
     this.sprinting = this.moving && k.has('ShiftLeft') && this.stamina > 5 && !this.swimming;
     if (this.sprinting || this.swimming) this.crouching = false;
     let speed = this.swimming ? 2.2 : this.riding ? (this.sprinting ? 13 : 7.5) : this.sprinting ? 6.5 : this.crouching ? 1.5 : 3.6;
