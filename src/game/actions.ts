@@ -669,9 +669,41 @@ export const ACTIONS: ActionDef[] = [
         merchant: ['Finest wares this side of the river!', 'The traders bring the villages\' surplus here. Prices follow what\'s scarce.'],
         baker: ['Wheat from the villages, water from the well, and a hot oven.', 'Bread\'s best fresh. Ask at the stores.'],
         carpenter: ['Measure twice, cut once.', 'A good table outlasts the one who made it.'],
+        lord: ['These walls have stood two hundred winters. The town below feeds them; they keep the town.', 'You\'re a long way from your own hearth, traveller. Keep the peace in my town.'],
+        noble: ['The view from the castle road is the finest in the land.', 'One does so tire of the market crowds.'],
+        innkeeper: ['Sit by the fire! Meat off the hearth, beds upstairs... well, beds at the back.', 'A hot meal\'s yours for a few coins.'],
+        guard: ['Move along. No trouble inside the walls.', 'Gates are watched day and night.'],
       };
       const say = lines[v.role] ?? lines.villager;
       c.g.msg(`${v.name}, the ${v.roleName} (${v.doing}): "${say[Math.floor(Math.random() * say.length)]}"`, 'info');
+    },
+  },
+  {
+    // The innkeeper serves a hot meal from the town's stores.
+    id: 'buy_meal', label: (c) => {
+      const v = c.t.kind === 'villager' ? c.t.villager : undefined;
+      return v ? `Buy a hot meal (${c.g.economy.price(v.village, 'cooked_meat', 'buy') + 2} coins)` : 'Buy a hot meal';
+    },
+    show: (c) => c.t.kind === 'villager' && c.t.villager.role === 'innkeeper' && !c.t.villager.lying,
+    check: (c) => {
+      if (c.t.kind !== 'villager') return '';
+      const v = c.t.villager, price = c.g.economy.price(v.village, 'cooked_meat', 'buy') + 2;
+      if (c.g.economy.stock(v.village, 'cooked_meat') === 0) return 'The pot is empty. Come back when there\'s meat on the hearth.';
+      if (c.g.coins < price) return `You need ${price} coins.`;
+      return null;
+    },
+    time: 0,
+    run: (c) => {
+      if (c.t.kind !== 'villager') return;
+      const v = c.t.villager, eco = c.g.economy;
+      const price = eco.price(v.village, 'cooked_meat', 'buy') + 2;
+      const [meal] = eco.take(v.village, 'cooked_meat', 1);
+      if (!meal) return;
+      c.g.coins -= price;
+      eco.ledger(v.village).treasury += price;
+      c.g.inv.add(meal);
+      c.g.eat(meal.uid);
+      c.g.msg(`${v.name} sets a steaming plate before you. (${price} coins)`, 'good');
     },
   },
   {

@@ -73,7 +73,7 @@ const TOWN_START: [string, number][] = [
   ['wheat', 20], ['bread', 16], ['cooked_meat', 8], ['flour', 4], ['log', 12], ['plank', 10], ['refined_plank', 6], ['kindling', 12],
   ['iron_lump', 6], ['shaft', 10], ['branch', 6], ['wheat_seeds', 6],
 ];
-const START_TREASURY = 250, TOWN_TREASURY = 900;
+const START_TREASURY = 250, TOWN_TREASURY = 900, CITY_TREASURY = 2500;
 
 /** A village's books (saved with the game). */
 export interface Ledger {
@@ -117,9 +117,9 @@ export class Economy {
   ledger(v: Village): Ledger {
     let l = this.ledgers.get(key(v));
     if (!l) {
-      const town = v.kind === 'town';
-      l = { name: v.name, treasury: town ? TOWN_TREASURY : START_TREASURY, seeded: true, traded: 0, hungry: 0, hungryDay: 0, goods: [] };
-      for (const [type, n] of town ? TOWN_START : START) for (let i = 0; i < n; i++) l.goods.push(makeItem(type, 25 + Math.random() * 15));
+      const town = v.kind !== 'village', big = v.kind === 'city' ? 1.6 : 1;
+      l = { name: v.name, treasury: v.kind === 'city' ? CITY_TREASURY : town ? TOWN_TREASURY : START_TREASURY, seeded: true, traded: 0, hungry: 0, hungryDay: 0, goods: [] };
+      for (const [type, n] of town ? TOWN_START : START) for (let i = 0; i < Math.round(n * big); i++) l.goods.push(makeItem(type, 25 + Math.random() * 15));
       this.ledgers.set(key(v), l);
     }
     l.goods ??= [];

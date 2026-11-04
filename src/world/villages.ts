@@ -30,16 +30,20 @@ const LINK = 1000;
 const BLOCK = 26, STREET = 4;
 /** How far out the ring street runs (to its outer edge). */
 const TOWN_EDGE = BLOCK * 1.5 + STREET / 2;
+/** A castle city: its palisade (across, and on the castle side), and the castle (how far from the town's centre, its half-size). */
+const PAL_X = 46, PAL_N = 71, CASTLE_Z = 96, CASTLE_HALF = 22;
 
-export type SettlementKind = 'village' | 'town';
+export type SettlementKind = 'village' | 'town' | 'city';
 export interface VPiece { type: string; x: number; y: number; z: number; yaw: number }
 /** A rectangle turned by `yaw` (the same turn as a piece's). */
 export interface Rect { x: number; z: number; yaw: number; hx: number; hz: number }
-interface Pad extends Rect { level: number }
+/** A levelled plot (blending back into the land over `fall` metres: castle mounds are graded wider). */
+interface Pad extends Rect { level: number; fall?: number }
 export interface Seg { ax: number; az: number; bx: number; bz: number; w: number }
 /** What a house is for (the work of whoever comes to live there). */
 export type HouseRole = 'farmer' | 'shepherd' | 'woodcutter' | 'butcher' | 'smith' | 'elder' | 'villager'
-  | 'priest' | 'mayor' | 'merchant' | 'baker' | 'carpenter';
+  | 'priest' | 'mayor' | 'merchant' | 'baker' | 'carpenter'
+  | 'lord' | 'noble' | 'innkeeper' | 'guard';
 export interface House {
   x: number; z: number; yaw: number; y: number;
   /** Floor tiles along its length (2: a cottage, 3: a longhouse...). */
@@ -50,7 +54,7 @@ export interface House {
   /** Which tile along the front the door is in (local x). */
   doorX: number;
   /** What kind of building (for the map and for talk). */
-  kind: 'house' | 'cathedral' | 'hall' | 'villa' | 'bakery' | 'workshop' | 'smithy';
+  kind: 'house' | 'cathedral' | 'hall' | 'villa' | 'bakery' | 'workshop' | 'smithy' | 'tavern' | 'keep' | 'great_hall' | 'barracks' | 'tower';
   role: HouseRole;
   /** Just outside the door. */
   door: { x: number; z: number };
@@ -71,6 +75,9 @@ export interface House {
   altar?: { x: number; z: number };
   /** Its animal pen, if it keeps one. */
   pen?: Rect;
+  /** A tavern's bar (where the innkeeper serves) and hearth. */
+  bar?: { x: number; z: number };
+  hearth?: { x: number; z: number };
 }
 export interface Village {
   kind: SettlementKind;
@@ -97,6 +104,12 @@ export interface Village {
   grid?: { x: number; z: number; yaw: number };
   /** Market stalls (where merchants stand). */
   stalls: { x: number; z: number; yaw: number }[];
+  /** A city's castle on its hill: its frame (centre, facing the town) and half-size. */
+  castle?: { x: number; z: number; yaw: number; half: number };
+  /** A city's road up to the castle: from the town's streets, to the gatehouse, into the bailey. */
+  upper?: { x: number; z: number }[];
+  /** The gates (in the town's palisade, and the castle's): where the guards stand. */
+  gates: { x: number; z: number }[];
   pieces: VPiece[];
 }
 
@@ -161,7 +174,7 @@ function settlementName(rnd: () => number, kind: SettlementKind): string {
   let b = LAST[Math.floor(rnd() * LAST.length)];
   // (A town takes a grander ending; the same number of draws either way.)
   const t = TOWN_LAST[Math.floor(rnd() * TOWN_LAST.length)];
-  if (kind === 'town') b = t;
+  if (kind !== 'village') b = t;
   if (a.toLowerCase().endsWith(b[0])) b = b.slice(1);
   return a + b;
 }
@@ -261,7 +274,9 @@ export class Villages {
     }
     // A town: out along one of the four streets off the market square, through the ring street.
     const [lx, lz] = local(s, toward.x, toward.z);
-    const alongX = Math.abs(lx) > Math.abs(lz), sg = Math.sign(alongX ? lx : lz) || 1;
+    let alongX = Math.abs(lx) > Math.abs(lz), sg = Math.sign(alongX ? lx : lz) || 1;
+    // (A city's castle is up behind its north side: roads leave it east, west or south.)
+    if (s.kind === 'city' && !alongX && sg > 0) { alongX = true; sg = Math.sign(lx) || 1; }
     const street = BLOCK / 2;
     const pt = (u: number, w: number) => { const [x, z] = alongX ? world(s, u, w) : world(s, w, u); return { x, z }; };
     return { inner: [pt(sg * (BLOCK / 2 - 3), street), pt(sg * TOWN_EDGE, street)], out: pt(sg * (TOWN_EDGE + 18), street) };
@@ -352,7 +367,8 @@ export class Villages {
       const d = outside(p, x, z);
       // (On a plot it's the plot's level, whatever a neighbour's slope would make of it.)
       if (d === 0) return p.level;
-      if (d < FALL) h += (p.level - h) * (1 - smooth(0, FALL, d));
+      const fall = p.fall ?? FALL;
+      if (d < fall) h += (p.level - h) * (1 - smooth(0, fall, d));
     }
     return h;
   }
@@ -379,7 +395,12 @@ export class Villages {
     for (const f of v.fields) if (outside(f, x, z) < 1.5) return true;
     for (const s of v.paths) if (segDist(s, x, z) < s.w / 2 + 1.5) return true;
     // A town keeps its whole grid clear (gardens and yards between the houses).
-    if (v.grid) { const [lx, lz] = local(v.grid, x, z); if (Math.abs(lx) < TOWN_EDGE + 3 && Math.abs(lz) < TOWN_EDGE + 3) return true; }
+    if (v.grid) {
+      const [lx, lz] = local(v.grid, x, z);
+      if (Math.abs(lx) < TOWN_EDGE + 3 && Math.abs(lz) < TOWN_EDGE + 3) return true;
+      // A city: everything inside the palisade, and the castle's hill.
+      if (v.kind === 'city' && Math.abs(lx) < PAL_X + 3 && lz > -PAL_X - 3 && lz < CASTLE_Z + CASTLE_HALF + 16) return true;
+    }
     return false;
   }
 
@@ -416,7 +437,9 @@ export class Villages {
     if (s !== undefined) return s;
     s = null;
     const rnd = this.rng(cx, cz);
-    if (rnd() <= 0.42) {
+    // Now and then a castle city, where there's a hill to build the castle on and level land below it for the town.
+    if (hash2(cx, cz, this.gen.seed ^ 0xc17e) < 0.1) s = this.citySite(cx, cz);
+    if (!s && rnd() <= 0.42) {
       // A few spots in the square: keep the best open, level farmland.
       let best: { x: number; z: number; score: number } | null = null;
       for (let i = 0; i < 7; i++) {
@@ -461,6 +484,43 @@ export class Villages {
     return sum / 24 + (zone === 'meadow' ? 0 : zone === 'broadleaf' ? 1 : 2);
   }
 
+  /**
+   * A castle city's site: a hill, broad enough on top for the castle and
+   * standing well above level land (CASTLE_Z metres off) for the town. The site
+   * is the town's centre, its frame turned to face the castle.
+   */
+  private citySite(cx: number, cz: number): Site | null {
+    const g = this.gen;
+    let best: { s: Site; score: number } | null = null;
+    for (let i = 0; i < 12; i++) {
+      const hx = cx * VCELL + 150 + hash2(cx * 13 + i, cz, 71) * (VCELL - 300), hz = cz * VCELL + 150 + hash2(cx, cz * 17 + i, 72) * (VCELL - 300);
+      if (this.avoid.some((a) => Math.hypot(a.x - hx, a.z - hz) < AVOID + 60)) continue;
+      const top = g.height(hx, hz);
+      if (top < SEA + 8 || !Number.isNaN(g.water(hx, hz, top))) continue;
+      // A broad top.
+      let broad = true;
+      for (let k = 0; k < 8 && broad; k++) {
+        const a = (k / 8) * Math.PI * 2, h = g.height(hx + Math.cos(a) * 16, hz + Math.sin(a) * 16);
+        if (Math.abs(h - top) > 4.5) broad = false;
+      }
+      if (!broad) continue;
+      for (let k = 0; k < 8; k++) {
+        const a = (k / 8) * Math.PI * 2, dx = Math.cos(a), dz = Math.sin(a);
+        const tx = hx - dx * CASTLE_Z, tz = hz - dz * CASTLE_Z;
+        const drop = top - g.height(tx, tz);
+        if (drop < 5 || drop > 35) continue;
+        // The whole city inside its square of the grid.
+        const yaw = Math.atan2(dx, dz), F = { x: tx, z: tz, yaw };
+        const inCell = [[-PAL_X - 4, -PAL_X - 4], [PAL_X + 4, -PAL_X - 4], [-PAL_X - 4, CASTLE_Z + CASTLE_HALF + 18], [PAL_X + 4, CASTLE_Z + CASTLE_HALF + 18]]
+          .every(([lx, lz]) => { const [x, z] = world(F, lx, lz); return x > cx * VCELL + 8 && x < (cx + 1) * VCELL - 8 && z > cz * VCELL + 8 && z < (cz + 1) * VCELL - 8; });
+        if (!inCell || this.siteScore(tx, tz) === null || !this.townOk(tx, tz)) continue;
+        const score = Math.abs(drop - 14);
+        if (!best || score < best.score) best = { s: { cx, cz, x: tx, z: tz, kind: 'city', yaw }, score };
+      }
+    }
+    return best?.s ?? null;
+  }
+
   /** Is the land level and dry enough, wide enough, for a town's streets? */
   private townOk(x: number, z: number): boolean {
     const g = this.gen, h = g.height(x, z);
@@ -480,10 +540,11 @@ export class Villages {
     for (let i = 0; i < 15; i++) rnd();
     const v: Village = {
       kind: s.kind, cx: s.cx, cz: s.cz, name: settlementName(rnd, s.kind), x: s.x, z: s.z, r: 0, square: { x: s.x, z: s.z, r: 5 + rnd() * 1.5 },
-      fire: { x: s.x, z: s.z }, benches: [], houses: [], pads: [], pens: [], fields: [], paths: [], paved: [], stalls: [], pieces: [],
+      fire: { x: s.x, z: s.z }, benches: [], houses: [], pads: [], pens: [], fields: [], paths: [], paved: [], stalls: [], gates: [], pieces: [],
     };
     const links = this.siteLinks(s);
     if (s.kind === 'town') this.layoutTown(v, s, links, rnd);
+    else if (s.kind === 'city') { this.layoutTown(v, s, links, rnd, true); this.layoutCity(v, rnd); }
     else this.layoutVillage(v, s, links, rnd);
     // How far it all reaches.
     let reach = v.square.r;
@@ -640,7 +701,7 @@ export class Villages {
    * cathedral, the merchants' hall and the mayor's villa on the square, the
    * baker, carpenter and smith among the houses.
    */
-  private layoutTown(v: Village, s: Site, links: Site[], rnd: () => number) {
+  private layoutTown(v: Village, s: Site, links: Site[], rnd: () => number, city = false) {
     const F = { x: s.x, z: s.z, yaw: s.yaw };
     v.grid = F;
     const at = (lx: number, lz: number) => world(F, lx, lz);
@@ -764,6 +825,15 @@ export class Villages {
       const sides: [number, number][] = ([[0, -1], [0, 1], [-1, 0], [1, 0]] as [number, number][])
         .sort((a, b) => Math.hypot(cx + a[0] * 11, cz + a[1] * 11) - Math.hypot(cx + b[0] * 11, cz + b[1] * 11));
       for (const [nx, nz] of sides) {
+        // A city's grand tavern: the whole frontage of the block south of the square.
+        if (city && bi === 0 && bj === -1 && nx === 0 && nz === 1) {
+          const { wx, wz, yaw, level } = blockY(cx, cz + (11 - 0.8 - 4), faceYaw(0, 1), 5, 4);
+          const tav = this.newHouse(wx, wz, yaw, level, 5, 4, 2, 'tavern', 'innkeeper');
+          tav.doorX = 1;
+          addHouse(tav, { ground: 'stone_wall', upper: 'wood_wall', windows: 0.7 }, 0);
+          this.tavern(v, tav);
+          continue;
+        }
         let t = -5.5;
         while (t < 5.5) {
           const role = crafts.shift();
@@ -782,7 +852,7 @@ export class Villages {
           const stories = shop ? 1 : rnd() < 0.55 ? 2 : 1;
           const kind = role === 'baker' ? 'bakery' : role === 'carpenter' ? 'workshop' : role === 'smith' ? 'smithy' : 'house';
           // Homes for a dozen households; the rest are shops and lodgings (no one at home).
-          const lived = !!role || homes < 12;
+          const lived = !!role || homes < (city ? 8 : 12);
           if (!role && lived) homes++;
           const h = addHouse(this.newHouse(wx, wz, yaw, level, tiles, 2, stories, kind, role ?? 'villager'),
             { ground: rnd() < 0.4 ? 'stone_wall' : 'wood_wall', upper: 'wood_wall', windows: 0.6 }, lived ? (tiles === 3 ? 2 : 1) : 0);
@@ -792,6 +862,145 @@ export class Villages {
         }
       }
     }
+  }
+
+  /** A grand tavern's insides: a long table and benches, a hearth, a bar by the shelves, tables and stools, barrels, beds to let. */
+  private tavern(v: Village, h: House) {
+    const put = (type: string, lx: number, lz: number, yaw = 0) => {
+      const [x, z] = world(h, lx, lz);
+      v.pieces.push({ type, x, y: h.y + 0.2, z, yaw: h.yaw + yaw });
+      return { x, z };
+    };
+    put('dining_table', 0, -0.5);
+    put('bench', 0, -1.5); put('bench', 0, 0.5, Math.PI);
+    put('table', 2.6, 2.4, Math.PI / 2); put('stool', 1.7, 2.4); put('stool', 3.5, 2.4);
+    put('barrel', 4.4, 3.3); put('barrel', -1.5, 3.4);
+    put('shelf', 0, 3.6, Math.PI);
+    h.hearth = put('campfire', -3.4, 2.8);
+    h.bar = (([x, z]) => ({ x, z }))(world(h, 0, 2.6));
+    // Beds to let (anyone may sleep in them), and the innkeeper's own.
+    for (const lx of [-3.9, 3.9]) put('bed', lx, -2.4, Math.PI / 2);
+    this.furnish(v, h, 1);
+  }
+
+  /**
+   * A castle city's upper parts: the castle on its hill (curtain walls with a
+   * tower at each corner and a gatehouse, a keep, a great hall, the guards'
+   * barracks, a well in the courtyard), the road climbing to it lined with the
+   * villas of the well-to-do, and a timber palisade round the whole of the
+   * town below, with gates where the roads come in.
+   */
+  private layoutCity(v: Village, rnd: () => number) {
+    const F = v.grid!, at = (lx: number, lz: number) => { const [x, z] = world(F, lx, lz); return { x, z }; };
+    const H = CASTLE_HALF;
+    const C = { ...at(0, CASTLE_Z), yaw: F.yaw, half: H };
+    v.castle = C;
+    const cat = (lx: number, lz: number) => { const [x, z] = world(C, lx, lz); return { x, z }; };
+    // The castle mound: levelled at the hilltop, graded wide.
+    const level = this.gen.height(C.x, C.z);
+    v.pads.push({ x: C.x, z: C.z, yaw: C.yaw, hx: H + 3, hz: H + 3, level, fall: 16 });
+    v.paved.push({ x: C.x, z: C.z, yaw: C.yaw, hx: H - 1, hz: H - 1 });
+    // The road up: from the town's street, out through the palisade, to the gatehouse and into the courtyard.
+    const P0 = at(13, BLOCK * 1.5), P1 = cat(0, -H - 2.5), P2 = cat(0, -H + 5);
+    v.upper = [P0, P1, P2];
+    const len = Math.hypot(P1.x - P0.x, P1.z - P0.z), ryaw = Math.atan2(P1.x - P0.x, P1.z - P0.z);
+    v.paved.push({ x: (P0.x + P1.x) / 2, z: (P0.z + P1.z) / 2, yaw: ryaw, hx: 2.2, hz: len / 2 + 1 });
+    v.gates.push(P1, P2);
+    // Curtain walls, three courses of stone (6 m); the gatehouse's opening in the middle of the side facing the town.
+    const stoneSpec = { ground: 'stone_wall', upper: 'stone_wall', windows: 0.08, hollow: true };
+    for (const [sx, sz, ry] of [[0, -1, 0], [0, 1, 0], [-1, 0, Math.PI / 2], [1, 0, Math.PI / 2]] as const) {
+      for (let t = -H + 3; t <= H - 3; t += 2) {
+        if (sz === -1 && Math.abs(t) < 6.5) continue;
+        const p = cat(sx ? sx * H : t, sz ? sz * H : t);
+        for (let k = 0; k < 3; k++) v.pieces.push({ type: 'stone_wall', x: p.x, y: level - 0.1 + k * 2, z: p.z, yaw: C.yaw + ry });
+      }
+    }
+    // Towers at the corners, and either side of the gate.
+    const tower = (lx: number, lz: number, stories: number) => {
+      const p = cat(lx, lz);
+      const t = this.newHouse(p.x, p.z, C.yaw, level, 2, 2, stories, 'tower', 'guard');
+      t.doorX = 99;
+      this.building(v, t, stoneSpec, rnd);
+    };
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) tower(sx * H, sz * H, 5);
+    tower(-4, -H, 4); tower(4, -H, 4);
+    // Inside: the keep, the great hall, the barracks.
+    const inside = (lx: number, lz: number, faceX: number, faceZ: number, tiles: number, nz: number, stories: number, kind: House['kind'], role: HouseRole) => {
+      const p = cat(lx, lz);
+      const h = this.newHouse(p.x, p.z, C.yaw + Math.atan2(-faceX, -faceZ), level, tiles, nz, stories, kind, role);
+      const [dx, dz] = world(h, h.doorX, -h.nz - 0.9);
+      h.door = { x: dx, z: dz };
+      h.route = [h.door, h.door, h.door];
+      v.houses.push(h);
+      return h;
+    };
+    const keep = inside(0, 9, 0, -1, 4, 4, 4, 'keep', 'lord');
+    keep.doorX = 1;
+    { const [dx, dz] = world(keep, keep.doorX, -keep.nz - 0.9); keep.door = { x: dx, z: dz }; keep.route = [keep.door, keep.door, keep.door]; }
+    this.building(v, keep, { ground: 'stone_wall', upper: 'stone_wall', windows: 0.15 }, rnd);
+    this.furnish(v, keep, 1);
+    const hall = inside(10, -6, -1, 0, 5, 4, 2, 'great_hall', 'lord');
+    this.building(v, hall, { ground: 'stone_wall', upper: 'stone_wall', windows: 0.5 }, rnd);
+    {
+      const put = (type: string, lx: number, lz: number, yaw = 0) => { const [x, z] = world(hall, lx, lz); v.pieces.push({ type, x, y: level + 0.2, z, yaw: hall.yaw + yaw }); };
+      put('dining_table', 0, 0); put('bench', 0, -1, 0); put('bench', 0, 1, Math.PI);
+      put('armchair', 3, 0, -Math.PI / 2);
+      put('hide_rug', -2.5, 0);
+    }
+    const barracks = inside(-12, -8, 1, 0, 3, 2, 2, 'barracks', 'guard');
+    this.building(v, barracks, { ground: 'stone_wall', upper: 'wood_wall', windows: 0.3 }, rnd);
+    this.furnish(v, barracks, 2);
+    { const p = cat(-4, -5); v.pieces.push({ type: 'well', x: p.x, y: level - 0.05, z: p.z, yaw: C.yaw }); }
+    { const p = cat(5, 6); v.pieces.push({ type: 'campfire', x: p.x, y: level, z: p.z, yaw: 0 }); }
+
+    // The villas of the well-to-do, either side of the road up.
+    const dirX = (P1.x - P0.x) / len, dirZ = (P1.z - P0.z) / len;
+    for (const t of [0.36, 0.68]) {
+      for (const side of [-1, 1]) {
+        const cx = P0.x + (P1.x - P0.x) * t + dirZ * side * 9, cz = P0.z + (P1.z - P0.z) * t - dirX * side * 9;
+        // Front toward the road.
+        const yaw = Math.atan2(-(dirZ * side * -1), -(-dirX * side * -1));
+        const vl = this.pad(v, { x: cx, z: cz, yaw, hx: 3.8, hz: 2.8 });
+        const h = this.newHouse(cx, cz, yaw, vl, 3, 2, t > 0.5 ? 3 : 2, 'villa', 'noble');
+        const [dx, dz] = world(h, h.doorX, -h.nz - 0.9);
+        h.door = { x: dx, z: dz };
+        h.route = [h.door, h.door, h.door];
+        v.houses.push(h);
+        this.building(v, h, { ground: 'stone_wall', upper: 'stone_wall', windows: 0.8 }, rnd);
+        this.furnish(v, h, 2);
+      }
+    }
+
+    // The palisade: two courses of logs round the town and the villas, gates where roads come in (an opening under a lintel).
+    const gaps: { side: number; at: number }[] = [];
+    const sides: [number, number, number, number][] = [[-PAL_X, -PAL_X, PAL_X, -PAL_X], [PAL_X, -PAL_X, PAL_X, PAL_N], [PAL_X, PAL_N, -PAL_X, PAL_N], [-PAL_X, PAL_N, -PAL_X, -PAL_X]];
+    const toGrid = (p: { x: number; z: number }) => local(F, p.x, p.z);
+    const crossings = [...v.paths.map((sg) => [toGrid({ x: sg.ax, z: sg.az }), toGrid({ x: sg.bx, z: sg.bz })]), [toGrid(P0), toGrid(P1)]];
+    sides.forEach(([x0, z0, x1, z1], si) => {
+      for (const [[ax, az], [bx, bz]] of crossings) {
+        // Where a road crosses this side (in the grid's frame).
+        const d1x = x1 - x0, d1z = z1 - z0, d2x = bx - ax, d2z = bz - az, den = d1x * d2z - d1z * d2x;
+        if (Math.abs(den) < 1e-6) continue;
+        const u = ((ax - x0) * d2z - (az - z0) * d2x) / den, w = ((ax - x0) * d1z - (az - z0) * d1x) / den;
+        if (u > 0 && u < 1 && w >= 0 && w <= 1) gaps.push({ side: si, at: u * Math.hypot(d1x, d1z) });
+      }
+    });
+    sides.forEach(([x0, z0, x1, z1], si) => {
+      const L = Math.hypot(x1 - x0, z1 - z0), ux = (x1 - x0) / L, uz = (z1 - z0) / L;
+      const ry = Math.abs(uz) > 0.5 ? Math.PI / 2 : 0;
+      for (let d = 1; d < L; d += 2) {
+        const gap = gaps.find((g) => g.side === si && Math.abs(g.at - d) < 2.6);
+        const p = at(x0 + ux * d, z0 + uz * d);
+        const gy = this.ground(v, p.x, p.z) - 0.1;
+        // A gate: open below, a course of logs across the top, posts either side.
+        if (gap) { v.pieces.push({ type: 'log_wall', x: p.x, y: gy + 2, z: p.z, yaw: F.yaw + ry }); continue; }
+        for (let k = 0; k < 2; k++) v.pieces.push({ type: 'log_wall', x: p.x, y: gy + k * 2, z: p.z, yaw: F.yaw + ry });
+      }
+      for (const g of gaps.filter((gg) => gg.side === si)) {
+        const p = at(x0 + ux * g.at, z0 + uz * g.at);
+        v.gates.push(p);
+      }
+    });
   }
 
   // ---------- buildings
@@ -804,7 +1013,7 @@ export class Villages {
    * there), storey on storey, and a pitched roof (ridge along its length) with
    * its gable ends filled in. Any width; any depth in 4 m steps.
    */
-  private building(v: Village, h: House, spec: { ground: string; upper: string; windows: number }, rnd: () => number) {
+  private building(v: Village, h: House, spec: { ground: string; upper: string; windows: number; hollow?: boolean }, rnd: () => number) {
     const nx = h.tiles, nz = h.nz, half = Math.PI / 2;
     const put = (type: string, lx: number, ly: number, lz: number, yaw: number) => {
       const [x, z] = world(h, lx, lz);
@@ -816,7 +1025,7 @@ export class Villages {
       const win = () => (rnd() < spec.windows ? 'window_wall' : wall);
       for (let i = 0; i < nx; i++) {
         const lx = -nx + 1 + i * 2;
-        for (let j = 0; j < nz; j++) put('floor', lx, fy, -nz + 1 + j * 2, 0);
+        if (st === 0 || !spec.hollow) for (let j = 0; j < nz; j++) put('floor', lx, fy, -nz + 1 + j * 2, 0);
         put(st === 0 && lx === h.doorX ? 'door' : win(), lx, wy, -nz, 0);
         put(win(), lx, wy, nz, Math.PI);
       }

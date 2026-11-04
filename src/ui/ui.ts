@@ -27,6 +27,7 @@ const JOB_WORDS: Record<HouseRole, string> = {
   farmer: 'farmer\'s work', shepherd: 'shepherd\'s work', woodcutter: 'woodcutter\'s work', butcher: 'butcher\'s work',
   smith: 'smith\'s work', elder: 'odd jobs', villager: 'gathering about the land',
   priest: 'the church\'s needs', mayor: 'the town\'s needs', merchant: 'trade goods', baker: 'baker\'s work', carpenter: 'carpenter\'s work',
+  lord: 'the castle\'s needs', noble: 'fine goods', innkeeper: 'the tavern\'s needs', guard: 'the garrison\'s needs',
 };
 const fmtCoins = (n: number) => (Number.isInteger(n) ? `${n}` : n.toFixed(1));
 
@@ -1283,6 +1284,7 @@ export class UI {
       this.devButton('Teleport home', () => devCommands.teleportHome(g)),
       this.devButton('Teleport to village', () => devCommands.teleportVillage(g)),
       this.devButton('Teleport to town', () => devCommands.teleportVillage(g, 'town')),
+      this.devButton('Teleport to castle', () => devCommands.teleportVillage(g, 'city')),
       this.devButton('Grow everything', () => devCommands.growEverything(g)),
       this.devButton('Spawn deer', () => devCommands.spawnAnimal(g, 'deer')),
       this.devButton('Spawn boar', () => devCommands.spawnAnimal(g, 'boar')),

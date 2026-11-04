@@ -58,6 +58,10 @@ Animals should be rigged if possible (walk, run, idle, graze, death).
 - `well.glb` (stone ring, posts, winch, small roof; currently simple shapes)
 - `water_trough.glb` (for animal pens), `hay_bale.glb`, `signpost.glb` (village name at the roads in)
 - `thatch_roof` piece variant with overhanging eaves (village houses use the plain 45° roof)
+- Towns and castle cities: `market_stall.glb`, `crenellated_wall.glb` (castle wall top with battlements), `portcullis_gate.glb`
+  (the castle gatehouse is an open arch now), `palisade_wall.glb` (pointed log stakes; the palisade uses log walls),
+  `palisade_gate.glb`, `tavern_sign.glb`, `banner.glb` (on the keep and towers), `slate_roof` variant for stone buildings,
+  `spiral_stair` / `ladder` (upper floors and towers have no way up yet)
 
 ## Textures (PBR: `_color`, `_normal`, `_orm`, in `public/textures/`)
 
@@ -105,6 +109,7 @@ Animals should be rigged if possible (walk, run, idle, graze, death).
 
 **Villages**
 - `village_chatter` (loop: voices at the evening fire), `shears` ×2, `anvil_distant` (the smith at work, heard across the village)
+- `tavern_crowd` (loop), `church_bell` ×2, `market_crowd` (loop), `gate_creak`, `cart_on_road` (traders passing)
 
 **Interface**
 - `ui_click`, `ui_open`, `map_open` (parchment unrolling), `quest_new`, `quest_complete`,
