@@ -401,7 +401,8 @@ export class QuestLog {
   private targets: Target[] = [];
   private timer = 0;
   private time = 0;
-  private lastHtml = '';
+  /** What the panel shows now (null: redraw it, whatever's due). */
+  private lastHtml: string | null = null;
   /** Quests just finished (shown in the panel a while) and just offered (likewise), by id, with when. */
   private finished = new Map<string, number>();
   private offered = new Map<string, number>();
@@ -480,7 +481,20 @@ export class QuestLog {
     this.off = true;
     this.quests = this.quests.filter((q) => q.status === 'done' || !DEF.get(q.id)?.tutorial);
     this.offered.clear();
-    this.lastHtml = '';
+    // Clear the panel and the markers straight away (the game may be paused, so the next check could be a while).
+    this.targets = [];
+    this.group.visible = false;
+    if (this.edge) this.edge.style.display = 'none';
+    this.changed();
+    this.render('', false);
+  }
+
+  /** Bring the tutorial back (from the pause menu): the house quest starts again, and any steps you've already done tick off by themselves. */
+  restart(x: number, z: number) {
+    this.off = false;
+    this.quests = this.quests.filter((q) => q.id !== 'home');
+    this.quests.unshift({ id: 'home', status: 'active', step: 0, tracked: true, anchor: null, start: { x, z } });
+    this.timer = 0;
     this.changed();
   }
 
@@ -531,7 +545,7 @@ export class QuestLog {
   }
 
   private changed() {
-    this.lastHtml = '';
+    this.lastHtml = null;
     this.onChange?.();
   }
 
@@ -628,13 +642,13 @@ export class QuestLog {
         this.changed();
       }
     }
-    for (const [id, t] of this.finished) if (this.time - t > 20) { this.finished.delete(id); this.lastHtml = ''; }
+    for (const [id, t] of this.finished) if (this.time - t > 20) { this.finished.delete(id); this.lastHtml = null; }
     // (Offers waiting from an earlier session show again.)
-    for (const q of this.quests) if (q.status === 'offered' && DEF.get(q.id)?.tutorial && !this.offered.has(q.id)) { this.offered.set(q.id, this.time); this.lastHtml = ''; }
+    for (const q of this.quests) if (q.status === 'offered' && DEF.get(q.id)?.tutorial && !this.offered.has(q.id)) { this.offered.set(q.id, this.time); this.lastHtml = null; }
     // An offer stays in the panel until you take it up (a tutorial one), or a while (others).
     for (const [id, t] of this.offered) {
       const q = this.quests.find((x) => x.id === id);
-      if (q?.status !== 'offered' || (!DEF.get(id)?.tutorial && this.time - t > 45)) { this.offered.delete(id); this.lastHtml = ''; }
+      if (q?.status !== 'offered' || (!DEF.get(id)?.tutorial && this.time - t > 45)) { this.offered.delete(id); this.lastHtml = null; }
     }
 
     // The focused quest's step: the nearest few things to go for (looking further afield if there's nothing close).

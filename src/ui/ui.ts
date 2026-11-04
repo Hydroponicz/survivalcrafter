@@ -172,6 +172,7 @@ export class UI {
           <button data-act="sound" title="Turn the game's sound on or off">Sound: ${g.sound.muted ? 'off' : 'on'}</button>
           <button data-act="windows" title="Put every window and panel back where it started">Reset window positions</button>
           <button data-act="skip-tutorial" title="Turn the tutorial quest off for this world">Skip tutorial</button>
+          <button data-act="restart-tutorial" title="Add the tutorial quest back to your quest log">Restart tutorial</button>
           <button data-act="new" title="Delete this world and start a new one" class="danger">Abandon world</button>
         </div>
       </div>`);
@@ -205,7 +206,13 @@ export class UI {
       }
       if (act === 'windows') { this.resetWindows(); this.log('Windows are back where they started.', 'info'); return; }
       if (act === 'skip-tutorial') {
-        if (confirm('Turn the tutorial off for this world?')) { g.quests?.skip(); this.log('Tutorial off. Press H any time for the guide.', 'info'); }
+        if (confirm('Turn the tutorial off for this world?')) { g.quests?.skip(); this.log('Tutorial off. Press H any time for the guide, or restart it from this menu.', 'info'); this.update(); }
+        return;
+      }
+      if (act === 'restart-tutorial') {
+        g.quests?.restart(g.player.pos.x, g.player.pos.z);
+        this.log('The tutorial is back in your quest log. Steps you\'ve already done will tick off by themselves.', 'good');
+        this.update();
         return;
       }
       if (act === 'export') {
@@ -603,7 +610,12 @@ export class UI {
     setStyle(this.startEl, 'display', this.started ? 'none' : 'flex');
     const showPause = this.started && !g.input.locked && !this.anyWindowOpen() && !this.wantsRelock && this.relockGrace <= 0 && !this.modalOpen;
     setStyle(this.pauseEl, 'display', showPause ? 'flex' : 'none');
-    if (showPause) (this.pauseEl.querySelector('[data-act="skip-tutorial"]') as HTMLElement).style.display = g.quests?.active ? '' : 'none';
+    if (showPause) {
+      (this.pauseEl.querySelector('[data-act="skip-tutorial"]') as HTMLElement).style.display = g.quests?.active ? '' : 'none';
+      // Offered once the tutorial's off, or its house quest is gone from the log.
+      const home = g.quests?.quests.find((q) => q.id === 'home');
+      (this.pauseEl.querySelector('[data-act="restart-tutorial"]') as HTMLElement).style.display = g.quests && (g.quests.off || !home) ? '' : 'none';
+    }
 
     // Live windows refresh a few times per second.
     this.refreshTimer -= 1 / 60;
