@@ -816,7 +816,7 @@ export const ACTIONS: ActionDef[] = [
   },
   {
     id: 'demolish', label: 'Demolish',
-    show: (c) => { const s = obj(c, 'structure'); return !!s && s.built && !STRUCTURES[s.type].item && s.type !== 'village_store' && (toolIs(c, 'hammer') || toolIs(c, 'hatchet')); },
+    show: (c) => { const s = obj(c, 'structure'); return !!s && s.built && !STRUCTURES[s.type].item && !STRUCTURES[s.type].village && (toolIs(c, 'hammer') || toolIs(c, 'hatchet')); },
     time: 12, skill: 'carpentry', difficulty: 5, stamina: 15, toolWear: 0.2,
     run: (c) => {
       const s = obj(c, 'structure')!;

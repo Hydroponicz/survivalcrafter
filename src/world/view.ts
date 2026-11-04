@@ -1369,10 +1369,119 @@ export function buildPieceMesh(type: string, state: { lit?: boolean; open?: bool
       tex(new THREE.BoxGeometry(1.0, 0.35, 1.9), 'dark_planks', 0, 0.18, 0, { turn: true });
       add(new THREE.BoxGeometry(0.9, 0.12, 1.8), 0x9b7552, 0, 0.42, 0);
       break;
+    case 'market_hall': {
+      // Six posts, tie-beams, a thatched roof (ridge along its length), a flagged floor.
+      for (const x of [-6, 0, 6]) for (const z of [-4, 4]) tex(new THREE.BoxGeometry(0.3, 4, 0.3), 'rough_wood', x, 2, z);
+      for (const z of [-4, 4]) tex(new THREE.BoxGeometry(12.4, 0.25, 0.3), 'rough_wood', 0, 3.9, z, { turn: true });
+      for (const x of [-6, 0, 6]) tex(new THREE.BoxGeometry(0.25, 0.25, 8.3), 'rough_wood', x, 3.9, 0);
+      tex(new THREE.BoxGeometry(12, 0.08, 8), 'stone', 0, 0.04, 0, { tint: 0xc8c0b4 });
+      for (const side of [-1, 1]) {
+        const r = tex(new THREE.BoxGeometry(13.2, 0.2, 6.4), 'thatch', 0, 5.6, side * 2.2);
+        r.rotation.x = side * 0.78;
+      }
+      for (const x of [-6.5, 6.5]) {
+        const tri = new THREE.Shape([new THREE.Vector2(-4.4, 0), new THREE.Vector2(4.4, 0), new THREE.Vector2(0, 4.2)]);
+        const gab = tex(new THREE.ExtrudeGeometry(tri, { depth: 0.12, bevelEnabled: false }), 'planks', x, 4, 0);
+        gab.rotation.y = Math.PI / 2;
+      }
+      break;
+    }
+    case 'stage': {
+      // A raised platform with steps, a painted backdrop, a canopy and curtains.
+      tex(new THREE.BoxGeometry(8, 1.2, 5), 'dark_planks', 0, 0.6, 0);
+      tex(new THREE.BoxGeometry(8.1, 0.1, 5.1), 'planks', 0, 1.22, 0, { turn: true });
+      for (let k = 0; k < 3; k++) tex(new THREE.BoxGeometry(1.4, 0.4 * (k + 1), 0.4), 'dark_planks', 3.2, 0.2 * (k + 1), -2.7 - (2 - k) * 0.4);
+      tex(new THREE.BoxGeometry(8, 3, 0.15), 'planks', 0, 2.7, 2.4);
+      add(new THREE.BoxGeometry(5, 2.2, 0.05), 0x3a5a7a, 0, 2.5, 2.3, { roughness: 1 });
+      for (const x of [-3.9, 3.9]) {
+        tex(new THREE.BoxGeometry(0.25, 3.6, 0.25), 'rough_wood', x, 3, 2.4);
+        tex(new THREE.BoxGeometry(0.2, 3.4, 0.2), 'rough_wood', x, 2.9, -2.4);
+        add(new THREE.BoxGeometry(0.9, 2.8, 0.08), 0x8a1c1c, x * 0.86, 2.6, -2.3, { roughness: 1 });
+      }
+      const canopy = add(new THREE.BoxGeometry(8.6, 0.08, 5.4), 0x8a1c1c, 0, 4.7, 0, { roughness: 1 });
+      canopy.rotation.x = 0.12;
+      break;
+    }
+    case 'stands': {
+      // Three tiers of benches, rising to the back.
+      for (let k = 0; k < 3; k++) {
+        tex(new THREE.BoxGeometry(8, 0.45 * (k + 1), 1), 'dark_planks', 0, 0.225 * (k + 1), -1 + k);
+        tex(new THREE.BoxGeometry(8, 0.08, 0.4), 'planks', 0, 0.45 * (k + 1) + 0.04, -1.2 + k, { turn: true });
+      }
+      for (const x of [-4, 4]) tex(new THREE.BoxGeometry(0.15, 2.2, 0.15), 'rough_wood', x, 1.1, 1.4);
+      break;
+    }
+    case 'gallows': {
+      // A scaffold of planks on posts, steps up one side, two uprights and a beam, a noose.
+      tex(new THREE.BoxGeometry(3, 0.12, 3), 'dark_planks', 0, 1.4, 0, { turn: true });
+      for (const x of [-1.35, 1.35]) for (const z of [-1.35, 1.35]) tex(new THREE.BoxGeometry(0.2, 1.4, 0.2), 'rough_wood', x, 0.7, z);
+      for (let k = 0; k < 4; k++) tex(new THREE.BoxGeometry(1, 0.12, 0.35), 'planks', 0, 0.35 * (k + 1) - 0.06, -1.7 - (3 - k) * 0.35);
+      for (const x of [-1, 1]) tex(new THREE.BoxGeometry(0.22, 2.9, 0.22), 'rough_wood', x, 2.9, 0.6);
+      tex(new THREE.BoxGeometry(2.5, 0.22, 0.22), 'rough_wood', 0, 4.35, 0.6, { turn: true });
+      add(new THREE.CylinderGeometry(0.025, 0.025, 1.1, 5), 0x8a7650, 0, 3.7, 0.6, { roughness: 1 });
+      const loop = add(new THREE.TorusGeometry(0.16, 0.03, 4, 10), 0x8a7650, 0, 3.0, 0.6, { roughness: 1 });
+      loop.rotation.x = Math.PI / 2;
+      break;
+    }
     default:
-      furnitureMesh(type, g, tex, add);
+      if (type.startsWith('th_')) townhouseMesh(type, tex, add);
+      else furnitureMesh(type, g, tex, add);
   }
   return g;
+}
+
+/**
+ * A town house: a stone or timber ground floor with a door and windows, upper
+ * storeys jettied out over the street on beams, timber framing on the plank
+ * storeys, a steep roof (ridge along the front) with its gable ends, and a
+ * chimney on the stone ones.
+ */
+function townhouseMesh(type: string, tex: (geo: THREE.BufferGeometry, s: Surface, x?: number, y?: number, z?: number, o?: { turn?: boolean; tint?: number }) => THREE.Mesh,
+  add: (geo: THREE.BufferGeometry, color: number, x?: number, y?: number, z?: number, extra?: THREE.MeshStandardMaterialParameters) => THREE.Mesh) {
+  const w = +type[3], d = +type[4], st = +type[5], style = type[6];
+  const W = w * 2, D = d * 2, H = 2.4;
+  const ground: Surface = style === 'b' ? 'dark_planks' : 'stone_wall', upper: Surface = style === 'c' ? 'stone_wall' : style === 'b' ? 'dark_planks' : 'planks';
+  const roofS: Surface = style === 'c' ? 'dark_planks' : 'thatch';
+  const tint = style === 'a' ? 0xf0e6d6 : 0xffffff;
+  tex(new THREE.BoxGeometry(W, H, D), ground, 0, H / 2, 0);
+  // Upper storeys, each jutting out a little more over the street (local -z is the front).
+  let front = D / 2, top = H;
+  for (let k = 1; k < st; k++) {
+    const jut = style === 'c' ? 0 : 0.35 * k;
+    const dd = D + jut;
+    tex(new THREE.BoxGeometry(W + 0.1, H, dd), upper, 0, H * k + H / 2, -jut / 2, { tint });
+    // The floor beam the storey sits out on, and the posts of its frame.
+    tex(new THREE.BoxGeometry(W + 0.2, 0.18, 0.22), 'rough_wood', 0, H * k + 0.05, -dd / 2 - jut / 2 + 0.05, { turn: true });
+    if (style !== 'c') for (let x = -W / 2; x <= W / 2 + 0.01; x += W / Math.max(1, w)) tex(new THREE.BoxGeometry(0.16, H, 0.16), 'rough_wood', x, H * k + H / 2, -dd / 2 - jut / 2 - 0.03);
+    front = dd / 2 + jut / 2;
+    top = H * (k + 1);
+  }
+  // Windows: dark panes in frames, one or two to a bay, every storey; the door below.
+  for (let k = 0; k < st; k++) {
+    const jut = k === 0 || style === 'c' ? 0 : 0.35 * k;
+    const fz = -(k === 0 ? D / 2 : D / 2 + jut) - 0.02;
+    for (let x = -W / 2 + 1; x < W / 2; x += 2) {
+      if (k === 0 && x === -W / 2 + 1) continue; // the door's bay
+      add(new THREE.BoxGeometry(0.7, 0.8, 0.06), 0x1c1f24, x, H * k + 1.3, fz, { roughness: 0.3, metalness: 0.1 });
+      tex(new THREE.BoxGeometry(0.86, 0.1, 0.1), 'rough_wood', x, H * k + 0.86, fz, { turn: true });
+      // (and at the back)
+      add(new THREE.BoxGeometry(0.7, 0.8, 0.06), 0x1c1f24, x, H * k + 1.3, D / 2 + 0.02, { roughness: 0.3, metalness: 0.1 });
+    }
+  }
+  tex(new THREE.BoxGeometry(1.0, 1.95, 0.1), 'dark_planks', -W / 2 + 1, 0.98, -D / 2 - 0.04);
+  // The roof: two steep slopes meeting at a ridge along the front, and the gable ends filled.
+  const back = D / 2, depth = front + back, mid = (back - front) / 2, rise = depth * 0.62;
+  const slope = Math.hypot(depth / 2, rise), ang = Math.atan2(rise, depth / 2);
+  for (const side of [-1, 1]) {
+    const r = tex(new THREE.BoxGeometry(W + 0.5, 0.16, slope + 0.35), roofS, 0, top + rise / 2, mid + side * depth / 4);
+    r.rotation.x = side * ang;
+  }
+  const tri = new THREE.Shape([new THREE.Vector2(-depth / 2, 0), new THREE.Vector2(depth / 2, 0), new THREE.Vector2(0, rise)]);
+  for (const x of [-W / 2, W / 2 - 0.1]) {
+    const gab = tex(new THREE.ExtrudeGeometry(tri, { depth: 0.1, bevelEnabled: false }), upper, x, top, mid, { tint });
+    gab.rotation.y = Math.PI / 2;
+  }
+  if (style === 'c' || (w === 3 && style === 'a')) tex(new THREE.BoxGeometry(0.6, 1.6, 0.6), 'stone_wall', W / 2 - 0.8, top + rise * 0.6, back - 0.8);
 }
 
 /** Inside the solid (built) copy of a planned piece? */

@@ -41,7 +41,7 @@ const WALK = 1.45;
 export const ROLE_NAMES: Record<HouseRole, string> = {
   farmer: 'farmer', shepherd: 'shepherd', woodcutter: 'woodcutter', butcher: 'butcher', smith: 'smith', elder: 'village elder', villager: 'villager',
   priest: 'priest', mayor: 'mayor', merchant: 'merchant', baker: 'baker', carpenter: 'carpenter',
-  lord: 'lord of the castle', noble: 'noble', innkeeper: 'innkeeper', guard: 'guard',
+  lord: 'lord of the castle', noble: 'noble', innkeeper: 'innkeeper', guard: 'guard', performer: 'player',
 };
 
 const NAMES = ['Aldric', 'Edda', 'Osric', 'Maud', 'Wulfric', 'Hilde', 'Godwin', 'Agnes', 'Leofric', 'Bertha', 'Cedric', 'Elfrida', 'Hamon', 'Isolde',
@@ -67,14 +67,14 @@ const KIT: Record<HouseRole, [string, number][]> = {
   priest: [], mayor: [], merchant: [],
   baker: [['clay_jar', 2]],
   carpenter: [['iron_hammer', 1], ['saw', 1]],
-  lord: [], noble: [], innkeeper: [], guard: [['iron_sword', 1]],
+  lord: [], noble: [], innkeeper: [], guard: [['iron_sword', 1]], performer: [],
 };
 /** What each job is good at (skill levels). */
 const TRADE: Record<HouseRole, SkillId[]> = {
   farmer: ['farming'], shepherd: ['taming'], woodcutter: ['woodcutting', 'carpentry'], butcher: ['butchering'],
   smith: ['smithing', 'firemaking'], elder: ['firemaking'], villager: ['foraging'],
   priest: ['herbalism'], mayor: ['firemaking', 'cooking'], merchant: [], baker: ['cooking', 'firemaking'], carpenter: ['carpentry'],
-  lord: [], noble: [], innkeeper: ['cooking', 'firemaking'], guard: ['fighting'],
+  lord: [], noble: [], innkeeper: ['cooking', 'firemaking'], guard: ['fighting'], performer: [],
 };
 /** What the carpenter makes, in turn. */
 const CARPENTRY = ['stool', 'chair', 'bench', 'table'];
@@ -396,6 +396,7 @@ export class VillageLife {
       case 'noble': this.noble(v); break;
       case 'innkeeper': this.innkeeper(v); break;
       case 'guard': this.guard(v); break;
+      case 'performer': this.perform(v, false); break;
       default: this.gather(v); break;
     }
     if (!v.steps.length) this.loiter(v);
@@ -437,7 +438,7 @@ export class VillageLife {
     }
     // Supper (once an evening) from the stores.
     if (v.supper !== this.g.world.day) { v.supper = this.g.world.day; v.steps.push({ kind: 'call', fn: () => this.meal(v) }); }
-    // In a city: the guards keep watch, the lord dines in the great hall, everyone else makes for the tavern.
+    // In a city: the guards keep watch, the lord dines in the great hall.
     if (vil.kind === 'city') {
       if (v.role === 'guard') { this.guard(v); return; }
       const hall = v.role === 'lord' ? vil.houses.find((h) => h.kind === 'great_hall') : undefined;
@@ -446,19 +447,62 @@ export class VillageLife {
         v.steps.push({ kind: 'pose', clip: 'eat', time: 50, doing: 'dining in the great hall' });
         return;
       }
-      const tav = vil.houses.find((h) => h.kind === 'tavern');
-      if (tav && v.role !== 'innkeeper') {
-        const a = (v.id * 2.399) % (Math.PI * 2), r = 1.3 + (v.id % 3) * 0.5;
-        const [sx, sz] = local(tav, Math.cos(a) * r * 1.8, -0.5 + Math.sin(a) * r);
-        this.walkTo(v, { x: sx, z: sz }, 'off to the tavern', true);
-        v.steps.push({ kind: 'pose', clip: v.id % 3 === 0 ? 'eat' : v.id % 3 === 1 ? 'interact' : 'drink', time: 40 + Math.random() * 30, face: { x: tav.x, z: tav.z }, doing: 'merrymaking at the tavern' });
-        return;
-      }
+    }
+    // In a town or city: the innkeepers serve, the players play, and everyone else goes out (a different place most nights).
+    if (vil.grid) {
       if (v.role === 'innkeeper') { this.innkeeper(v); return; }
+      if (v.role === 'performer' && vil.stage) { this.perform(v, true); return; }
+      if (this.goOut(v)) return;
     }
     const a = (v.id * 2.399 + Math.floor(this.g.world.time / 60)) % (Math.PI * 2), r = 2.4 + (v.id % 3) * 0.5;
     this.walkTo(v, { x: vil.fire.x + Math.cos(a) * r, z: vil.fire.z + Math.sin(a) * r }, 'heading to the fire');
     v.steps.push({ kind: 'pose', clip: v.id % 4 === 0 ? 'interact' : 'idle', time: 30 + Math.random() * 30, face: vil.fire, doing: 'sitting out the evening by the fire' });
+  }
+
+  /**
+   * An evening out in a town: the tavern (most often), the playhouse, the
+   * gaming den, the baths, a stroll in the pleasure garden, or the fire in
+   * the square. False if there's nowhere to go but the fire.
+   */
+  private goOut(v: Villager): boolean {
+    const vil = v.village;
+    const taverns = vil.houses.filter((h) => h.kind === 'tavern');
+    const roll = ((v.id * 7919 + this.g.world.day * 104729) >>> 0) % 100;
+    const want = roll < 40 ? 'tavern' : roll < 65 ? 'playhouse' : roll < 75 ? 'den' : roll < 85 ? 'garden' : roll < 92 ? 'bathhouse' : 'fire';
+    const venue = vil.venues.find((x) => x.kind === want);
+    if (venue) {
+      const [sx, sz] = local(venue, (Math.random() - 0.5) * 2 * venue.hx, (Math.random() - 0.5) * 2 * venue.hz);
+      const what = venue.kind === 'playhouse' ? ['off to the playhouse', 'watching the play', v.id % 3 ? 'idle' : 'interact']
+        : venue.kind === 'den' ? ['off to the gaming den', 'dicing in the gaming den', 'interact']
+        : venue.kind === 'bathhouse' ? ['off to the baths', 'soaking at the bathhouse', 'idle']
+        : ['off for a stroll', 'strolling in the pleasure garden', 'idle'];
+      this.walkTo(v, { x: sx, z: sz }, what[0], !!venue.indoors);
+      v.steps.push({ kind: 'pose', clip: what[2] as 'idle', time: 40 + Math.random() * 30, face: venue.face, doing: what[1] });
+      return true;
+    }
+    if (want === 'fire' || !taverns.length) return false;
+    const tav = taverns[v.id % taverns.length];
+    const a = (v.id * 2.399) % (Math.PI * 2), r = 1.3 + (v.id % 3) * 0.5;
+    const [sx, sz] = local(tav, Math.cos(a) * r * 1.8, -0.5 + Math.sin(a) * r);
+    this.walkTo(v, { x: sx, z: sz }, 'off to the tavern', true);
+    v.steps.push({ kind: 'pose', clip: v.id % 3 === 0 ? 'eat' : v.id % 3 === 1 ? 'interact' : 'drink', time: 40 + Math.random() * 30, face: { x: tav.x, z: tav.z }, doing: 'merrymaking at the tavern' });
+    return true;
+  }
+
+  /** The players: rehearse by day, and of an evening play to the crowd in front of the stage (a sword fight, a song, a speech). */
+  private perform(v: Villager, show: boolean) {
+    const st = v.village.stage;
+    if (!st) { this.gather(v); return; }
+    const side = ((v.id % 3) - 1) * 1.6;
+    const dx = st.face.x - st.x, dz = st.face.z - st.z, d = Math.hypot(dx, dz) || 1;
+    this.walkTo(v, { x: st.x - (dz / d) * side, z: st.z + (dx / d) * side }, show ? 'going on stage' : 'off to rehearse');
+    const acts: [string, string][] = show
+      ? [['attack_one', 'fighting a stage duel'], ['interact', 'declaiming to the crowd'], ['attack_two', 'fighting a stage duel'], ['idle', 'singing a ballad']]
+      : [['interact', 'rehearsing lines'], ['attack_one', 'practising a stage fight'], ['idle', 'learning a new song']];
+    for (let k = 0; k < (show ? 3 : 2); k++) {
+      const [clip, doing] = acts[Math.floor(Math.random() * acts.length)];
+      v.steps.push({ kind: 'pose', clip: clip as 'idle', time: 15 + Math.random() * 15, face: st.face, doing });
+    }
   }
 
   /** A meal from the village's stores (or none, if they're bare). */
@@ -986,7 +1030,7 @@ export class VillageLife {
       }
     }
     // In a town: errands at the market.
-    if (vil.kind === 'town' && vil.stalls.length && Math.random() < 0.5) {
+    if (vil.grid && vil.stalls.length && Math.random() < 0.5) {
       const st = vil.stalls[Math.floor(Math.random() * vil.stalls.length)];
       const [fx, fz] = local(st, 0, -1.4);
       this.walkTo(v, { x: fx, z: fz }, 'off to the market');
@@ -1204,7 +1248,7 @@ export class VillageLife {
    */
   private cityPath(vil: Village, from: Spot, to: Spot): Spot[] {
     const R = vil.upper;
-    const up = (p: Spot) => !!R && toFrame(vil.grid!, p.x, p.z)[1] > 42;
+    const up = (p: Spot) => !!R && toFrame(vil.grid!, p.x, p.z)[1] > vil.edge! + 1;
     const ua = up(from), ub = up(to);
     if (!ua && !ub) { const a = this.streetPoint(vil, from), b = this.streetPoint(vil, to); return [a, ...this.streets(vil, a, b)]; }
     const out: Spot[] = [];
@@ -1217,36 +1261,25 @@ export class VillageLife {
     return out;
   }
 
-  /** The nearest point on a town's streets (or its market square) to a spot. */
+  /** The nearest point on a town's streets to a spot. */
   private streetPoint(vil: Village, p: Spot): Spot {
-    const F = vil.grid!;
+    const F = vil.grid!, L = vil.lines!, lim = L.at(-1)!;
     const [lx, lz] = toFrame(F, p.x, p.z);
-    // In the market square: the street alongside it, on the nearest side.
-    if (Math.abs(lx) < STREETS[2] && Math.abs(lz) < STREETS[2]) {
-      const [x, z] = STREETS[2] - Math.abs(lx) < STREETS[2] - Math.abs(lz) ? local(F, Math.sign(lx) * STREETS[2], lz) : local(F, lx, Math.sign(lz) * STREETS[2]);
-      return { x, z };
-    }
-    const nx = nearest(STREETS, lx), nz = nearest(STREETS, lz), lim = STREETS[3];
+    const nx = nearest(L, lx), nz = nearest(L, lz);
     const [x, z] = Math.abs(nx - lx) < Math.abs(nz - lz) ? local(F, nx, clamp(lz, -lim, lim)) : local(F, clamp(lx, -lim, lim), nz);
     return { x, z };
   }
 
   /** The corners to turn, going from one street point to another along a town's grid. */
   private streets(vil: Village, a: Spot, b: Spot): Spot[] {
-    const F = vil.grid!;
+    const F = vil.grid!, L = vil.lines!;
     const [ax, az] = toFrame(F, a.x, a.z), [bx, bz] = toFrame(F, b.x, b.z);
-    const onX = (x: number) => STREETS.some((s) => Math.abs(s - x) < 0.6), sq = (x: number, z: number) => Math.abs(x) < STREETS[2] && Math.abs(z) < STREETS[2];
+    const onX = (x: number) => L.some((s) => Math.abs(s - x) < 0.6);
     const pts: [number, number][] = [];
-    if (sq(ax, az) || sq(bx, bz)) {
-      // To or from the square: by the street it opens onto.
-      const s = sq(ax, az) ? [bx, bz] : [ax, az];
-      if (onX(s[0])) pts.push([s[0], clamp(s[1], -STREETS[2], STREETS[2])]);
-      else pts.push([clamp(s[0], -STREETS[2], STREETS[2]), s[1]]);
-      if (!sq(ax, az)) pts.reverse();
-    } else if (onX(ax) && onX(bx)) {
-      if (Math.abs(ax - bx) > 0.6) { const h = nearest(STREETS, (az + bz) / 2); pts.push([ax, h], [bx, h]); }
+    if (onX(ax) && onX(bx)) {
+      if (Math.abs(ax - bx) > 0.6) { const h = nearest(L, (az + bz) / 2); pts.push([ax, h], [bx, h]); }
     } else if (!onX(ax) && !onX(bx)) {
-      if (Math.abs(az - bz) > 0.6) { const vv = nearest(STREETS, (ax + bx) / 2); pts.push([vv, az], [vv, bz]); }
+      if (Math.abs(az - bz) > 0.6) { const vv = nearest(L, (ax + bx) / 2); pts.push([vv, az], [vv, bz]); }
     } else if (onX(ax)) pts.push([ax, bz]);
     else pts.push([bx, az]);
     return [...pts.map(([x, z]) => { const [wx, wz] = local(F, x, z); return { x: wx, z: wz }; }), b];
@@ -1366,8 +1399,6 @@ function between(pts: Spot[], ta: number, tb: number): Spot[] {
   out.sort((a, b) => (tb >= ta ? a.t - b.t : b.t - a.t));
   return out.map((o) => o.p);
 }
-/** A town's street lines (in its grid's own frame). */
-const STREETS = [-39, -13, 13, 39];
 const nearest = (list: number[], v: number) => list.reduce((a, b) => (Math.abs(b - v) < Math.abs(a - v) ? b : a));
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 function toFrame(r: { x: number; z: number; yaw: number }, x: number, z: number): [number, number] {

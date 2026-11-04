@@ -173,6 +173,7 @@ export class MapView {
       };
       for (const f of v.fields) rect(f, 'rgba(140,100,50,0.35)');
       for (const p of v.paved) rect(p, 'rgba(150,140,120,0.45)');
+      for (const f of v.facades) rect(f, 'rgba(96,66,40,0.8)');
       for (const hs of v.houses) rect({ x: hs.x, z: hs.z, yaw: hs.yaw, hx: hs.tiles, hz: hs.nz }, hs.kind === 'cathedral' ? 'rgba(90,80,90,0.95)' : 'rgba(74,50,30,0.85)');
       if (v.castle) rect({ ...v.castle, hx: v.castle.half, hz: v.castle.half }, 'rgba(110,100,95,0.55)');
       ctx.fillStyle = INK; ctx.font = v.kind === 'village' ? 'italic bold 13px Georgia, serif' : v.kind === 'town' ? 'italic bold 16px Georgia, serif' : 'italic bold 18px Georgia, serif'; ctx.textAlign = 'center';

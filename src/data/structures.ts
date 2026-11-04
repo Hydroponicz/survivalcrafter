@@ -187,6 +187,39 @@ defs.push({ id: 'market_stall', name: 'Market stall', icon: '⛺', category: 'Cr
   materials: [{ item: 'plank', count: 6 }, { item: 'shaft', count: 4 }, { item: 'wool', count: 4 }], tool: 'hammer', skill: 'carpentry', difficulty: 8, stepTime: 2,
   desc: 'A trader\'s stall on the market square.' });
 
+// Town houses: the background buildings of a dense town's streets, each one whole piece (2–3 storeys,
+// upper floors jettied out over the street), so a town can have hundreds. Not entered (the homes and
+// shops people use are built of real pieces). Sizes in floor tiles wide × deep, then storeys; styles:
+// a = stone below, plank above, thatch; b = all dark timber, thatch; c = all stone, plank roof.
+export const TOWNHOUSE_SIZES: [number, number, number][] = [[2, 2, 2], [2, 2, 3], [3, 2, 2], [3, 2, 3], [2, 4, 2], [3, 4, 3]];
+export const TOWNHOUSE_STYLES = ['a', 'b', 'c'] as const;
+/** A town house's storey height (m). */
+export const TH_STOREY = 2.4;
+for (const [w, d, st] of TOWNHOUSE_SIZES) {
+  for (const style of TOWNHOUSE_STYLES) {
+    defs.push({ id: `th_${w}${d}${st}${style}`, name: st === 3 ? 'Tall town house' : 'Town house', icon: '🏘️', category: 'Walls', snap: false, village: true,
+      boxes: [box(0, (st * TH_STOREY) / 2, 0, w, (st * TH_STOREY) / 2, d)], snaps: [],
+      materials: [], skill: 'carpentry', difficulty: 20, stepTime: 3,
+      desc: 'A town house, its upper storeys leaning out over the street.' });
+  }
+}
+// A covered market hall: a thatched roof on posts over the stalls (12 × 8 m).
+defs.push({ id: 'market_hall', name: 'Market hall', icon: '🏛️', category: 'Crafting', snap: false, village: true,
+  boxes: [-6, 0, 6].flatMap((x) => [box(x, 2, -4, 0.15, 2, 0.15), box(x, 2, 4, 0.15, 2, 0.15)]), snaps: [],
+  materials: [], skill: 'carpentry', difficulty: 15, stepTime: 3, desc: 'A covered market: stalls in out of the rain.' });
+// The playhouse: a raised stage with a backdrop and canopy, and tiered stands for the audience.
+defs.push({ id: 'stage', name: 'Stage', icon: '🎭', category: 'Crafting', snap: false, village: true,
+  boxes: [box(0, 0.6, 0, 4, 0.6, 2.5), box(0, 2.7, 2.4, 4, 1.5, 0.1)], snaps: [],
+  materials: [], skill: 'carpentry', difficulty: 12, stepTime: 3, desc: 'A playhouse stage, where players and minstrels perform.' });
+defs.push({ id: 'stands', name: 'Stands', icon: '🪜', category: 'Crafting', snap: false, village: true,
+  boxes: [box(0, 0.22, -1, 4, 0.22, 0.5), box(0, 0.45, 0, 4, 0.45, 0.5), box(0, 0.67, 1, 4, 0.67, 0.5)], snaps: [],
+  materials: [], skill: 'carpentry', difficulty: 8, stepTime: 3, desc: 'Tiered benches for watching a play or a joust.' });
+
+// The gallows on a castle city's square (a warning to thieves).
+defs.push({ id: 'gallows', name: 'Gallows', icon: '🪢', category: 'Crafting', snap: false, village: true,
+  boxes: [box(0, 0.7, 0, 1.5, 0.7, 1.5), box(-1, 2.9, 0.6, 0.11, 1.45, 0.11), box(1, 2.9, 0.6, 0.11, 1.45, 0.11)], snaps: [],
+  materials: [], skill: 'carpentry', difficulty: 10, stepTime: 3, desc: 'The town\'s gallows.' });
+
 // A torch planted in the ground: it burns (its fuel is the burn left) and lights the spot.
 defs.push({ id: 'standing_torch', name: 'Torch', icon: '🔥', category: 'Crafting', snap: false, item: 'torch',
   boxes: [box(0, 0.55, 0, 0.09, 0.55, 0.09)], snaps: [], materials: [], skill: 'firemaking', difficulty: 1, stepTime: 0,

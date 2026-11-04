@@ -27,7 +27,7 @@ const JOB_WORDS: Record<HouseRole, string> = {
   farmer: 'farmer\'s work', shepherd: 'shepherd\'s work', woodcutter: 'woodcutter\'s work', butcher: 'butcher\'s work',
   smith: 'smith\'s work', elder: 'odd jobs', villager: 'gathering about the land',
   priest: 'the church\'s needs', mayor: 'the town\'s needs', merchant: 'trade goods', baker: 'baker\'s work', carpenter: 'carpenter\'s work',
-  lord: 'the castle\'s needs', noble: 'fine goods', innkeeper: 'the tavern\'s needs', guard: 'the garrison\'s needs',
+  lord: 'the castle\'s needs', noble: 'fine goods', innkeeper: 'the tavern\'s needs', guard: 'the garrison\'s needs', performer: 'the playhouse\'s needs',
 };
 const fmtCoins = (n: number) => (Number.isInteger(n) ? `${n}` : n.toFixed(1));
 
