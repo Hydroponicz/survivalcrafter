@@ -173,6 +173,8 @@ export class World {
   private tickTimer = 0;
   listener?: WorldListener;
   spawn = { x: 0, z: 0 };
+  /** Where the world first put you (the spawn moves to your bed when you sleep in one). */
+  origin = { x: 0, z: 0 };
   private regions = new Map<number, RegionState>();
   private loadedRegions = new Set<number>();
   regionHooks: RegionHook[] = [];
@@ -405,6 +407,7 @@ export class World {
   generate(gen?: WorldGen) {
     this.terrain.generate(gen);
     this.findSpawn();
+    this.origin = { ...this.spawn };
   }
 
   /**
@@ -583,6 +586,7 @@ export class World {
       animals: this.animals.map((a) => ({ species: a.species, x: a.x, z: a.z, hp: a.hp, rot: a.rot, tamed: a.tamed })),
       time: this.time,
       spawn: this.spawn,
+      origin: this.origin,
       stumps: this.stumps,
       brokenRocks: [...this.brokenRocks],
     };
@@ -610,6 +614,7 @@ export class World {
     }
     w.time = data.time;
     w.spawn = data.spawn;
+    w.origin = (data as { origin?: { x: number; z: number } }).origin ?? { ...data.spawn };
     w.stumps = data.stumps ?? [];
     w.brokenRocks = new Set(data.brokenRocks ?? []);
     return w;

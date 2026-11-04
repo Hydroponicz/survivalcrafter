@@ -1,3 +1,4 @@
+import { STRUCTURES } from '../data/structures';
 import type { Game } from '../game/game';
 import type { WorldMap } from './worldmap';
 
@@ -149,9 +150,14 @@ export class MapView {
       const s = Math.max(2, 1.6 * this.scale);
       ctx.fillRect(toX(o.x) - s / 2, toY(o.z) - s / 2, s, s);
     }
-    // Home: a little house.
-    const home = this.g.world.spawn;
-    this.house(ctx, toX(home.x), toY(home.z));
+    // Where the world began (a flag), and home: your first bed (a little house).
+    const o = this.g.world.origin;
+    this.flag(ctx, toX(o.x), toY(o.z));
+    let bed: { x: number; z: number; id: number } | null = null;
+    for (const s of this.g.world.objects.values()) {
+      if (s.kind === 'structure' && s.built && STRUCTURES[s.type]?.bed && (!bed || s.id < bed.id)) bed = s;
+    }
+    if (bed) this.house(ctx, toX(bed.x), toY(bed.z));
     // You: a red arrow pointing the way you face (north is up).
     const ax = toX(p.pos.x), ay = toY(p.pos.z), fx = -Math.sin(p.yaw), fz = -Math.cos(p.yaw);
     ctx.save();
@@ -166,6 +172,18 @@ export class MapView {
     this.compass(ctx, w - 78, h - 86);
     this.scaleBar(ctx, 34, h - 40);
     this.cartouche(ctx, w / 2, 34);
+  }
+
+  /** The world spawn: a little pennant on a pole. */
+  private flag(ctx: CanvasRenderingContext2D, x: number, y: number) {
+    ctx.save();
+    ctx.strokeStyle = INK; ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.moveTo(x, y + 6); ctx.lineTo(x, y - 9); ctx.stroke();
+    ctx.fillStyle = RED;
+    ctx.beginPath(); ctx.moveTo(x, y - 9); ctx.lineTo(x + 9, y - 6); ctx.lineTo(x, y - 3); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = INK; ctx.font = 'italic 12px Georgia, serif'; ctx.textAlign = 'center';
+    ctx.fillText('World spawn', x, y + 19);
+    ctx.restore();
   }
 
   private house(ctx: CanvasRenderingContext2D, x: number, y: number) {

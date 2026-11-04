@@ -90,7 +90,7 @@ export class UI {
   private preview = new CharacterPreview();
   /** Seconds to keep the pause screen hidden after asking to re-capture the mouse. */
   relockGrace = 0;
-  private devGive = { type: 'log', count: 10, ql: 50 };
+  private devGive = { type: 'log', count: 10, ql: 50, kind: 'All' };
   private devSkill = 50;
 
   constructor(private g: Game) {
@@ -149,6 +149,12 @@ export class UI {
       }
       return false;
     });
+    // The map zooms with the wheel (the cursor otherwise scrolls whatever's under it).
+    this.cursor.wheelHook = (dy, x, y) => {
+      if (!this.isOpen('map')) return false;
+      this.mapView.input(Math.sign(dy), false, x, y);
+      return true;
+    };
 
     this.pauseEl = el('div', 'pause', `
       <div class="pause-box">
@@ -1106,39 +1112,50 @@ export class UI {
     body.appendChild(el('h3', '', 'Time'));
     const timeRow = el('div', 'dev-row');
     timeRow.appendChild(el('span', '', 'Speed'));
-    const speed = el('select');
+    // (Buttons, not a dropdown: the in-game cursor can't open a browser's own menus.)
     for (const [v, label] of [[0, 'Frozen'], [1, 'Normal'], [5, '5×'], [20, '20×'], [100, '100×']] as [number, string][]) {
-      const o = el('option', '', label);
-      o.value = String(v);
-      if (g.dev.timeScale === v) o.selected = true;
-      speed.appendChild(o);
+      const b = this.devButton(label, () => { g.dev.setTimeScale(v); this.log(`[dev] Time speed: ${label}.`, 'info'); this.refresh(); });
+      if (g.dev.timeScale === v) b.classList.add('dev-on');
+      timeRow.appendChild(b);
     }
-    speed.addEventListener('change', () => g.dev.setTimeScale(Number(speed.value)));
-    timeRow.appendChild(speed);
     for (const [label, f] of [['Dawn', 0.25], ['Noon', 0.5], ['Dusk', 0.77], ['Midnight', 0]] as [string, number][]) {
       timeRow.appendChild(this.devButton(label, () => devCommands.setTime(g, f)));
     }
     body.appendChild(timeRow);
 
     body.appendChild(el('h3', '', 'Give item'));
-    const giveRow = el('div', 'dev-row');
-    const sel = el('select');
-    for (const d of Object.values(ITEMS).sort((a, b) => a.name.localeCompare(b.name))) {
-      const o = el('option', '', `${d.icon} ${esc(d.name)}`);
-      o.value = d.id;
-      if (d.id === this.devGive.type) o.selected = true;
-      sel.appendChild(o);
+    // Pick an item from the grid (filtered by kind), set how many and how good, and Give.
+    const kinds: [string, (d: typeof ITEMS[string]) => boolean][] = [
+      ['All', () => true], ['Tools', (d) => !!d.tool], ['Food', (d) => !!d.food], ['Wearables', (d) => !!d.wear],
+      ['Materials', (d) => !d.tool && !d.food && !d.wear && !d.places], ['Placeables', (d) => !!d.places],
+    ];
+    const kindRow = el('div', 'dev-row');
+    for (const [k] of kinds) {
+      const b = this.devButton(k, () => { this.devGive.kind = k; this.refresh(); });
+      if (this.devGive.kind === k) b.classList.add('dev-on');
+      kindRow.appendChild(b);
     }
-    sel.addEventListener('change', () => { this.devGive.type = sel.value; });
-    const count = this.devNumber(this.devGive.count, 1, 500, (v) => { this.devGive.count = v; });
-    const ql = this.devNumber(this.devGive.ql, 1, 100, (v) => { this.devGive.ql = v; });
-    giveRow.append(sel, el('span', '', '×'), count, el('span', '', 'QL'), ql,
-      this.devButton('Give', () => devCommands.give(g, this.devGive.type, this.devGive.count, this.devGive.ql)));
+    body.appendChild(kindRow);
+    const filter = kinds.find(([k]) => k === this.devGive.kind)?.[1] ?? (() => true);
+    const gridItems = el('div', 'dev-items');
+    for (const d of Object.values(ITEMS).filter(filter).sort((a, b) => a.name.localeCompare(b.name))) {
+      const b = el('button', d.id === this.devGive.type ? 'dev-on' : '', `${itemIcon(d.id, 'chip-img')} ${esc(d.name)}`);
+      b.addEventListener('click', () => { this.devGive.type = d.id; this.refresh(); });
+      gridItems.appendChild(b);
+    }
+    body.appendChild(gridItems);
+    const giveRow = el('div', 'dev-row');
+    giveRow.append(
+      el('span', '', `<b>${esc(itemDef(this.devGive.type).name)}</b>`),
+      el('span', '', 'Count'), this.devStepper(this.devGive.count, 1, 500, (v) => { this.devGive.count = v; }),
+      el('span', '', 'QL'), this.devStepper(this.devGive.ql, 1, 100, (v) => { this.devGive.ql = v; }),
+      this.devButton('Give', () => { devCommands.give(g, this.devGive.type, this.devGive.count, this.devGive.ql); this.log(`[dev] Gave ${this.devGive.count} × ${itemDef(this.devGive.type).name} (QL ${this.devGive.ql}).`, 'good'); }),
+    );
     body.appendChild(giveRow);
 
     body.appendChild(el('h3', '', 'Player &amp; world'));
     const skillRow = el('div', 'dev-row');
-    skillRow.append(el('span', '', 'All skills to'), this.devNumber(this.devSkill, 1, 99, (v) => { this.devSkill = v; }),
+    skillRow.append(el('span', '', 'All skills to'), this.devStepper(this.devSkill, 1, 99, (v) => { this.devSkill = v; }),
       this.devButton('Set', () => devCommands.setSkills(g, this.devSkill)));
     body.appendChild(skillRow);
     const misc = el('div', 'dev-row');
@@ -1160,18 +1177,14 @@ export class UI {
     return b;
   }
 
-  private devNumber(value: number, min: number, max: number, onChange: (v: number) => void): HTMLInputElement {
-    const inp = el('input');
-    inp.type = 'number';
-    inp.min = String(min);
-    inp.max = String(max);
-    inp.value = String(value);
-    inp.addEventListener('change', () => {
-      const v = Math.max(min, Math.min(max, Number(inp.value) || min));
-      inp.value = String(v);
-      onChange(v);
-    });
-    return inp;
+  /** A number set with −/+ buttons (works with the in-game cursor, unlike a typed field). */
+  private devStepper(value: number, min: number, max: number, onChange: (v: number) => void): HTMLElement {
+    const box = el('span', 'dev-stepper');
+    let v = value;
+    const show = el('b', '', String(v));
+    const step = (d: number) => this.devButton(d > 0 ? `+${d}` : String(d), () => { v = Math.max(min, Math.min(max, v + d)); show.textContent = String(v); onChange(v); });
+    box.append(step(-10), step(-1), show, step(1), step(10));
+    return box;
   }
 
   /** Your quests: ones offered to take up, ones under way (tracked on screen or not), and ones done. */

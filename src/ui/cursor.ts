@@ -149,7 +149,11 @@ export class VirtualCursor {
     }
   }
 
+  /** Something that wants the wheel itself (the map zooms with it): return true to take it. */
+  wheelHook?: (dy: number, x: number, y: number) => boolean;
+
   private scroll(dy: number) {
+    if (this.wheelHook?.(dy, this.x, this.y)) return;
     for (let e = this.targetAt(); e; e = e.parentElement) {
       if (e instanceof HTMLElement && e.scrollHeight > e.clientHeight && /(auto|scroll)/.test(getComputedStyle(e).overflowY)) {
         e.scrollTop += dy;

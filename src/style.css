@@ -534,3 +534,11 @@ button.coach-pulse { box-shadow: 0 0 0 2px #8fd0ff; animation: coach-pulse 1.1s 
 .dev-log-heal b { color: #8fd0ff; }
 .dev-log-perf b { color: #c0a0f0; }
 .dev-log-info b, .dev-log-event b { color: #9fdc7c; }
+
+/* Dev console: item grid, steppers, selected buttons. */
+.dev-items { display: flex; flex-wrap: wrap; gap: 4px; max-height: 190px; overflow: auto; padding: 4px; background: rgba(0, 0, 0, 0.2); border-radius: 6px; margin-bottom: 6px; }
+.dev-items button { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; padding: 2px 7px 2px 3px; }
+.dev-items .chip-img { width: 20px; height: 20px; }
+.dev-stepper { display: inline-flex; align-items: center; gap: 3px; }
+.dev-stepper b { min-width: 28px; text-align: center; }
+button.dev-on { background: #6b5530; border-color: var(--accent); color: #fff3d6; }
