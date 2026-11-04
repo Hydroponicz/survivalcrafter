@@ -159,6 +159,12 @@ export const RECIPES: Recipe[] = [
   // --- clothing
   { id: 'hide_cap', name: 'Hide cap', category: 'Clothing', skill: 'tailoring', difficulty: 4, time: 8,
     tool: 'knife', inputs: [{ item: 'hide', count: 1 }, { item: 'cordage', count: 1 }], output: { item: 'hide_cap', count: 1 } },
+  { id: 'hide_backpack', name: 'Hide backpack', category: 'Clothing', skill: 'tailoring', difficulty: 9, time: 16,
+    tool: 'knife', inputs: [{ item: 'hide', count: 2 }, { item: 'cordage', count: 3 }], output: { item: 'hide_backpack', count: 1 } },
+  { id: 'quiver', name: 'Quiver', category: 'Clothing', skill: 'tailoring', difficulty: 6, time: 10,
+    tool: 'knife', inputs: [{ item: 'hide', count: 1 }, { item: 'cordage', count: 2 }, { item: 'shaft', count: 1 }], output: { item: 'quiver', count: 1 } },
+  { id: 'hide_canteen', name: 'Hide canteen', category: 'Clothing', skill: 'tailoring', difficulty: 5, time: 10,
+    tool: 'knife', inputs: [{ item: 'hide', count: 1 }, { item: 'cordage', count: 1 }], output: { item: 'hide_canteen', count: 1 } },
   { id: 'hide_boots', name: 'Hide boots', category: 'Clothing', skill: 'tailoring', difficulty: 5, time: 10,
     tool: 'knife', inputs: [{ item: 'hide', count: 1 }, { item: 'cordage', count: 2 }], output: { item: 'hide_boots', count: 1 } },
   { id: 'hide_trousers', name: 'Hide trousers', category: 'Clothing', skill: 'tailoring', difficulty: 7, time: 14,

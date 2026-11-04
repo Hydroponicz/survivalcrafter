@@ -17,7 +17,6 @@ import { VirtualCursor } from './cursor';
 import { BIOMES, biomeAt } from '../game/forage';
 import { QUICK_MARGIN, type Game, type MsgKind } from '../game/game';
 import { minigameVerb, RECIPE_MINIGAMES } from '../game/minigames';
-import { CARRY_CAPACITY } from '../game/inventory';
 import { MAT_NAMES } from '../world/terrain';
 import { ANIMALS, cropKey, type PileObj, type StructureObj } from '../world/world';
 
@@ -535,7 +534,7 @@ export class UI {
     if (p.water < 20) status.push('<span class="warn" data-tip="Your water is low. Drink from a lake or river.">Thirsty</span>');
     if (p.stamina < 10) status.push('<span class="warn" data-tip="No strength left for hard work. Stop and rest a moment.">Exhausted</span>');
     const w = g.inv.weight();
-    if (w > CARRY_CAPACITY) status.push(`<span class="warn" data-tip="You carry more than ${CARRY_CAPACITY} kg and move slowly. Drop or store something.">Overloaded ${w.toFixed(0)}/${CARRY_CAPACITY} kg</span>`);
+    if (w > g.carryCapacity()) status.push(`<span class="warn" data-tip="You carry more than ${g.carryCapacity()} kg and move slowly. Drop or store something.">Overloaded ${w.toFixed(0)}/${g.carryCapacity()} kg</span>`);
     if (p.swimming) status.push('Swimming');
     if (p.slope === 'blocked') status.push('<span class="warn">Too steep to climb</span>');
     else if (p.slope === 'sliding') status.push('<span class="warn">Sliding!</span>');
@@ -738,7 +737,7 @@ export class UI {
     const ql = items.length > 1 ? `QL ${items.at(-1)!.ql.toFixed(0)}–${best.ql.toFixed(0)}` : `QL ${best.ql.toFixed(1)}`;
     row.innerHTML = `<span class="icon">${itemIcon(best.type)}</span>
       <span class="name">${esc(itemName(best))}${items.length > 1 ? ` <b>×${items.length}</b>` : ''}
-        <small>${ql}${def.tool && best.dmg > 0 ? ` · dmg ${best.dmg.toFixed(1)}` : ''}${best.quenched ? ' · hardened' : ''}${best.hot ? ` · <span class="warn">glowing, ${Math.ceil(best.hot)}s to quench</span>` : ''} · ${weight.toFixed(1)} kg</small></span>`;
+        <small>${ql}${def.holds ? ` · ${best.contents?.length ?? 0}/${def.holds.max} arrows` : ''}${def.sips ? ` · ${best.fill ?? 0}/${def.sips} drinks` : ''}${def.carry ? ` · +${def.carry} kg capacity` : ''}${def.tool && best.dmg > 0 ? ` · dmg ${best.dmg.toFixed(1)}` : ''}${best.quenched ? ' · hardened' : ''}${best.hot ? ` · <span class="warn">glowing, ${Math.ceil(best.hot)}s to quench</span>` : ''} · ${weight.toFixed(1)} kg</small></span>`;
     row.dataset.tip = itemTip(best, items.length);
     const btns = el('span', 'btns');
     for (const a of actions) {
@@ -765,8 +764,8 @@ export class UI {
     const g = this.g;
     const body = el('div');
     const w = g.inv.weight();
-    const carrying = el('div', 'inv-weight', `Carrying <b>${w.toFixed(1)}</b> / ${CARRY_CAPACITY} kg${w > CARRY_CAPACITY ? ' — <span class="warn">overloaded, you move slowly</span>' : ''}`);
-    carrying.dataset.tip = weightTip(g.inv.items, CARRY_CAPACITY, 'Over this you move slowly.');
+    const carrying = el('div', 'inv-weight', `Carrying <b>${w.toFixed(1)}</b> / ${g.carryCapacity()} kg${w > g.carryCapacity() ? ' — <span class="warn">overloaded, you move slowly</span>' : ''}`);
+    carrying.dataset.tip = weightTip(g.inv.items, g.carryCapacity(), 'Over this you move slowly.');
     body.appendChild(carrying);
     body.appendChild(el('div', 'hint', 'Click <b>Use</b> to equip an item (tools, seeds, dirt…). Drag an item onto the hotbar, or hover over it and press <b>1-9</b>, to add it there.'));
     const groups = g.inv.grouped().sort((a, b) => itemDef(a.type).name.localeCompare(itemDef(b.type).name));
@@ -781,6 +780,11 @@ export class UI {
         actions.push(on ? { label: 'Take off', fn: () => g.takeOff(def.wear!.slot) } : { label: 'Wear', fn: (it) => g.putOn(it.uid) });
       } else actions.push({ label: isActive ? 'Unuse' : 'Use', fn: (it) => g.setActive(isActive ? null : it.uid) });
       if (def.food) actions.push({ label: def.food.verb ?? (def.food.nutrition || def.food.effect ? 'Eat' : 'Drink'), fn: (it) => g.eat(it.uid) });
+      if (def.sips) actions.push({ label: 'Drink', fn: (it) => g.drinkCanteen(it.uid) });
+      if (def.holds) {
+        actions.push({ label: 'Load arrows', fn: (it) => { const n = g.loadQuiver(it); g.msg(n ? `You slide ${n} arrow(s) into the quiver.` : 'No arrows in your pack to load (or the quiver is full).', 'info'); g.dressPlayer(); } });
+        actions.push({ label: 'Unload', fn: (it) => { const n = g.unloadQuiver(it); g.msg(`You take ${n} arrow(s) out of the quiver.`, 'info'); g.dressPlayer(); } });
+      }
       if (def.places) actions.push({ label: 'Place', fn: (it) => g.startPlacingItem(it) });
       if (grp.type === 'bandage') actions.push({ label: 'Apply', fn: () => g.applyBandage() });
       if (!isIdentified(grp.type)) actions.push({ label: 'Study', fn: (it) => g.request(ACTION_MAP.study, { g, t: { kind: 'none' }, item: it }) });

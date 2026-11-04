@@ -67,7 +67,9 @@ export class Combat {
   press(): boolean {
     const g = this.g, it = g.activeItem();
     if (it && itemDef(it.type).tool === 'bow') {
-      if (g.inv.count('arrow') === 0) { g.msg('You have no arrows. Make some: a shaft, a flint and a feather make three (Primitive).', 'fail'); return true; }
+      // Arrows are drawn from a worn quiver, nowhere else.
+      if (!g.quiver()) { g.msg('You need a quiver on to shoot: your bow draws arrows only from it. Make one (Crafting → Clothing) and wear it.', 'fail'); return true; }
+      if (g.arrowsReady() === 0) { g.msg(g.inv.count('arrow') ? 'Your quiver is empty. Load your arrows into it (open your pack → quiver → Load arrows).' : 'Your quiver is empty. Make arrows: a shaft, a flint and a feather make three (Primitive).', 'fail'); return true; }
       this.drawing = true;
       this.draw = 0;
       return true;
@@ -168,8 +170,9 @@ export class Combat {
   /** Loose an arrow along your aim. */
   private loose(bow: Item) {
     const g = this.g;
-    g.inv.take('arrow', 1);
+    g.quiver()?.contents?.pop();
     g.inventoryChanged();
+    g.dressPlayer();
     const dir = new THREE.Vector3();
     g.camera.getWorldDirection(dir);
     const pos = g.camera.position.clone().addScaledVector(dir, 0.6);

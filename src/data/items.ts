@@ -14,9 +14,11 @@ export const TOOL_NAMES: Record<ToolKind, string> = {
 };
 
 /** Where on the body something is worn. */
-export type WearSlot = 'head' | 'body' | 'legs' | 'feet';
-export const WEAR_SLOTS: WearSlot[] = ['head', 'body', 'legs', 'feet'];
-export const WEAR_SLOT_NAMES: Record<WearSlot, string> = { head: 'Head', body: 'Body', legs: 'Legs', feet: 'Feet' };
+export type WearSlot = 'head' | 'body' | 'legs' | 'feet' | 'back' | 'quiver' | 'belt';
+export const WEAR_SLOTS: WearSlot[] = ['head', 'body', 'legs', 'feet', 'back', 'quiver', 'belt'];
+/** The clothing slots (they colour the body); the rest are gear hung on it. */
+export const CLOTHING_SLOTS: WearSlot[] = ['head', 'body', 'legs', 'feet'];
+export const WEAR_SLOT_NAMES: Record<WearSlot, string> = { head: 'Head', body: 'Body', legs: 'Legs', feet: 'Feet', back: 'Back', quiver: 'Quiver', belt: 'Belt' };
 
 /** Seconds a torch burns, in your hand or planted (three in-game days of 20 minutes). */
 export const TORCH_BURN = 3 * 20 * 60;
@@ -54,6 +56,14 @@ export interface ItemDef {
   places?: string;
   /** Clothing and armour: where it's worn, how much of a blow it takes (share, 0..1, scaled by quality), and its colour. */
   wear?: { slot: WearSlot; armor: number; colour: number };
+  /** Extra carrying capacity while worn (kg): a backpack. */
+  carry?: number;
+  /** Holds this many of an item inside it (a quiver holds arrows). */
+  holds?: { item: string; max: number };
+  /** Holds water in drinks (a canteen): how many. */
+  sips?: number;
+  /** A cart you set down and use (see game/carts): which kind. */
+  cart?: 'hand' | 'ox';
 }
 
 const defs: ItemDef[] = [
@@ -84,6 +94,12 @@ const defs: ItemDef[] = [
   { id: 'hide_cap', name: 'Hide cap', icon: '🧢', weight: 0.4, wear: { slot: 'head', armor: 0.04, colour: 0x6e4a2c }, desc: 'A snug hide cap. Softens blows to the head.' },
   { id: 'hide_tunic', name: 'Hide tunic', icon: '🥼', weight: 1.6, wear: { slot: 'body', armor: 0.1, colour: 0x7a5232 }, desc: 'A hide tunic laced with cordage. Protects against tusks and horns.' },
   { id: 'hide_trousers', name: 'Hide trousers', icon: '👖', weight: 1.2, wear: { slot: 'legs', armor: 0.07, colour: 0x5e4028 }, desc: 'Tough hide leggings. Protect against tusks and thorns.' },
+  { id: 'hide_backpack', name: 'Hide backpack', icon: '🎒', weight: 1.5, wear: { slot: 'back', armor: 0, colour: 0x7a5232 }, carry: 20,
+    desc: 'A roomy pack of stitched hide on cordage straps. Wear it to carry 20 kg more.' },
+  { id: 'quiver', name: 'Quiver', icon: '🏹', weight: 0.5, wear: { slot: 'quiver', armor: 0, colour: 0x6e4a2c }, holds: { item: 'arrow', max: 30 },
+    desc: 'A hide tube slung across your back that holds up to 30 arrows. Wear it to shoot: your bow only draws arrows from your quiver. Arrows you make go straight into it.' },
+  { id: 'hide_canteen', name: 'Hide canteen', icon: '🫗', weight: 0.4, wear: { slot: 'belt', armor: 0, colour: 0x5e4028 }, sips: 4,
+    desc: 'A waterskin of sealed hide that hangs from your belt. Fill it at any fresh water (aim at the water), then drink from your pack: 4 good drinks.' },
   { id: 'hide_boots', name: 'Hide boots', icon: '🥾', weight: 0.6, wear: { slot: 'feet', armor: 0.04, colour: 0x4a3220 }, desc: 'Soft hide boots, bound at the ankle.' },
 
   // --- tools
@@ -192,6 +208,10 @@ export interface Item {
   hot?: number;
   /** Hardened in a quench trough: wears more slowly. */
   quenched?: boolean;
+  /** What's inside it (the arrows in a quiver). */
+  contents?: Item[];
+  /** Drinks of water left in it (a canteen). */
+  fill?: number;
 }
 
 let nextUid = 1;

@@ -6,7 +6,8 @@ export class Inventory {
   items: Item[] = [];
 
   weight(): number {
-    return this.items.reduce((s, i) => s + itemDef(i.type).weight, 0);
+    // (What's inside a container counts too: the arrows in a quiver.)
+    return this.items.reduce((s, i) => s + itemDef(i.type).weight + (i.contents?.reduce((a, c) => a + itemDef(c.type).weight, 0) ?? 0), 0);
   }
 
   add(item: Item) {

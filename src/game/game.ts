@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { getNextUid, isIdentified, itemDef, itemName, learnSpecies, makeItem, setNextUid, TORCH_BURN, WEAR_SLOTS, type Item, type WearSlot } from '../data/items';
+import { getNextUid, isIdentified, itemDef, itemName, learnSpecies, makeItem, setNextUid, TORCH_BURN, WEAR_SLOTS, CLOTHING_SLOTS, type Item, type WearSlot } from '../data/items';
 import type { Recipe, StationKind } from '../data/recipes';
 import { SKILLS, Skills, type SkillId } from '../data/skills';
 import { pieceBoxes, STRUCTURES, type StructureDef, type V3 } from '../data/structures';
@@ -406,15 +406,68 @@ export class Game {
     return Math.min(0.6, a);
   }
 
+  /** How much you can carry before you slow down (kg): more with a backpack on. */
+  carryCapacity(): number {
+    let c = CARRY_CAPACITY;
+    for (const slot of WEAR_SLOTS) { const it = this.worn(slot); if (it) c += itemDef(it.type).carry ?? 0; }
+    return c;
+  }
+
+  /** The quiver you're wearing, if any. */
+  quiver(): Item | undefined {
+    return this.worn('quiver');
+  }
+
+  /** Arrows ready to shoot (only those in a worn quiver count). */
+  arrowsReady(): number {
+    return this.quiver()?.contents?.length ?? 0;
+  }
+
+  /** Put arrows from your pack into the quiver (up to what it holds); returns how many went in. */
+  loadQuiver(q: Item, from?: Item[]): number {
+    const max = itemDef(q.type).holds?.max ?? 0;
+    q.contents ??= [];
+    let n = 0;
+    for (const a of from ?? this.inv.ofType('arrow')) {
+      if (q.contents.length >= max) break;
+      if (this.inv.remove(a.uid)) { q.contents.push(a); n++; }
+    }
+    this.inventoryChanged();
+    return n;
+  }
+
+  /** Take the arrows out of a quiver, back into your pack. */
+  unloadQuiver(q: Item): number {
+    const n = q.contents?.length ?? 0;
+    for (const a of q.contents ?? []) this.inv.add(a);
+    q.contents = [];
+    this.inventoryChanged();
+    return n;
+  }
+
+  /** Drink from a canteen. */
+  drinkCanteen(uid: number) {
+    const it = this.inv.find(uid);
+    if (!it || !(it.fill ?? 0)) return this.msg('The canteen is empty. Fill it at fresh water: aim at the water.', 'fail');
+    it.fill! -= 1;
+    this.player.water = Math.min(100, this.player.water + 30);
+    this.msg(`You drink from the canteen (${it.fill} drink${it.fill === 1 ? '' : 's'} left).`, 'info');
+    this.inventoryChanged();
+  }
+
   /** Show what you're wearing on your character. */
   dressPlayer() {
     const colours: Partial<Record<WearSlot, number>> = {};
-    for (const slot of WEAR_SLOTS) {
+    for (const slot of CLOTHING_SLOTS) {
       const uid = this.equipped[slot];
       const it = uid !== undefined ? this.inv.find(uid) : undefined;
       if (it) colours[slot] = itemDef(it.type).wear!.colour;
     }
     this.player.dress(colours);
+    // Gear hung on the body: a pack, a quiver (showing its arrows), a canteen at the hip.
+    const pick = (slot: WearSlot) => { const uid = this.equipped[slot]; return uid !== undefined ? this.inv.find(uid) : undefined; };
+    const q = pick('quiver');
+    this.player.gear({ back: !!pick('back'), quiver: q ? q.contents?.length ?? 0 : undefined, belt: !!pick('belt') });
   }
 
   /** Put an item type in a hotbar slot. A type lives in one slot only, so it moves (swapping with the target). */
@@ -514,7 +567,7 @@ export class Game {
     const list = p.kind === 'pile' ? p.items : (p.items ??= []);
     for (const it of items) {
       if (itemDef(it.type).noPickup) continue;
-      if (!this.dev.on('noWeight') && this.inv.weight() + itemDef(it.type).weight > CARRY_CAPACITY * 1.5) {
+      if (!this.dev.on('noWeight') && this.inv.weight() + itemDef(it.type).weight > this.carryCapacity() * 1.5) {
         this.msg('You can\'t carry any more.', 'fail');
         break;
       }
@@ -1900,7 +1953,7 @@ export class Game {
     }
 
     // --- player
-    const over = this.dev.on('noWeight') ? 0 : this.inv.weight() - CARRY_CAPACITY;
+    const over = this.dev.on('noWeight') ? 0 : this.inv.weight() - this.carryCapacity();
     p.update(dt, inp, this.world, !!this.action, over, !this.ui.menuOpen, this.dev.on('fly'));
     if (this.action && Math.hypot(p.pos.x - this.action.startPos.x, p.pos.z - this.action.startPos.z) > 0.6) {
       this.cancelAction('You moved and stopped what you were doing.');

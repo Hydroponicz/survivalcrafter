@@ -100,6 +100,7 @@ export class Player {
     this.heldItem.rotation.set(HOLD.rot[0], HOLD.rot[1], HOLD.rot[2]);
     rig.hand.add(this.heldItem);
     rig.setColours(this.wornColours);
+    this.fitGear();
   }
 
   private buildModel(): THREE.Group {
@@ -187,6 +188,54 @@ export class Player {
       }
       meshes[0].userData.colour = c;
       this.worn.set(slot, meshes);
+    }
+  }
+
+  /** What gear hangs on you: a backpack, a quiver (and how many arrows show), a canteen at the hip. */
+  private gearSpec: { back?: boolean; quiver?: number; belt?: boolean } = {};
+  private gearParts: THREE.Object3D[] = [];
+
+  gear(spec: { back?: boolean; quiver?: number; belt?: boolean }) {
+    const same = spec.back === this.gearSpec.back && spec.belt === this.gearSpec.belt && Math.min(8, spec.quiver ?? -1) === Math.min(8, this.gearSpec.quiver ?? -1);
+    this.gearSpec = spec;
+    if (!same) this.fitGear();
+  }
+
+  /**
+   * Hang the gear on the body. Each piece is laid out in the body's own frame
+   * (facing +z, feet at 0) and fixed to a bone (the spine for things on your
+   * back, the hips for the canteen), so it moves with you as you bend and swing.
+   */
+  private fitGear() {
+    for (const o of this.gearParts) o.removeFromParent();
+    this.gearParts = [];
+    const s = this.gearSpec;
+    const parts: [THREE.Object3D, string][] = [];
+    if (s.back) parts.push([gearModel('backpack'), 'mixamorigSpine2']);
+    if (s.quiver !== undefined) {
+      const q = gearModel('quiver', s.quiver);
+      // Beside the pack if you wear one, else square on your back.
+      if (s.back) q.position.x -= 0.12, q.position.z -= 0.08;
+      parts.push([q, 'mixamorigSpine2']);
+    }
+    if (s.belt) parts.push([gearModel('canteen'), 'mixamorigHips']);
+    this.model.updateMatrixWorld(true);
+    for (const [obj, boneName] of parts) {
+      const bone = this.rig?.root.getObjectByName(boneName);
+      obj.updateMatrix();
+      if (bone) {
+        // Laid out relative to the bone (in the body's frame: facing +z), then expressed in the bone's own frame.
+        const at = this.model.worldToLocal(bone.getWorldPosition(new THREE.Vector3()));
+        const place = new THREE.Matrix4().makeTranslation(at.x, at.y, at.z).multiply(obj.matrix);
+        const m = new THREE.Matrix4().copy(bone.matrixWorld).invert().multiply(this.model.matrixWorld).multiply(place);
+        m.decompose(obj.position, obj.quaternion, obj.scale);
+        bone.add(obj);
+      } else {
+        // The block figure: no bones; the spine about chest height, the hips at the waist.
+        obj.position.y += boneName === 'mixamorigHips' ? 0.95 : 1.32;
+        this.model.add(obj);
+      }
+      this.gearParts.push(obj);
     }
   }
 
@@ -689,4 +738,44 @@ export class Player {
     cam.lookAt(target.clone().addScaledVector(f, 4));
     this.applyShake(cam);
   }
+}
+
+/** Gear you wear, as simple models in the body's frame (facing +z), placed relative to the bone it hangs from. */
+function gearModel(kind: 'backpack' | 'quiver' | 'canteen', arrows = 0): THREE.Group {
+  const g = new THREE.Group();
+  const m = (c: number) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.95 });
+  const add = (geo: THREE.BufferGeometry, c: number, x: number, y: number, z: number, parent: THREE.Object3D = g) => {
+    const o = new THREE.Mesh(geo, m(c));
+    o.position.set(x, y, z);
+    o.castShadow = true;
+    parent.add(o);
+    return o;
+  };
+  if (kind === 'backpack') {
+    // A rounded hide pack with a flap and two straps over the shoulders.
+    add(new THREE.BoxGeometry(0.36, 0.44, 0.17), 0x7a5232, 0, -0.14, -0.2);
+    add(new THREE.BoxGeometry(0.37, 0.14, 0.19), 0x6a4528, 0, 0.04, -0.2);
+    add(new THREE.BoxGeometry(0.28, 0.16, 0.06), 0x6a4528, 0, -0.22, -0.3);
+    for (const x of [-0.11, 0.11]) add(new THREE.BoxGeometry(0.05, 0.42, 0.03), 0x4a3220, x, -0.02, -0.1);
+  } else if (kind === 'quiver') {
+    // A hide tube slung across the back, its mouth over the right shoulder, arrows showing.
+    const tube = new THREE.Group();
+    tube.position.set(-0.04, -0.1, -0.19);
+    tube.rotation.z = 0.5;
+    g.add(tube);
+    add(new THREE.CylinderGeometry(0.065, 0.055, 0.6, 10), 0x6e4a2c, 0, 0, 0, tube);
+    add(new THREE.TorusGeometry(0.066, 0.012, 6, 12).rotateX(Math.PI / 2), 0x4a3220, 0, 0.29, 0, tube);
+    const n = Math.min(8, arrows);
+    for (let i = 0; i < n; i++) {
+      const a = (i / Math.max(1, n)) * Math.PI * 2, r = 0.03;
+      add(new THREE.CylinderGeometry(0.006, 0.006, 0.34, 4), 0x9a7a54, Math.cos(a) * r, 0.42, Math.sin(a) * r, tube);
+      add(new THREE.BoxGeometry(0.004, 0.09, 0.035), i % 2 ? 0xe8e0d0 : 0xb03a2a, Math.cos(a) * r, 0.55, Math.sin(a) * r, tube);
+    }
+    add(new THREE.BoxGeometry(0.04, 0.62, 0.025), 0x4a3220, 0.02, -0.08, -0.12); // the strap across the back
+  } else {
+    // A plump hide waterskin on a thong at the right hip.
+    add(new THREE.SphereGeometry(0.1, 10, 8).scale(1, 1.25, 0.55), 0x5e4028, -0.2, -0.1, 0.02);
+    add(new THREE.CylinderGeometry(0.022, 0.026, 0.05, 8), 0x3a2618, -0.2, 0.04, 0.02);
+  }
+  return g;
 }

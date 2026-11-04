@@ -116,6 +116,9 @@ export const RECIPE_MINIGAMES: Record<string, MinigameSpec> = {
   // Cutting the hide to shape.
   hide_cap: { kind: 'carve', passes: 1, make: 'hide_cap' },
   hide_boots: { kind: 'carve', passes: 1, make: 'hide_boots' },
+  hide_backpack: { kind: 'carve', passes: 1, wide: true, make: 'hide_tunic' },
+  quiver: { kind: 'carve', passes: 1, make: 'hide_boots' },
+  hide_canteen: { kind: 'carve', passes: 1, make: 'hide_boots' },
   hide_trousers: { kind: 'carve', passes: 1, wide: true, make: 'hide_trousers' },
   hide_tunic: { kind: 'carve', passes: 1, wide: true, make: 'hide_tunic' },
 };

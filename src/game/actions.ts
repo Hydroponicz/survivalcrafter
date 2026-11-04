@@ -17,7 +17,6 @@ import { ZONE_NAMES } from '../world/climate';
 import type { Game } from './game';
 import type { SwingKind } from './tools';
 import { RECIPE_MINIGAMES, type MinigameSpec } from './minigames';
-import { CARRY_CAPACITY } from './inventory';
 import { anvilGrade, bellowsGrade, HOT_TIME, smithyCap } from './smithy';
 
 export type Target =
@@ -516,6 +515,18 @@ export const ACTIONS: ActionDef[] = [
     },
   },
   {
+    id: 'fill_canteen', label: 'Fill canteen',
+    show: (c) => c.t.kind === 'water' && c.g.inv.items.some((i) => itemDef(i.type).sips && (i.fill ?? 0) < itemDef(i.type).sips!),
+    time: 2,
+    run: ({ g }) => {
+      const it = g.inv.items.find((i) => itemDef(i.type).sips && (i.fill ?? 0) < itemDef(i.type).sips!);
+      if (!it) return;
+      it.fill = itemDef(it.type).sips;
+      g.inventoryChanged();
+      g.msg(`You fill the canteen (${it.fill} drinks).`, 'info');
+    },
+  },
+  {
     id: 'fill_jar', label: 'Fill clay jar',
     show: (c) => c.t.kind === 'water' && c.tool?.type === 'clay_jar',
     time: 2,
@@ -801,7 +812,7 @@ export const ACTIONS: ActionDef[] = [
     show: (c) => { const s = obj(c, 'structure'); return !!s && s.built && !!STRUCTURES[s.type].item; },
     check: (c) => {
       const w = itemDef(STRUCTURES[obj(c, 'structure')!.type].item!).weight;
-      if (!c.g.dev.on('noWeight') && c.g.inv.weight() + w > CARRY_CAPACITY * 1.5) return `It is too heavy to carry with all that in your pack (${w} kg).`;
+      if (!c.g.dev.on('noWeight') && c.g.inv.weight() + w > c.g.carryCapacity() * 1.5) return `It is too heavy to carry with all that in your pack (${w} kg).`;
       return null;
     },
     time: (c) => 1 + itemDef(STRUCTURES[obj(c, 'structure')!.type].item!).weight / 15, stamina: 5,
@@ -1049,10 +1060,18 @@ export const ACTIONS: ActionDef[] = [
       const ql = Math.min(o.ql * 0.7 + matQl * 0.3, matQl + 20, o.cap ?? 100);
       // Tools fresh off the anvil come out glowing, ready to quench.
       const hot = !!r.stations?.includes('anvil') && !!itemDef(r.output.item).tool;
+      const made: Item[] = [];
       for (let i = 0; i < r.output.count; i++) {
         const it = makeItem(r.output.item, ql);
         if (hot) it.hot = HOT_TIME;
         g.inv.add(it);
+        made.push(it);
+      }
+      // Arrows go straight into a worn quiver (as many as fit); otherwise they can't be shot.
+      if (r.output.item === 'arrow') {
+        const q = g.quiver();
+        if (q) { const n = g.loadQuiver(q, made); if (n < made.length) g.msg(`Your quiver is full: ${made.length - n} arrow(s) went into your pack.`, 'info'); }
+        else g.msg('No quiver on: these arrows go in your pack, and a bow only shoots from a worn quiver. Make one (Crafting → Clothing).', 'info');
       }
       for (const ret of r.returns ?? []) {
         const src = used.find((u) => u.type !== r.output.item);
