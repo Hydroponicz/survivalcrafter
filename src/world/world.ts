@@ -6,7 +6,7 @@ import { TreeCover, VEGETATION, type Species } from './trees';
 import type { WorldGen } from './worldgen';
 
 export type { Species } from './trees';
-export type AnimalSpecies = 'deer' | 'boar' | 'horse' | 'ox';
+export type AnimalSpecies = 'deer' | 'boar' | 'horse' | 'ox' | 'sheep';
 
 export interface TreeObj {
   kind: 'tree'; id: number; species: Species; x: number; z: number;
@@ -69,6 +69,12 @@ export interface AnimalObj {
   shoreAt?: number;
   /** Tamed by you (a horse, an ox): it trusts you, stays where you leave it (or follows when led). */
   tamed?: boolean;
+  /** Kept in a fenced pen (a village's livestock): it grazes inside and stays there. */
+  pen?: { x: number; z: number; yaw: number; hx: number; hz: number };
+  /** Which pen (a village's, by name), so a village knows its flock. */
+  penKey?: string;
+  /** A sheep's fleece: grown back (1) or just shorn (0). */
+  wool?: number;
 }
 
 /** A cart standing in the world (or hitched to an ox): it holds things, and you can move it. */
@@ -123,7 +129,15 @@ export const ANIMALS: Record<AnimalSpecies, { name: string; hp: number; speed: n
   boar: { name: 'Wild boar', hp: 40, speed: 3.6, aggressive: true, meat: 4, damage: 4 },
   horse: { name: 'Wild horse', hp: 70, speed: 7, aggressive: false, meat: 6, damage: 0 },
   ox: { name: 'Wild ox', hp: 110, speed: 3.4, aggressive: false, meat: 9, damage: 0 },
+  sheep: { name: 'Sheep', hp: 30, speed: 3.2, aggressive: false, meat: 3, damage: 0 },
 };
+
+/** Which animal a corpse was (from its label, e.g. "sheep corpse"). */
+export function corpseSpecies(label?: string): AnimalSpecies {
+  const l = label ?? '';
+  for (const s of ['boar', 'horse', 'ox', 'sheep'] as const) if (l.includes(s)) return s;
+  return 'deer';
+}
 
 export const cropKey = (x: number, z: number) => cellKey(Math.floor(x), Math.floor(z));
 export const cropPos = (key: number) => ({ x: (key % GSPAN) - GOFF + 0.5, z: Math.floor(key / GSPAN) - GOFF + 0.5 });
@@ -195,6 +209,8 @@ export class World {
   private regions = new Map<number, RegionState>();
   private loadedRegions = new Set<number>();
   regionHooks: RegionHook[] = [];
+  /** Where the villagers near you stand (you bump into them). */
+  people: { x: number; z: number; y: number }[] = [];
   /** Where things are happening (the player): slow processes run around here. */
   focus = { x: 0, z: 0 };
 
@@ -519,9 +535,10 @@ export class World {
   /** Keep a few animals about: new ones appear out of sight around you, far-off ones wander away. */
   keepAnimals(px: number, pz: number, want = 24) {
     // (Your own animals stay where you left them, however far you go.)
-    this.animals = this.animals.filter((a) => a.tamed || Math.hypot(a.x - px, a.z - pz) < 320);
+    // (And villages keep their flocks.)
+    this.animals = this.animals.filter((a) => a.tamed || a.pen || Math.hypot(a.x - px, a.z - pz) < 320);
     const g = this.terrain.gen;
-    const wild = () => this.animals.filter((a) => !a.tamed).length;
+    const wild = () => this.animals.filter((a) => !a.tamed && !a.pen).length;
     for (let tries = 0; tries < 6 && wild() < want; tries++) {
       const a = Math.random() * Math.PI * 2, r = 70 + Math.random() * 150;
       const x = px + Math.cos(a) * r, z = pz + Math.sin(a) * r;
@@ -639,7 +656,7 @@ export class World {
         .filter(([, st]) => st.removed.size || st.changed.size)
         .map(([r, st]) => [r, [...st.removed], [...st.changed.values()]] as [number, number[], WorldObj[]]),
       crops: [...this.crops.entries()].map(([k, c]) => [k, { planted: c.planted, ql: c.ql, tended: c.tended }]),
-      animals: this.animals.map((a) => ({ species: a.species, x: a.x, z: a.z, hp: a.hp, rot: a.rot, tamed: a.tamed })),
+      animals: this.animals.map((a) => ({ species: a.species, x: a.x, z: a.z, hp: a.hp, rot: a.rot, tamed: a.tamed, pen: a.pen, penKey: a.penKey, wool: a.wool })),
       // (A hitched cart is saved with the index of its ox: animals get new ids when loaded.)
       carts: this.carts.map((c) => ({ ...c, hitched: c.hitched === undefined ? undefined : this.animals.findIndex((a) => a.id === c.hitched) })),
       time: this.time,
@@ -673,6 +690,8 @@ export class World {
       an.hp = a.hp;
       if (a.rot !== undefined) an.rot = a.rot;
       if (a.tamed) an.tamed = true;
+      const kept = a as { pen?: AnimalObj['pen']; penKey?: string; wool?: number };
+      if (kept.pen) { an.pen = kept.pen; an.penKey = kept.penKey; an.wool = kept.wool; }
     }
     for (const c of (data as { carts?: CartObj[] }).carts ?? []) {
       const ox = c.hitched !== undefined && c.hitched >= 0 ? loadedAnimals[c.hitched] : undefined;

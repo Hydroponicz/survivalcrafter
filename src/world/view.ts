@@ -14,7 +14,7 @@ import { builtShare, fillPlanes } from './pieceFill';
 import { furnitureMesh } from './furnitureMesh';
 import { STRUCTURES } from '../data/structures';
 import {
-  APPLE_AGE, APPLES, CROP_STAGES, cropPos, type AnimalObj, type BushObj, type ForageObj, type PileObj, type Species, type StructureObj,
+  APPLE_AGE, APPLES, CROP_STAGES, corpseSpecies, cropPos, type AnimalObj, type AnimalSpecies, type BushObj, type ForageObj, type PileObj, type Species, type StructureObj,
   type TreeObj, type World, type WorldListener, type WorldObj,
 } from './world';
 
@@ -230,7 +230,9 @@ export class WorldView implements WorldListener {
   private fruitSlots = new Map<number, number>();
   private slots = new Map<number, number>();
   private meshes = new Map<number, THREE.Object3D>();
-  private cropMeshes = new Map<number, THREE.Mesh>();
+  /** Crops: one instanced pool per growth stage (a village's fields hold hundreds). */
+  private cropPools: InstancePool[] = [];
+  private cropSlots = new Map<number, { stage: number; slot: number }>();
   private animalMeshes = new Map<number, THREE.Group>();
   private fireLights: THREE.PointLight[] = [];
   private flames = new Set<THREE.Mesh>();
@@ -285,6 +287,8 @@ export class WorldView implements WorldListener {
     }
     this.cropGeo = mergeGeometries(stalks)!;
     this.cropMats = [0x6aa84f, 0x7fb348, 0x9cba45, 0xc2b04a, 0xd9b44a].map((c) => mat(c));
+    this.cropPools = this.cropMats.map((m) => new InstancePool(this.cropGeo, m, 4000));
+    for (const p of this.cropPools) this.group.add(p.mesh);
 
     const forageMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, flatShading: true });
     for (const sp of FORAGE_SPECIES) {
@@ -377,17 +381,17 @@ export class WorldView implements WorldListener {
 
   cropsChanged(k: number) {
     const crop = this.world.crops.get(k);
-    const old = this.cropMeshes.get(k);
-    if (old) { this.group.remove(old); this.cropMeshes.delete(k); }
+    const old = this.cropSlots.get(k);
+    if (old) { this.cropPools[old.stage].release(old.slot); this.cropSlots.delete(k); }
     if (!crop) return;
     const stage = this.world.cropStage(crop);
-    const m = new THREE.Mesh(this.cropGeo, this.cropMats[stage]);
+    const slot = this.cropPools[stage].alloc();
+    if (slot < 0) return;
     const { x, z } = cropPos(k);
-    m.position.set(x, this.world.terrain.heightAt(x, z), z);
-    m.scale.set(1, 0.15 + (stage / (CROP_STAGES - 1)) * 0.85, 1);
-    m.castShadow = true;
-    this.cropMeshes.set(k, m);
-    this.group.add(m);
+    this.q.identity();
+    this.m4.compose(new THREE.Vector3(x, this.world.terrain.heightAt(x, z), z), this.q, new THREE.Vector3(1, 0.15 + (stage / (CROP_STAGES - 1)) * 0.85, 1));
+    this.cropPools[stage].set(slot, this.m4);
+    this.cropSlots.set(k, { stage, slot });
   }
 
   // ---------- updates
@@ -440,6 +444,7 @@ export class WorldView implements WorldListener {
     this.bushPool.cull(view);
     this.berryPool.cull(view);
     this.fruitPool.cull(view);
+    for (const p of this.cropPools) p.cull(view);
     for (const p of this.foragePools.values()) p.cull(view);
     this.flushBatches();
   }
@@ -492,7 +497,7 @@ export class WorldView implements WorldListener {
     for (const o of this.world.near(x, z, r)) if (o.kind !== 'structure') this.changed(o);
     // Snapshot the keys: cropsChanged re-inserts them, which would make a live
     // iteration visit the same crop forever.
-    for (const k of [...this.cropMeshes.keys()]) {
+    for (const k of [...this.cropSlots.keys()]) {
       const c = cropPos(k);
       if (Math.abs(c.x - x) < r + 1 && Math.abs(c.z - z) < r + 1) this.cropsChanged(k);
     }
@@ -601,8 +606,7 @@ export class WorldView implements WorldListener {
     g.position.set(o.x, o.y, o.z);
     const corpse = o.items.find((i) => i.type === 'corpse');
     if (corpse) {
-      const species = corpse.label?.includes('boar') ? 'boar' : 'deer';
-      const body = animalModel(species);
+      const body = animalModel(corpseSpecies(corpse.label));
       body.rotation.z = Math.PI / 2;
       body.position.y = 0.35;
       g.add(body);
@@ -798,11 +802,11 @@ const animalGeos = new Map<string, { body: THREE.BufferGeometry; legs: { geo: TH
  * one mesh, and one mesh per leg (they swing). Built from the part-by-part
  * model the first time each kind is asked for; colours become vertex colours.
  */
-export function animalModel(species: 'deer' | 'boar' | 'horse' | 'ox', seed = 0, tamed = false): THREE.Group {
+export function animalModel(species: AnimalSpecies, seed = 0, tamed = false): THREE.Group {
   const key = species === 'horse' ? `horse:${Math.abs(seed) % HORSE_COATS.length}:${tamed ? 1 : 0}` : species === 'ox' ? `ox:${Math.abs(seed) % OX_COATS.length}:${tamed ? 1 : 0}` : species;
   let geos = animalGeos.get(key);
   if (!geos) {
-    const raw = species === 'horse' ? horseModel(seed, tamed) : species === 'ox' ? oxModel(seed, tamed) : partsModel(species);
+    const raw = species === 'horse' ? horseModel(seed, tamed) : species === 'ox' ? oxModel(seed, tamed) : species === 'sheep' ? sheepModel() : partsModel(species);
     raw.updateMatrixWorld(true);
     const legs = raw.userData.legs as THREE.Mesh[];
     const bake = (o: THREE.Object3D, root: THREE.Matrix4): THREE.BufferGeometry[] => {
@@ -940,6 +944,36 @@ function oxModel(seed: number, tamed: boolean): THREE.Group {
 }
 
 /** A deer or a boar, part by part (merged by animalModel). */
+/** A sheep: a round fleece on short dark legs, a dark face. */
+function sheepModel(): THREE.Group {
+  const g = new THREE.Group();
+  const fleece = mat(0xe4ddcc, { flatShading: true }), dark = mat(0x2e2824);
+  const body = new THREE.Mesh(new THREE.IcosahedronGeometry(0.5, 1).scale(0.85, 0.75, 1.25), fleece);
+  body.position.y = 0.72;
+  g.add(body);
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.26, 0.36), dark);
+  head.position.set(0, 0.88, 0.68);
+  head.rotation.x = 0.35;
+  g.add(head);
+  const poll = new THREE.Mesh(new THREE.IcosahedronGeometry(0.16, 0), fleece);
+  poll.position.set(0, 1.0, 0.56);
+  g.add(poll);
+  for (const x of [-0.15, 0.15]) {
+    const ear = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.05, 0.08), dark);
+    ear.position.set(x * 1.3, 0.95, 0.62);
+    g.add(ear);
+  }
+  const legs: THREE.Mesh[] = [];
+  for (const [x, z] of [[-0.18, 0.38], [0.18, 0.38], [-0.18, -0.38], [0.18, -0.38]]) {
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.42, 0.09).translate(0, -0.21, 0), dark);
+    leg.position.set(x, 0.42, z);
+    legs.push(leg);
+    g.add(leg);
+  }
+  g.userData.legs = legs;
+  return g;
+}
+
 function partsModel(species: 'deer' | 'boar'): THREE.Group {
   const g = new THREE.Group();
   const boar = species === 'boar';

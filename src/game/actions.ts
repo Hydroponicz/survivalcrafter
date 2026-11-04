@@ -6,7 +6,7 @@ import type { SkillId } from '../data/skills';
 import { isRock, isSoft, Mat, MAT_NAMES, Y_MIN } from '../world/terrain';
 import { telemetry } from './telemetry';
 import {
-  ANIMALS, APPLE_AGE, APPLES, CART_CAPACITY, CROP_STAGES, type CartObj, cropKey, type AnimalObj, type BushObj, type Crop, type ForageObj, type PileObj, type StructureObj, type Stump, type TreeObj, type WorldObj,
+  ANIMALS, APPLE_AGE, APPLES, CART_CAPACITY, corpseSpecies, CROP_STAGES, type CartObj, cropKey, type AnimalObj, type BushObj, type Crop, type ForageObj, type PileObj, type StructureObj, type Stump, type TreeObj, type WorldObj,
 } from '../world/world';
 import { FORAGE, IDENTIFY } from '../data/forage';
 import type { Boulder } from '../world/groundcover';
@@ -15,6 +15,7 @@ import { stumpSize, treeScale } from '../world/treefx';
 import { SPECIES, TREES } from '../world/trees';
 import { ZONE_NAMES } from '../world/climate';
 import type { Game } from './game';
+import type { Villager } from './villagers';
 import type { SwingKind } from './tools';
 import { RECIPE_MINIGAMES, type MinigameSpec } from './minigames';
 import { anvilGrade, bellowsGrade, HOT_TIME, smithyCap } from './smithy';
@@ -27,6 +28,7 @@ export type Target =
   | { kind: 'rock'; rock: Boulder; point: THREE.Vector3 }
   | { kind: 'cart'; cart: CartObj; point: THREE.Vector3 }
   | { kind: 'stump'; stump: Stump; point: THREE.Vector3 }
+  | { kind: 'villager'; villager: Villager; point: THREE.Vector3 }
   | { kind: 'none' };
 
 export interface Ctx {
@@ -644,6 +646,27 @@ export const ACTIONS: ActionDef[] = [
       g.msg(`You dig out the stump and pull it free${big ? ': a log and some roots for firewood' : ', roots and all'}.`, 'good');
     },
   },
+  // ===== villagers
+  {
+    id: 'talk_villager', label: (c) => (c.t.kind === 'villager' ? `Talk to ${c.t.villager.name}` : 'Talk'),
+    show: (c) => c.t.kind === 'villager', time: 0,
+    run: (c) => {
+      if (c.t.kind !== 'villager') return;
+      const v = c.t.villager;
+      if (v.lying) return c.g.msg(`${v.name} is fast asleep.`, 'info');
+      const lines: Record<string, string[]> = {
+        farmer: ['The wheat wants weeding twice over if it\'s to fill out.', 'Ripe fields don\'t wait. Neither do the crows.', 'A hoe and a strong back: that\'s farming.'],
+        shepherd: ['Mind the gate, or they\'ll be off across the meadow.', 'Their fleece grows back by and by. Then it\'s shearing again.'],
+        woodcutter: ['Fell from the outside in, and plant a sapling for every tree.', 'Split along the grain and the plank comes clean.'],
+        butcher: ['A sharp knife is a kind knife.', 'Nothing goes to waste: meat for the pot, hide for the tanner.'],
+        smith: ['Keep the forge hot and the trough full.', 'Quench it while it glows, or it\'ll be soft as butter.'],
+        elder: ['Welcome, traveller. Mind our fields as you pass.', 'We\'ve kept this village through hard winters. You\'re welcome by the fire of an evening.'],
+        villager: ['Always something to fetch and carry.', 'Lovely weather for gathering, isn\'t it?'],
+      };
+      const say = lines[v.role] ?? lines.villager;
+      c.g.msg(`${v.name}, the ${v.roleName} (${v.doing}): "${say[Math.floor(Math.random() * say.length)]}"`, 'info');
+    },
+  },
   {
     id: 'examine_stump', label: 'Examine stump',
     show: (c) => c.t.kind === 'stump', time: 0,
@@ -973,13 +996,13 @@ export const ACTIONS: ActionDef[] = [
       const p = obj(c, 'pile') as PileObj;
       const corpse = p.items.find((i) => i.type === 'corpse')!;
       p.items = p.items.filter((i) => i !== corpse);
-      const species = corpse.label?.includes('boar') ? 'boar' : 'deer';
+      const species = corpseSpecies(corpse.label);
       const meat = Math.max(1, ANIMALS[species].meat + (o.success ? 1 : -1));
       c.g.give('raw_meat', o.ql, meat);
       if (o.success) c.g.give('hide', o.ql, 1);
       if (p.items.length === 0) c.g.world.remove(p);
       else c.g.world.changed(p);
-      c.g.msg(`You butcher the ${species}: ${meat} meat${o.success ? ' and a hide' : '. The hide is ruined'}.`, o.success ? 'good' : 'info');
+      c.g.msg(`You butcher the ${ANIMALS[species].name.replace('Wild ', '').toLowerCase()}: ${meat} meat${o.success ? ' and a hide' : '. The hide is ruined'}.`, o.success ? 'good' : 'info');
       c.g.quests?.note('butchered');
     },
   },
@@ -1126,6 +1149,20 @@ export const ACTIONS: ActionDef[] = [
     show: (c) => c.t.kind === 'animal' && c.t.animal.species === 'horse' && !!c.t.animal.tamed && !c.g.riding,
     time: 0.6, fixedTime: true,
     run: (c) => { if (c.t.kind === 'animal' && c.g.world.animals.includes(c.t.animal)) c.g.mount(c.t.animal); },
+  },
+  {
+    id: 'shear_sheep', label: 'Shear',
+    show: (c) => c.t.kind === 'animal' && c.t.animal.species === 'sheep' && toolIs(c, 'knife'),
+    check: (c) => (c.t.kind === 'animal' && (c.t.animal.wool ?? 1) < 1 ? 'Its fleece hasn\'t grown back yet.' : null),
+    time: 8, skill: 'taming', difficulty: 6, stamina: 3, toolWear: 0.05,
+    run: (c, o) => {
+      if (c.t.kind !== 'animal') return;
+      const a = c.t.animal;
+      a.wool = 0;
+      const n = o.success ? 2 + (Math.random() < 0.5 ? 1 : 0) : 1;
+      c.g.give('wool', o.ql, n);
+      c.g.msg(`You shear the sheep: ${n} fleece${n > 1 ? 's' : ''} of wool.`, 'good');
+    },
   },
   {
     id: 'examine_animal', label: 'Examine', show: (c) => c.t.kind === 'animal', time: 0,

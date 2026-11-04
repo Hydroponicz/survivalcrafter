@@ -302,6 +302,11 @@ export class Player {
       if (t.solidAt(x, y + h, z)) score += 2;
       for (const [ox, oz] of RING) if (t.solidAt(x + ox * RADIUS, y + h, z + oz * RADIUS)) score++;
     }
+    // Villagers: you bump into them.
+    for (const pp of world.people) {
+      if (Math.abs(pp.x - x) > 1 || Math.abs(pp.z - z) > 1 || Math.abs(pp.y - y) > 1.6) continue;
+      score += Math.max(0, RADIUS + 0.28 - Math.hypot(x - pp.x, z - pp.z)) * 10;
+    }
     // Stumps: solid, unless low enough to step over.
     for (const st of world.stumpsNear(x, z, 2)) {
       const { r, h } = stumpSize(st);

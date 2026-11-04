@@ -50,6 +50,7 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { QuestLog } from './quests';
 import { Combat } from './combat';
 import { WorldMap } from '../ui/worldmap';
+import { VillageLife } from './villagers';
 
 const REACH = 4.5;
 /** Skill above a task's difficulty needed to do it the quick way. */
@@ -100,6 +101,8 @@ export class Game {
   camera: THREE.PerspectiveCamera;
   world: World;
   view: WorldView;
+  /** The villagers of the villages near you. */
+  life!: VillageLife;
   player = new Player();
   inv = new Inventory();
   skills = new Skills();
@@ -218,6 +221,8 @@ export class Game {
     world.regionHooks.push(forageRegion);
     this.scene.add(this.markers);
     this.scene.add(this.view.group);
+    this.life = new VillageLife(this);
+    this.scene.add(this.life.group);
     this.scene.add(this.player.model);
     // The light of a torch in your hand (always in the scene, dark when unused,
     // so lighting one doesn't make every material rebuild its shader).
@@ -906,6 +911,7 @@ export class Game {
     if (t.kind === 'cart') return !this.world.carts.includes(t.cart);
     if (t.kind === 'rock') return this.world.brokenRocks.has(t.rock.key);
     if (t.kind === 'stump') return !this.world.stumps.includes(t.stump);
+    if (t.kind === 'villager') return !this.life.villagers.includes(t.villager);
     return false;
   }
 
@@ -1145,7 +1151,7 @@ export class Game {
   /** Turn the body toward what you're working on (third person). */
   private faceToward(t: Target): number | null {
     const p = this.player.pos;
-    const at = t.kind === 'object' ? t.obj : t.kind === 'animal' ? t.animal : t.kind === 'cart' ? t.cart : t.kind === 'stump' ? t.stump : t.kind === 'terrain' ? t.point : null;
+    const at = t.kind === 'object' ? t.obj : t.kind === 'animal' ? t.animal : t.kind === 'cart' ? t.cart : t.kind === 'stump' ? t.stump : t.kind === 'villager' ? t.villager.pos : t.kind === 'terrain' ? t.point : null;
     if (!at) return null;
     const dx = at.x - p.x, dz = at.z - p.z;
     return Math.hypot(dx, dz) < 0.2 ? null : Math.atan2(dx, dz);
@@ -1161,20 +1167,22 @@ export class Game {
   }
 
   /** A blow lands on a tree: notch, shake, chips, thunk. */
-  treeHit(t: TreeObj, strength: number, clean: boolean) {
-    const p = this.player.pos;
+  treeHit(t: TreeObj, strength: number, clean: boolean, from?: { x: number; z: number }) {
+    const p = from ?? this.player.pos;
     this.world.changed(t); // swaps the instanced tree for its own notched model
     this.view.treeFx.hit(t, p.x, p.z, strength, clean);
-    if (clean) this.sound.chop(0.6 + strength * 0.4); else this.sound.glance();
-    this.player.shake(clean ? 0.3 + strength * 0.25 : 0.15);
+    // (Someone else chopping: heard from where you are.)
+    const vol = from ? distVol(Math.hypot(from.x - this.player.pos.x, from.z - this.player.pos.z)) : 1;
+    if (vol > 0.02) { if (clean) this.sound.chop((0.6 + strength * 0.4) * vol); else this.sound.glance(vol); }
+    if (!from) this.player.shake(clean ? 0.3 + strength * 0.25 : 0.15);
   }
 
   /**
    * Fell a tree: it topples away from you; logs and branches land where the
    * trunk comes down, and a stump is left behind.
    */
-  fellTree(t: TreeObj, items: Item[], onDone: () => void) {
-    const p = this.player.pos;
+  fellTree(t: TreeObj, items: Item[], onDone: () => void, from?: { x: number; z: number }) {
+    const p = from ?? this.player.pos;
     const dx = t.x - p.x, dz = t.z - p.z;
     const { s } = treeScale(t);
     this.world.stumps.push({ x: t.x, z: t.z, s, species: t.species });
@@ -1336,6 +1344,11 @@ export class Game {
       if (this.action?.ctx.t.kind === 'animal' && this.action.ctx.t.animal === a) {
         a.speed = 0; a.state = 'idle'; a.timer = 2;
         a.rot = Math.atan2(p.x - a.x, p.z - a.z);
+        continue;
+      }
+      // Livestock in a pen grazes about inside it (and a sheep's fleece grows back).
+      if (a.pen) {
+        penAnimal(a, dt);
         continue;
       }
       // Your own animals wait where you left them, grazing; one you're leading follows you.
@@ -1509,6 +1522,8 @@ export class Game {
           if (skipPieces && o.kind === 'structure') continue;
           if (this.hitObject(o, p)) return { kind: 'object', obj: o, point: p.clone() };
         }
+        const person = this.life.hit(p);
+        if (person) return { kind: 'villager', villager: person, point: p.clone() };
         for (const st of stumps) {
           const { r, h } = stumpSize(st), g = t.heightAt(st.x, st.z) - 0.1;
           if (Math.hypot(p.x - st.x, p.z - st.z) < r + 0.05 && p.y > g && p.y < g + h + 0.05) return { kind: 'stump', stump: st, point: p.clone() };
@@ -2222,6 +2237,7 @@ export class Game {
     if (this.quests && !this.quests.onChange) this.quests.onChange = () => this.ui.refresh();
     this.quests?.update(this, dt);
     perf.time('animals', () => { this.updateAnimals(dt); this.updateCarts(dt); });
+    perf.time('villagers', () => this.life.update(dt));
     perf.time('map', () => this.map.update(dt, p.pos.x, p.pos.z, this.ui.isOpen('map')));
     perf.time('terrain', () => this.world.terrain.update(p.pos.x, p.pos.y, p.pos.z, 6));
     this.world.focus = { x: p.pos.x, z: p.pos.z };
@@ -2546,16 +2562,46 @@ function makeGlowTexture(): THREE.Texture {
   return tex;
 }
 
+/** An animal in a pen: stands, grazes, ambles a few steps, never past the fence. */
+function penAnimal(a: AnimalObj, dt: number) {
+  const pen = a.pen!;
+  if (a.species === 'sheep') a.wool = Math.min(1, (a.wool ?? 1) + dt / 900);
+  if (a.hurt) a.hurt = Math.max(0, a.hurt - dt);
+  a.timer -= dt;
+  if (a.timer <= 0) {
+    if (a.state === 'wander') { a.state = 'idle'; a.timer = 3 + Math.random() * 8; a.speed = 0; }
+    else {
+      a.state = 'wander'; a.timer = 1.5 + Math.random() * 3; a.speed = 0.6;
+      const ang = Math.random() * Math.PI * 2;
+      a.dirX = Math.cos(ang); a.dirZ = Math.sin(ang);
+    }
+  }
+  if (a.state !== 'wander') { a.speed = 0; return; }
+  const c = Math.cos(pen.yaw), s = Math.sin(pen.yaw);
+  let nx = a.x + a.dirX * a.speed * dt, nz = a.z + a.dirZ * a.speed * dt;
+  // Inside the fence (in the pen's own frame), turning back at it.
+  const dx = nx - pen.x, dz = nz - pen.z;
+  let lx = dx * c - dz * s, lz = dx * s + dz * c;
+  const mx = pen.hx - 0.7, mz = pen.hz - 0.7;
+  if (Math.abs(lx) > mx || Math.abs(lz) > mz) {
+    lx = Math.max(-mx, Math.min(mx, lx)); lz = Math.max(-mz, Math.min(mz, lz));
+    nx = pen.x + lx * c + lz * s; nz = pen.z - lx * s + lz * c;
+    a.dirX = -a.dirX; a.dirZ = -a.dirZ;
+  }
+  a.x = nx; a.z = nz;
+  a.rot = Math.atan2(a.dirX, a.dirZ);
+}
+
 /** How long the quick reach of an instant pickup takes (seconds). */
 const REACH_TIME = 0.75;
 
 /** What the body does for each job (null: stands at ease). `minigame`: the hands-on version. */
-function workClip(id: string, _c?: Ctx): Clip | null {
+export function workClip(id: string, _c?: Ctx): Clip | null {
   switch (id) {
     case 'cut_tree': return 'chop';
     case 'mine': case 'break_rock': case 'dig': case 'dig_stump': case 'level': case 'raise': case 'smooth': case 'cultivate': return 'mine';
     case 'harvest': return 'sickle';
-    case 'pick_forage': case 'collect_branch': case 'pick_sprout': case 'pick_berries': case 'sow': case 'tend': case 'plant_sprout': case 'butcher': return 'gather';
+    case 'pick_forage': case 'collect_branch': case 'pick_sprout': case 'pick_berries': case 'sow': case 'tend': case 'plant_sprout': case 'butcher': case 'shear_sheep': return 'gather';
     case 'pick_up': case 'take_all': case 'place_item': case 'fill_jar': return 'pickup';
     case 'drink': return 'drink';
     case 'continue_build': case 'quick_build': case 'demolish': return 'hammer';

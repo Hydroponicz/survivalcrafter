@@ -89,6 +89,7 @@ const defs: ItemDef[] = [
   { id: 'wheat_seeds', name: 'Wheat seeds', icon: '🫘', weight: 0.1, desc: 'Sow them on a tilled field.' },
   { id: 'wheat', name: 'Wheat', icon: '🌾', weight: 0.5, desc: 'Harvested grain. Grind it at a quern.' },
   { id: 'hide', name: 'Hide', icon: '🟫', weight: 2, desc: 'An animal hide. Used for clothing and beds.' },
+  { id: 'wool', name: 'Wool', icon: '🐑', weight: 0.4, desc: 'A fleece shorn from a sheep. Spun and woven, it makes cloth.' },
 
   // --- clothing (worn: see the character window, Tab)
   { id: 'hide_cap', name: 'Hide cap', icon: '🧢', weight: 0.4, wear: { slot: 'head', armor: 0.04, colour: 0x6e4a2c }, desc: 'A snug hide cap. Softens blows to the head.' },

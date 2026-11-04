@@ -27,7 +27,7 @@ export interface Rect { x: number; z: number; yaw: number; hx: number; hz: numbe
 interface Pad extends Rect { level: number }
 export interface Seg { ax: number; az: number; bx: number; bz: number; w: number }
 /** What a house is for (the work of whoever comes to live there). */
-export type HouseRole = 'farmer' | 'herder' | 'woodcutter' | 'butcher' | 'elder' | 'villager';
+export type HouseRole = 'farmer' | 'shepherd' | 'woodcutter' | 'butcher' | 'smith' | 'elder' | 'villager';
 export interface House {
   x: number; z: number; yaw: number; y: number;
   /** Floor tiles along its length (2: a cottage, 3: a longhouse). */
@@ -35,7 +35,17 @@ export interface House {
   role: HouseRole;
   /** Just outside the door. */
   door: { x: number; z: number };
+  /** Its path to the square: the door, the bend, the square's edge. */
+  route: { x: number; z: number }[];
   beds: { x: number; z: number }[];
+  /** Where its chest stands (what the household makes goes in here). */
+  chest: { x: number; z: number };
+  /** A chopping block outside, if it has one. */
+  block?: { x: number; z: number };
+  /** The smith's forge and anvil. */
+  smithy?: { forge: { x: number; z: number }; anvil: { x: number; z: number } };
+  /** Its animal pen, if it keeps one. */
+  pen?: Rect;
 }
 export interface Village {
   /** Its square on the village grid. */
@@ -45,6 +55,9 @@ export interface Village {
   /** Everything of it lies within this distance of its centre. */
   r: number;
   square: { x: number; z: number; r: number };
+  /** The campfire in the square, and the benches round it. */
+  fire: { x: number; z: number };
+  benches: { x: number; z: number; yaw: number }[];
   houses: House[];
   pads: Pad[];
   pens: Rect[];
@@ -255,7 +268,7 @@ export class Villages {
 
   private layout(cx: number, cz: number, x: number, z: number, rnd: () => number): Village {
     const g = this.gen;
-    const v: Village = { cx, cz, name: villageName(rnd), x, z, r: 0, square: { x, z, r: 5 + rnd() * 1.5 }, houses: [], pads: [], pens: [], fields: [], paths: [], pieces: [] };
+    const v: Village = { cx, cz, name: villageName(rnd), x, z, r: 0, square: { x, z, r: 5 + rnd() * 1.5 }, fire: { x, z }, benches: [], houses: [], pads: [], pens: [], fields: [], paths: [], pieces: [] };
     const sq = v.square;
     const ground = (px: number, pz: number) => this.shape(v, px, pz, g.height(px, pz));
     const dry = (px: number, pz: number) => Number.isNaN(g.water(px, pz, g.height(px, pz)));
@@ -279,16 +292,19 @@ export class Villages {
     }
 
     // Houses round the square, each facing it, a path from its door.
-    const roles: HouseRole[] = ['elder', 'farmer', 'herder', 'woodcutter', 'butcher', 'farmer', 'herder', 'villager', 'farmer', 'villager', 'woodcutter', 'villager'];
+    const roles: HouseRole[] = ['elder', 'farmer', 'shepherd', 'woodcutter', 'smith', 'butcher', 'farmer', 'shepherd', 'villager', 'farmer', 'villager', 'woodcutter'];
     for (let i = 0; i < n; i++) {
       const tiles = i === 0 || rnd() < 0.3 ? 3 : 2;
+      const role = roles[i % roles.length];
+      // The smith works beside the house: a wider plot for the forge and anvil.
+      const extra = role === 'smith' ? 3.4 : 0;
       for (let tries = 0; tries < 40; tries++) {
         const a = rnd() * Math.PI * 2, r = sq.r + 7 + rnd() * spread;
         const hx = x + Math.cos(a) * r, hz = z + Math.sin(a) * r;
         if (!inCell(hx, hz)) continue;
         // Its front (local -z) toward the square, turned a little off true.
         const yaw = Math.atan2(-(x - hx), -(z - hz)) + (rnd() - 0.5) * 0.35;
-        const pad: Rect = { x: hx, z: hz, yaw, hx: tiles + 1.3, hz: 2 + 1.3 };
+        const pad: Rect = { x: hx, z: hz, yaw, hx: tiles + 1.3 + extra, hz: 2 + 1.3 };
         if (!free(pad, 2.5)) continue;
         // Level enough to build on, and dry.
         const hs: number[] = [];
@@ -306,8 +322,7 @@ export class Villages {
         const level = hs.reduce((s, h) => s + h, 0) / hs.length;
         v.pads.push({ ...pad, level });
         v.paths.push(...path);
-        const role = roles[i % roles.length];
-        const house: House = { x: hx, z: hz, yaw, y: level, tiles, role, door: { x: dx, z: dz }, beds: [] };
+        const house: House = { x: hx, z: hz, yaw, y: level, tiles, role, door: { x: dx, z: dz }, route: [{ x: dx, z: dz }, { x: mx, z: mz }, { x: ex, z: ez }], beds: [], chest: { x: hx, z: hz } };
         v.houses.push(house);
         this.house(v, house, logs, rnd);
         break;
@@ -316,13 +331,14 @@ export class Villages {
 
     // Pens behind the herders' houses (and sometimes others), fields out past the houses.
     for (const h of v.houses) {
-      if (h.role !== 'herder' && !(h.role === 'butcher' || rnd() < 0.2)) continue;
+      if (h.role !== 'shepherd' && !(h.role === 'butcher' || rnd() < 0.2)) continue;
       const [px, pz] = world(h, 0, 2 + 1.3 + 1.8 + 3);
       const pen: Rect = { x: px, z: pz, yaw: h.yaw, hx: 3, hz: 3 };
       if (!free(pen, 1.5) || !inCell(px, pz)) continue;
       const hs = corners(pen).map(([qx, qz]) => g.height(qx, qz));
       if (Math.max(...hs) - Math.min(...hs) > 1.6 || corners(pen, 1).some(([qx, qz]) => !dry(qx, qz))) continue;
       v.pens.push(pen);
+      h.pen = pen;
       for (const [lx, lz, yaw] of [[-2, -3, 0], [0, -3, 0], [2, -3, 0], [-2, 3, 0], [0, 3, 0], [2, 3, 0], [-3, -2, Math.PI / 2], [-3, 0, Math.PI / 2], [-3, 2, Math.PI / 2], [3, -2, Math.PI / 2], [3, 0, Math.PI / 2], [3, 2, Math.PI / 2]] as const) {
         const [fx, fz] = world(pen, lx, lz);
         const gate = lx === 3 && lz === 0;
@@ -351,9 +367,12 @@ export class Villages {
     const fa = rnd() * Math.PI * 2;
     const fx = x + Math.cos(fa) * 3.6, fz = z + Math.sin(fa) * 3.6;
     v.pieces.push({ type: 'campfire', x: fx, y: ground(fx, fz), z: fz, yaw: 0 });
+    v.fire = { x: fx, z: fz };
     for (const off of [-0.7, 0.7]) {
       const bx = fx + Math.cos(fa + off * 1.6) * 1.8, bz = fz + Math.sin(fa + off * 1.6) * 1.8;
-      v.pieces.push({ type: 'bench', x: bx, y: ground(bx, bz), z: bz, yaw: Math.atan2(bx - fx, bz - fz) + Math.PI / 2 });
+      const byaw = Math.atan2(bx - fx, bz - fz) + Math.PI / 2;
+      v.pieces.push({ type: 'bench', x: bx, y: ground(bx, bz), z: bz, yaw: byaw });
+      v.benches.push({ x: bx, z: bz, yaw: byaw });
     }
     const ba = fa + Math.PI * (0.6 + rnd() * 0.8);
     const bx = x + Math.cos(ba) * (sq.r - 0.8), bz = z + Math.sin(ba) * (sq.r - 0.8);
@@ -401,12 +420,24 @@ export class Villages {
       h.beds.push({ x, z });
     }
     put('chest', -n + 0.9, 0.2, 1.5, Math.PI);
+    { const [x, z] = world(h, -n + 0.9, 1.5); h.chest = { x, z }; }
     put('table', -n + 1.6 + (n === 3 ? 0.6 : 0), 0.2, 0.3, half);
     put('stool', -n + 0.7 + (n === 3 ? 0.6 : 0), 0.2, 0.3, 0);
     // Outside: a woodcutter splits logs by the house; others sometimes keep a block too.
     if (h.role === 'woodcutter' || rnd() < 0.15) {
-      const [x, z] = world(h, n + 1.7, -1);
+      const [x, z] = world(h, h.role === 'smith' ? -n - 1.7 : n + 1.7, -1);
       v.pieces.push({ type: 'chopping_block', x, y: this.shape(v, x, z, this.gen.height(x, z)), z, yaw: rnd() * 6 });
+      h.block = { x, z };
+    }
+    // The smithy: a forge with bellows at its side, an anvil and a quench trough, on the levelled plot.
+    if (h.role === 'smith') {
+      const at = (lx: number, lz: number) => world(h, lx, lz);
+      const [fx, fz] = at(n + 2.8, -0.6), [bx, bz] = at(n + 2.8 + 1.05, -0.6), [ax, az] = at(n + 2.4, 1.5), [tx, tz] = at(n + 3.9, 1.5);
+      v.pieces.push({ type: 'forge', x: fx, y: y0, z: fz, yaw: h.yaw });
+      v.pieces.push({ type: 'bellows', x: bx, y: y0, z: bz, yaw: h.yaw + Math.PI / 2 });
+      v.pieces.push({ type: 'anvil', x: ax, y: y0, z: az, yaw: h.yaw + Math.PI / 2 });
+      v.pieces.push({ type: 'quench_trough', x: tx, y: y0, z: tz, yaw: h.yaw });
+      h.smithy = { forge: { x: fx, z: fz }, anvil: { x: ax, z: az } };
     }
   }
 }
