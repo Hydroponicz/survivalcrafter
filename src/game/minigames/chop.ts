@@ -82,8 +82,8 @@ export class ChopGame extends Minigame {
   readonly instructions: string;
   /** Played out in the world itself (the game draws it from this camera). */
   readonly inWorld = true;
-  /** The view looks past where you stand: the game hides your body meanwhile. */
-  readonly hidesPlayer = true;
+  /** You're seen at the block, swinging the hatchet yourself. */
+  readonly hidesPlayer = false;
   readonly overlay = new THREE.Group();
   readonly stand: { x: number; z: number; yaw: number };
   /** A warm light on the work at night. */
@@ -192,21 +192,38 @@ export class ChopGame extends Minigame {
       // Handle away from you at the blow, edge down: x = y × z.
       this.pivot.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(new THREE.Vector3(-1, 0, 0), new THREE.Vector3(0, 0, -1), new THREE.Vector3(0, -1, 0)));
       this.pivot.add(this.tool);
+      // (Your own character swings the hatchet: the floating one stays hidden.)
       this.pivot.visible = false;
       this.work.add(this.pivot);
     }
 
-    // Glide in: from the side, a little above, so you see the blade come down.
+    // Glide in: from the side, a little above, taking in you and the block.
     this.camFrom.pos.copy(from.position);
     this.camFrom.quat.copy(from.quaternion);
     // (Far enough back to see the hatchet raised high and the log it comes down on.)
-    this.camTo.copy(this.work.localToWorld(new THREE.Vector3(1.55, h + 0.75, 0.95)));
-    this.lookAt.copy(this.work.localToWorld(new THREE.Vector3(0, h + 0.3, 0.2)));
+    this.camTo.copy(this.work.localToWorld(new THREE.Vector3(2.3, h + 0.85, 0.75)));
+    this.lookAt.copy(this.work.localToWorld(new THREE.Vector3(0, h + 0.35, 0.45)));
     this.camera.position.copy(from.position);
     this.camera.quaternion.copy(from.quaternion);
     if ((from as THREE.PerspectiveCamera).fov) this.camera.fov = (from as THREE.PerspectiveCamera).fov;
     this.camera.updateProjectionMatrix();
     this.workLight.copy(this.work.localToWorld(new THREE.Vector3(0.4, h + 0.7, 0.6)));
+  }
+
+  /** Where you stand (at the block, facing it). */
+  standAt(): { x: number; z: number; face: { x: number; z: number } } {
+    const b = this.work.position;
+    return { x: this.stand.x, z: this.stand.z, face: { x: b.x, z: b.z } };
+  }
+
+  /** Your swing, in step with each blow: raised and ready, a chop down onto the line, and back up. */
+  bodyWork(): { clip: 'chop'; phase: number; impactAt: number } | null {
+    if (this.phase !== 'split') return null;
+    const impactAt = 0.6, ready = impactAt * 0.78;
+    if (this.swingT < 0) return { clip: 'chop', phase: ready, impactAt };
+    const t = this.swingT;
+    const phase = t < DOWN ? ready + (impactAt - ready) * (t / DOWN) : impactAt + (1 - impactAt) * Math.min(1, (t - DOWN) / RECOIL);
+    return { clip: 'chop', phase, impactAt };
   }
 
   /** The point on the top where the current line is struck. */
@@ -254,7 +271,7 @@ export class ChopGame extends Minigame {
           this.t = 0;
           this.guides.forEach((g) => (g.visible = true));
           this.ring.visible = this.target.visible = true;
-          this.pivot.visible = !!this.tool;
+          this.pivot.visible = false;
         }
         return;
       }

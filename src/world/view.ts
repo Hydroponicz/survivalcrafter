@@ -679,8 +679,61 @@ function horseModel(seed: number, tamed: boolean): THREE.Group {
   return g;
 }
 
+/** One shared material for every animal (their colours are baked into the vertices). */
+const animalMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85 });
+/** Merged animal geometry, by kind (species, coat, saddle): a herd shares it. */
+const animalGeos = new Map<string, { body: THREE.BufferGeometry; legs: { geo: THREE.BufferGeometry; pos: THREE.Vector3 }[] }>();
+
+/**
+ * An animal drawn with as few draw calls as possible: all the fixed parts in
+ * one mesh, and one mesh per leg (they swing). Built from the part-by-part
+ * model the first time each kind is asked for; colours become vertex colours.
+ */
 export function animalModel(species: 'deer' | 'boar' | 'horse', seed = 0, tamed = false): THREE.Group {
-  if (species === 'horse') return horseModel(seed, tamed);
+  const key = species === 'horse' ? `horse:${Math.abs(seed) % HORSE_COATS.length}:${tamed ? 1 : 0}` : species;
+  let geos = animalGeos.get(key);
+  if (!geos) {
+    const raw = species === 'horse' ? horseModel(seed, tamed) : partsModel(species);
+    raw.updateMatrixWorld(true);
+    const legs = raw.userData.legs as THREE.Mesh[];
+    const bake = (o: THREE.Object3D, root: THREE.Matrix4): THREE.BufferGeometry[] => {
+      const out: THREE.BufferGeometry[] = [];
+      o.traverse((m) => {
+        if (!(m as THREE.Mesh).isMesh) return;
+        const mesh = m as THREE.Mesh;
+        let g = mesh.geometry.clone();
+        if (g.index) g = g.toNonIndexed();
+        g.applyMatrix4(new THREE.Matrix4().multiplyMatrices(root, mesh.matrixWorld));
+        const c = (mesh.material as THREE.MeshStandardMaterial).color;
+        const n = g.attributes.position.count, col = new Float32Array(n * 3);
+        for (let i = 0; i < n; i++) c.toArray(col, i * 3);
+        g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+        for (const k of Object.keys(g.attributes)) if (k !== 'position' && k !== 'normal' && k !== 'color') g.deleteAttribute(k);
+        out.push(g);
+      });
+      return out;
+    };
+    // The body: everything but the legs, in the model's own frame.
+    const legSet = new Set<THREE.Object3D>(legs);
+    const bodyParts: THREE.BufferGeometry[] = [];
+    for (const child of raw.children) if (!legSet.has(child)) bodyParts.push(...bake(child, new THREE.Matrix4()));
+    // Each leg (with its hoof) in the leg's own frame, so it can still swing about its hip.
+    const legGeos = legs.map((l) => ({ geo: mergeGeometries(bake(l, l.matrixWorld.clone().invert()))!, pos: l.position.clone() }));
+    geos = { body: mergeGeometries(bodyParts)!, legs: legGeos };
+    animalGeos.set(key, geos);
+  }
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(geos.body, animalMat);
+  body.castShadow = true;
+  g.add(body);
+  const legs = geos.legs.map(({ geo, pos }) => { const l = new THREE.Mesh(geo, animalMat); l.position.copy(pos); l.castShadow = true; g.add(l); return l; });
+  g.userData.legs = legs;
+  if (species === 'horse') g.userData.tamed = tamed;
+  return g;
+}
+
+/** A deer or a boar, part by part (merged by animalModel). */
+function partsModel(species: 'deer' | 'boar'): THREE.Group {
   const g = new THREE.Group();
   const boar = species === 'boar';
   const c = boar ? 0x4a3a30 : 0x8a5a34;

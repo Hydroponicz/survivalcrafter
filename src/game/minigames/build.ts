@@ -76,8 +76,11 @@ export class BuildGame extends Minigame {
   readonly instructions: string;
   /** Played out in the world itself (the game's camera follows this one). */
   readonly inWorld = true;
-  /** The view looks past where you stand: the game hides your body meanwhile. */
-  readonly hidesPlayer = true;
+  /** While carrying the material in, the view looks past where you stand: your body's hidden then. Nailing, you're seen at work. */
+  get hidesPlayer(): boolean { return this.phase !== 'fix' && this.phase !== 'done'; }
+  /** Where the material sits in your hands, off the pointer, and how it sways (piece frame). */
+  private grip = new THREE.Vector3();
+  private swayAmp = 0;
   /** What's shown in the world while you work (added to the world's scene). */
   readonly overlay = new THREE.Group();
   /** Where you stand to do it, and which way you face. */
@@ -284,7 +287,16 @@ export class BuildGame extends Minigame {
         look.lookAt(this.camTo.look);
         this.camera.quaternion.slerpQuaternions(this.camFrom.quat, look.quaternion, e);
         this.camera.updateMatrixWorld();
-        if (k >= 1) { this.phase = 'place'; this.t = 0; }
+        if (k >= 1) {
+          this.phase = 'place'; this.t = 0;
+          // You pick the material up off to one side: it has to be carried onto the slot, not just
+          // clicked where the view happens to be centred. It sways a little in your hands, too.
+          const [tu, tv] = this.tolerances();
+          const a = Math.random() * Math.PI * 2, r = 1.8 + Math.random() * 1.2;
+          this.grip.set(Math.cos(a) * tu * r, 0, Math.sin(a) * tv * r);
+          if (!this.flatSlot()) this.grip.set(this.grip.x, this.grip.z, 0);
+          this.swayAmp = 0.28 * (1.15 - this.ease * 0.6);
+        }
         return;
       }
       case 'place': {
@@ -293,8 +305,13 @@ export class BuildGame extends Minigame {
         // it is from the slot in that surface counts.
         const c = this.slotCentre();
         const flat = this.flatSlot();
-        const local = this.pointOnSlot(i.ndc, flat);
-        if (!local) return;
+        const hit = this.pointOnSlot(i.ndc, flat);
+        if (!hit) return;
+        // Where the material is: off the pointer by where you're holding it, swaying a little.
+        const [su, sv] = this.tolerances();
+        const sway = new THREE.Vector3(Math.sin(this.time * 1.7) * su, 0, Math.sin(this.time * 1.3 + 1) * sv).multiplyScalar(this.swayAmp);
+        if (!flat) sway.set(sway.x, sway.z, 0);
+        const local = hit.add(this.grip).add(sway);
         // How far off, as a share of what still fits each way (a long course forgives more along its length).
         const [tu, tv] = this.tolerances();
         const off = flat ? Math.hypot((local.x - c.x) / tu, (local.z - c.z) / tv) : Math.hypot((local.x - c.x) / tu, (local.y - c.y) / tv);
@@ -445,7 +462,8 @@ export class BuildGame extends Minigame {
     this.target.visible = true;
     this.camLook.copy(this.camTo.look);
     if (this.tool) {
-      this.pivot.visible = true;
+      // (Your own character swings the hammer now: no floating one.)
+      this.pivot.visible = false;
       this.pivot.position.copy(this.gripFor(this.markers[0]));
     }
   }
@@ -454,6 +472,31 @@ export class BuildGame extends Minigame {
   private headAt(m: Marker): THREE.Vector3 {
     m.mesh.updateWorldMatrix(true, false);
     return m.mesh.localToWorld(new THREE.Vector3(0, m.top, 0));
+  }
+
+  /** Where you stand to drive the current nail (beside it, on your side of the piece), and the point to face. */
+  standAt(): { x: number; z: number; face: { x: number; z: number } } | null {
+    if (this.phase !== 'fix' && this.phase !== 'done') return null;
+    const m = this.markers[Math.min(this.current, this.markers.length - 1)];
+    if (!m) return null;
+    const head = this.headAt(m);
+    // Back toward where you came from, a short reach from the nail.
+    const back = new THREE.Vector3(this.stand.x - head.x, 0, this.stand.z - head.z);
+    if (back.lengthSq() < 1e-4) back.set(m.out.x, 0, m.out.z);
+    back.normalize();
+    const reach = fillsAcross(this.def) ? 0.75 : 0.85;
+    return { x: head.x + back.x * reach, z: head.z + back.z * reach, face: { x: head.x, z: head.z } };
+  }
+
+  /** What your body does: a swing in step with each blow (overhead at a wall, down at a floor). */
+  bodyWork(): { clip: 'chop' | 'mine'; phase: number; impactAt: number } | null {
+    if (this.phase !== 'fix') return null;
+    const clip = fillsAcross(this.def) ? 'mine' : 'chop';
+    const impactAt = 0.6, ready = impactAt * 0.78;
+    if (this.swingT < 0) return { clip, phase: ready, impactAt };
+    const t = this.swingT;
+    const phase = t < DOWN ? ready + (impactAt - ready) * (t / DOWN) : impactAt + (1 - impactAt) * Math.min(1, (t - DOWN) / RECOIL);
+    return { clip, phase, impactAt };
   }
 
   /** Where your grip is, for the head to come down square on this nail. */
@@ -466,10 +509,17 @@ export class BuildGame extends Minigame {
     if (!m) return;
     const head = this.headAt(m);
     const smooth = (rate: number) => 1 - Math.exp(-dt * rate);
-    // The view closes in on the nail, from the side the hammer swings across.
-    const camAt = head.clone().addScaledVector(m.out, 0.75).addScaledVector(m.side, 0.6);
+    // The view takes in you and the nail: from the side, a little above, between the two.
+    const st = this.standAt()!;
+    // (Your chest: a little over a metre above the ground the piece stands on.)
+    const chest = new THREE.Vector3(st.x, this.piece.position.y + 1.15, st.z);
+    const mid = head.clone().lerp(chest, 0.5);
+    const along = new THREE.Vector3(st.x - head.x, 0, st.z - head.z).normalize();
+    const side = new THREE.Vector3(-along.z, 0, along.x);
+    if (side.dot(m.side) < 0) side.negate();
+    const camAt = mid.clone().addScaledVector(side, 3.4).addScaledVector(along, 0.4).add(new THREE.Vector3(0, 1.3, 0));
     this.camera.position.lerp(camAt, smooth(4));
-    this.camLook.lerp(head, smooth(6));
+    this.camLook.lerp(mid, smooth(6));
     this.camera.lookAt(this.camLook);
     this.camera.updateMatrixWorld();
     this.workLight.copy(head).addScaledVector(m.out, 0.55).addScaledVector(m.side, 0.25).add(new THREE.Vector3(0, 0.3, 0));

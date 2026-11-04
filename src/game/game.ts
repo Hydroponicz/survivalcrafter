@@ -1831,8 +1831,22 @@ export class Game {
       // Hands-on work: the mouse drives the minigame; you stand still.
       if (!inp.locked) this.working.session.cancel();
       else this.working.session.update(dt, inp);
-      p.work = this.working ? { clip: workClip(this.working.def.id, this.working.ctx) ?? 'craft' } : null;
+      // Work in the world (building, splitting): your body swings in step with each blow,
+      // and you step along to where the work is.
+      const inWorld = this.working?.session.mg as {
+        bodyWork?: () => { clip: Clip; phase: number; impactAt: number } | null;
+        standAt?: () => { x: number; z: number; face: { x: number; z: number } } | null;
+      } | undefined;
+      const body = inWorld?.bodyWork?.() ?? null;
+      p.work = this.working ? (body ?? { clip: workClip(this.working.def.id, this.working.ctx) ?? 'craft' }) : null;
       p.faceYaw = this.working ? this.faceToward(this.working.ctx.t) : null;
+      const st = this.working ? inWorld?.standAt?.() : null;
+      if (st) {
+        const k = 1 - Math.exp(-dt * 6), nx = p.pos.x + (st.x - p.pos.x) * k, nz = p.pos.z + (st.z - p.pos.z) * k;
+        const y = p.groundAt(this.world, nx, this.world.terrain.heightAt(nx, nz) + 1, nz).y;
+        if (Number.isFinite(y) && Math.abs(y - p.pos.y) < 1.2 && p.penetration(this.world, nx, y + 0.02, nz) === 0) p.pos.set(nx, y + 0.02, nz);
+        p.faceYaw = Math.atan2(st.face.x - p.pos.x, st.face.z - p.pos.z);
+      }
       p.update(dt, inp, this.world, true, 0, false, false);
       p.updateCamera(this.camera, this.world.terrain);
       // Work in the world (building) is seen through its own view of the piece.
