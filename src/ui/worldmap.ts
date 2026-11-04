@@ -20,6 +20,8 @@ const RES = 0.5;
 const CELL_PX = CELL * RES;
 const CHUNK_PX = CELL_PX * CHUNK;
 /** How far around you counts as seen (metres). */
+/** With the map closed, only cells this near you are drawn (m). */
+const NEAR = 260;
 const REVEAL = 72;
 
 const OFF = 2 ** 20, SPAN = 2 ** 21;
@@ -61,6 +63,11 @@ export class WorldMap {
     for (const k of keys ?? []) { this.explored.add(k); this.pending.add(k); }
   }
 
+  /** Pending cells in drawing order (re-sorted every half second), and whether the map was open then. */
+  private queue: number[] = [];
+  private wasOpen = false;
+  private pinnedAny = false;
+
   serialize(): number[] {
     return [...this.explored];
   }
@@ -68,7 +75,7 @@ export class WorldMap {
   /** Mark what's in sight of a point, and draw a few cells (more while the map is open). */
   update(dt: number, x: number, z: number, open: boolean) {
     this.timer -= dt;
-    if (this.timer <= 0) {
+    if (this.timer <= 0 || open !== this.wasOpen) {
       this.timer = 0.5;
       const c0x = Math.floor((x - REVEAL) / CELL), c1x = Math.floor((x + REVEAL) / CELL);
       const c0z = Math.floor((z - REVEAL) / CELL), c1z = Math.floor((z + REVEAL) / CELL);
@@ -78,18 +85,27 @@ export class WorldMap {
         const k = cellKey(cx, cz);
         if (!this.explored.has(k)) { this.explored.add(k); this.pending.add(k); }
       }
+      // What to draw next, nearest first: sorted now and then, not every frame. With the map
+      // closed, only what's round you (cells from an earlier visit wait until you look, or come back).
+      this.queue = [...this.pending]
+        .map((k) => ({ k, d: Math.hypot((cellX(k) + 0.5) * CELL - x, (cellZ(k) + 0.5) * CELL - z) }))
+        .filter((e) => open || e.d < NEAR)
+        .sort((a, b) => a.d - b.d)
+        .map((e) => e.k);
+      this.wasOpen = open;
     }
-    this.draw(open ? 8 : 2, x, z, open);
+    this.draw(open ? 8 : 2, open);
   }
 
-  /** Draw pending cells, nearest first, within a time budget. Far ones (from an earlier visit) ask for their land while the map is open. */
-  private draw(budgetMs: number, x: number, z: number, open: boolean) {
-    if (!this.pending.size) return;
+  /** Draw queued cells within a time budget (one a frame with the map closed). Far ones (from an earlier visit) ask for their land while the map is open. */
+  private draw(budgetMs: number, open: boolean) {
+    if (!this.queue.length) { if (this.pinnedAny && !open) { this.gen.unpinAll(); this.pinnedAny = false; } return; }
     const start = performance.now();
-    const list = [...this.pending].map((k) => ({ k, d: Math.hypot((cellX(k) + 0.5) * CELL - x, (cellZ(k) + 0.5) * CELL - z) })).sort((a, b) => a.d - b.d);
-    let asked = 0;
-    for (const { k } of list) {
-      if (performance.now() - start > budgetMs) break;
+    let asked = 0, drawn = 0;
+    for (let i = 0; i < this.queue.length; i++) {
+      if (performance.now() - start > budgetMs || (!open && drawn >= 1)) break;
+      const k = this.queue[i];
+      if (!this.pending.has(k)) { this.queue.splice(i--, 1); continue; }
       const cx = cellX(k), cz = cellZ(k);
       const x0 = cx * CELL, z0 = cz * CELL;
       const ready = this.gen.covered(x0, z0) && this.gen.covered(x0 + CELL, z0) && this.gen.covered(x0, z0 + CELL) && this.gen.covered(x0 + CELL, z0 + CELL);
@@ -97,15 +113,20 @@ export class WorldMap {
         // Land from an earlier visit: fetch it in the background (a few tiles at a time) while you look.
         if (open && asked < 4) {
           for (const [tx, tz] of this.gen.tilesAround(x0 + CELL / 2, z0 + CELL / 2, CELL)) { this.gen.want(tx, tz); this.gen.pin(tx, tz); }
+          this.pinnedAny = true;
           asked++;
         }
+        // (With the map closed, a cell whose land isn't here waits for the next sort.)
+        if (!open) { this.queue.splice(i--, 1); }
         continue;
       }
       this.drawCell(cx, cz);
       this.pending.delete(k);
+      this.queue.splice(i--, 1);
+      drawn++;
       this.version++;
     }
-    if (!this.pending.size || !open) this.gen.unpinAll();
+    if (this.pinnedAny && (!this.pending.size || !open)) { this.gen.unpinAll(); this.pinnedAny = false; }
   }
 
   private chunk(cx: number, cz: number): HTMLCanvasElement {
