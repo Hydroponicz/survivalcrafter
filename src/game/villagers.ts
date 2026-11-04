@@ -32,6 +32,7 @@ import { workClip } from './game';
 import { Inventory } from './inventory';
 import { telemetry } from './telemetry';
 import { buildToolMesh } from './tools';
+import { disposeObject } from '../world/view';
 
 /** Villagers come to life within this distance of their village, and are let go beyond the second. */
 const ACTIVE_R = 170, DROP_R = 280;
@@ -176,6 +177,7 @@ export class Villager {
     // Until the body has loaded (or if it can't): a plain figure.
     const stand = new THREE.Mesh(new THREE.CapsuleGeometry(0.25, 1.2, 4, 8).translate(0, 0.85, 0), new THREE.MeshStandardMaterial({ color: this.colours.tunic, roughness: 0.9 }));
     stand.castShadow = true;
+    (stand.material as THREE.Material).userData.owned = true;
     stand.name = 'stand-in';
     this.model.add(stand);
   }
@@ -187,7 +189,8 @@ export class Villager {
     if (!gltf) return false;
     this.rig = new CharacterRig(gltf);
     this.rig.setColours({ skin: this.colours.skin, hair: this.colours.hair, tunic: this.colours.tunic, trousers: this.colours.trousers });
-    this.model.getObjectByName('stand-in')?.removeFromParent();
+    const stand = this.model.getObjectByName('stand-in');
+    if (stand) { stand.removeFromParent(); disposeObject(stand); }
     this.model.add(this.rig.root);
     this.rig.hand.add(this.held);
     return true;
@@ -198,6 +201,7 @@ export class Villager {
     const key = item?.type ?? '';
     if (key === this.heldKey) return;
     this.heldKey = key;
+    disposeObject(this.held);
     this.held.clear();
     if (item) this.held.add(buildToolMesh(itemDef(item.type).tool, item.type));
   }
@@ -274,7 +278,7 @@ export class VillageLife {
     for (const [key, list] of this.active) {
       const v = list[0]?.village;
       if (v && Math.hypot(v.x - p.x, v.z - p.z) < DROP_R) continue;
-      for (const vi of list) { this.group.remove(vi.model); this.villagers.splice(this.villagers.indexOf(vi), 1); }
+      for (const vi of list) { this.group.remove(vi.model); disposeObject(vi.model); vi.rig?.material.dispose(); this.villagers.splice(this.villagers.indexOf(vi), 1); }
       this.active.delete(key);
       telemetry.event('villagers', `Left ${v?.name ?? key}: ${list.length} villagers let go`);
     }

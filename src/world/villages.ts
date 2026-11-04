@@ -253,15 +253,15 @@ export class Villages {
 
   /**
    * The settlements a settlement has roads to that can be worked out from map
-   * tiles already made (no tile is made on the spot: those not ready yet are
-   * asked for in the background, and join in once they're here). For things
+   * tiles already made (no tile is made on the spot: those not ready yet join in
+   * once the map round you has reached them). For things
    * that roam far (traders), so they never hold up a frame.
    */
   readyNeighbours(v: Village): Village[] {
     const reach = Math.ceil(LINK / VCELL), out: Village[] = [];
     for (let cz = v.cz - reach; cz <= v.cz + reach; cz++) {
       for (let cx = v.cx - reach; cx <= v.cx + reach; cx++) {
-        if ((cx === v.cx && cz === v.cz) || !this.cellReady(cx, cz)) continue;
+        if ((cx === v.cx && cz === v.cz) || !this.layoutReady(cx, cz)) continue;
         const o = this.inCell(cx, cz);
         if (o && Math.hypot(o.x - v.x, o.z - v.z) < LINK) out.push(o);
       }
@@ -274,7 +274,20 @@ export class Villages {
     return this.known().filter((v) => Math.hypot(v.x - x, v.z - z) < r + v.r);
   }
 
-  /** Can a grid square's settlement be planned without making any map tile on the spot? (Asks for the missing ones.) */
+  /**
+   * Can a square's settlement be laid out without making any map tile on the
+   * spot? Its layout needs the sites around it too (for its roads), so their
+   * squares' tiles must be here as well.
+   */
+  private layoutReady(cx: number, cz: number): boolean {
+    if (this.cells.has(cellKey(cx, cz))) return true;
+    const reach = Math.ceil(LINK / VCELL);
+    let ready = true;
+    for (let j = cz - reach; j <= cz + reach; j++) for (let i = cx - reach; i <= cx + reach; i++) if (!this.sites.has(cellKey(i, j)) && !this.cellReady(i, j)) ready = false;
+    return ready;
+  }
+
+  /** Can a grid square's settlement be planned without making any map tile on the spot? */
   private cellReady(cx: number, cz: number): boolean {
     const key = cellKey(cx, cz);
     if (this.cells.has(key)) return true;
@@ -282,7 +295,8 @@ export class Villages {
     const t0x = Math.floor((cx * VCELL - BLEND) / TILE) - 1, t1x = Math.floor(((cx + 1) * VCELL + BLEND) / TILE) + 1;
     const t0z = Math.floor((cz * VCELL - BLEND) / TILE) - 1, t1z = Math.floor(((cz + 1) * VCELL + BLEND) / TILE) + 1;
     for (let tz = t0z; tz <= t1z; tz++) for (let tx = t0x; tx <= t1x; tx++) {
-      if (!this.gen.hasTile(tx, tz)) { ready = false; this.gen.want(tx, tz); }
+      // (Not asked for here: the tiles round you are fetched anyway, and asking for far ones would only churn.)
+      if (!this.gen.hasTile(tx, tz)) ready = false;
     }
     return ready;
   }

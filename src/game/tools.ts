@@ -36,6 +36,7 @@ export function buildToolMesh(kind: ToolKind | undefined, itemType?: string): TH
       geo.setAttribute('color', new THREE.Float32BufferAttribute(model.colors, 3));
       geo.setIndex(model.indices);
       geo.computeVertexNormals();
+      geo.userData.shared = true;
       modelGeos.set(itemType!, geo);
     }
     const mesh = new THREE.Mesh(geo, modelMat);

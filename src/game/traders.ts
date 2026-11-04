@@ -11,7 +11,7 @@
 
 import * as THREE from 'three';
 import { itemDef, type Item } from '../data/items';
-import { cartModel } from '../world/view';
+import { cartModel, disposeObject } from '../world/view';
 import type { Village } from '../world/villages';
 import { GOODS } from './economy';
 import { CharacterRig, characterLoaded } from './character';
@@ -79,7 +79,7 @@ export class Traders {
       live.add(t.id);
       this.show(t, pos, dt);
     }
-    for (const [id, b] of this.bodies) if (!live.has(id)) { this.group.remove(b.root); this.bodies.delete(id); this.at.delete(id); }
+    for (const [id, b] of this.bodies) if (!live.has(id)) { this.group.remove(b.root); disposeObject(b.root); b.rig?.material.dispose(); this.bodies.delete(id); this.at.delete(id); }
   }
 
   /** Settlements near you that haven't sent out their traders yet do so (one each, two from a town). */
@@ -196,7 +196,7 @@ export class Traders {
   private show(t: Trader, pos: { x: number; z: number; dirX: number; dirZ: number }, dt: number) {
     let b = this.bodies.get(t.id);
     const loaded = t.cargo.length > 0;
-    if (b && b.loaded !== loaded) { b.root.remove(b.cart); b.cart = cartModel('hand_cart', loaded); b.root.add(b.cart); b.loaded = loaded; }
+    if (b && b.loaded !== loaded) { b.root.remove(b.cart); disposeObject(b.cart); b.cart = cartModel('hand_cart', loaded); b.root.add(b.cart); b.loaded = loaded; }
     if (!b) {
       const root = new THREE.Group();
       const cart = cartModel('hand_cart', loaded);

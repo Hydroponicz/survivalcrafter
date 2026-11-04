@@ -18,8 +18,28 @@ import {
   type TreeObj, type World, type WorldListener, type WorldObj,
 } from './world';
 
-const mat = (color: number, extra: THREE.MeshStandardMaterialParameters = {}) =>
-  new THREE.MeshStandardMaterial({ color, roughness: 0.9, metalness: 0, ...extra });
+const mat = (color: number, extra: THREE.MeshStandardMaterialParameters = {}) => {
+  const m = new THREE.MeshStandardMaterial({ color, roughness: 0.9, metalness: 0, ...extra });
+  m.userData.owned = true;
+  return m;
+};
+
+/**
+ * Free what an object no longer drawn holds on the graphics card: its geometry
+ * (unless shared: models, animal bodies, the character) and materials made just
+ * for it (shared, textured ones are kept), and a skinned body's bone texture.
+ */
+export function disposeObject(root: THREE.Object3D) {
+  root.traverse((c) => {
+    const m = c as THREE.Mesh;
+    if (!m.isMesh) return;
+    if (m.geometry && !m.geometry.userData.shared) m.geometry.dispose();
+    for (const mat of Array.isArray(m.material) ? m.material : [m.material]) {
+      if (mat && (mat as THREE.Material).userData.owned) (mat as THREE.Material).dispose();
+    }
+    (m as THREE.SkinnedMesh).skeleton?.dispose();
+  });
+}
 
 /** Animals (by |dx|+|dz|) and crops further than this from you aren't drawn. */
 const SHOW_ANIMALS = 220, SHOW_CROPS = 240;
@@ -520,6 +540,8 @@ export class WorldView implements WorldListener {
   private disposeMesh(m: THREE.Object3D) {
     this.group.remove(m);
     m.traverse((c) => { if (c instanceof THREE.Mesh) this.flames.delete(c); });
+    // (Freed on the graphics card too: doors open and shut all day in a village, and each look is new geometry.)
+    disposeObject(m);
   }
 
   // ---------- static batches
@@ -660,6 +682,7 @@ export class WorldView implements WorldListener {
         solid.traverse((c) => {
           if (c instanceof THREE.Mesh) {
             const m = (c.material as THREE.MeshStandardMaterial).clone();
+            m.userData.owned = true;
             m.clippingPlanes = [built];
             m.clipShadows = true;
             c.material = m;
@@ -671,6 +694,7 @@ export class WorldView implements WorldListener {
       g.traverse((c) => {
         if (c instanceof THREE.Mesh && !isInSolid(c)) {
           const m = (c.material as THREE.MeshStandardMaterial).clone();
+          m.userData.owned = true;
           m.transparent = true;
           m.opacity = 0.35;
           m.depthWrite = false;
@@ -693,7 +717,7 @@ export class WorldView implements WorldListener {
       live.add(c.id);
       const loaded = c.items.length > 0;
       let m = this.cartMeshes.get(c.id);
-      if (m && m.userData.loaded !== loaded) { this.group.remove(m); this.cartMeshes.delete(c.id); m = undefined; }
+      if (m && m.userData.loaded !== loaded) { this.group.remove(m); disposeObject(m); this.cartMeshes.delete(c.id); m = undefined; }
       if (!m) {
         m = cartModel(c.type, loaded);
         this.cartMeshes.set(c.id, m);
@@ -706,7 +730,7 @@ export class WorldView implements WorldListener {
       m.userData.lx = c.x; m.userData.lz = c.z;
       for (const w of m.userData.wheels as THREE.Object3D[]) w.rotation.x += moved / (m.userData.r as number);
     }
-    for (const [id, m] of this.cartMeshes) if (!live.has(id)) { this.group.remove(m); this.cartMeshes.delete(id); }
+    for (const [id, m] of this.cartMeshes) if (!live.has(id)) { this.group.remove(m); disposeObject(m); this.cartMeshes.delete(id); }
   }
 
   syncAnimals(time: number) {
@@ -849,6 +873,8 @@ export function animalModel(species: AnimalSpecies, seed = 0, tamed = false): TH
     // Each leg (with its hoof) in the leg's own frame, so it can still swing about its hip.
     const legGeos = legs.map((l) => ({ geo: mergeGeometries(bake(l, l.matrixWorld.clone().invert()))!, pos: l.position.clone() }));
     geos = { body: mergeGeometries(bodyParts)!, legs: legGeos };
+    geos.body.userData.shared = true;
+    for (const l of geos.legs) l.geo.userData.shared = true;
     animalGeos.set(key, geos);
   }
   const g = new THREE.Group();
@@ -1067,6 +1093,7 @@ function propMesh(name: string): THREE.Mesh {
     geo.setAttribute('color', new THREE.Float32BufferAttribute(m.colors, 3));
     geo.setIndex(m.indices);
     geo.computeVertexNormals();
+    geo.userData.shared = true;
     propGeos.set(name, geo);
   }
   const mesh = new THREE.Mesh(geo, propMat);

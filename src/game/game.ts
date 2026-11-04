@@ -189,6 +189,8 @@ export class Game {
   private ambTimer = 0;
   private viewModel = new ViewModel();
   private saveTimer = 0;
+  /** When the tab last came back into view (gaps across it aren't stalls). */
+  static lastShown = -1e9;
   private respawnTimer = 0;
   elapsed = 0;
   /** Explanations already shown (and acknowledged) in this world. */
@@ -1927,9 +1929,12 @@ export class Game {
     this.input.endFrame();
     perf.end();
     // Stutters worth knowing about (not while paused or loading), with where the time went.
-    if (raw > 0.25 && !this.paused && this.elapsed > 10 && this.elapsed - this.lastHitchLog > 15) {
+    // (Not a gap while the tab was in the background or minimised: that's the browser resting, not a stall.)
+    const wasHidden = typeof document !== 'undefined' && (document.hidden || performance.now() - Game.lastShown < raw * 1000 + 50);
+    if (raw > 0.25 && !wasHidden && !this.paused && this.elapsed > 10 && this.elapsed - this.lastHitchLog > 15) {
       this.lastHitchLog = this.elapsed;
-      telemetry.log('perf', 'frame', `Slow frame: ${Math.round(raw * 1000)} ms`, { parts: perf.worstParts.slice(0, 5).map(([k, v]) => `${k} ${v.toFixed(1)}`), fps: perf.fps });
+      const mem = this.renderer.info.memory;
+      telemetry.log('perf', 'frame', `Slow frame: ${Math.round(raw * 1000)} ms`, { parts: perf.worstParts.slice(0, 5).map(([k, v]) => `${k} ${v.toFixed(1)}`), fps: perf.fps, gpu: { geometries: mem.geometries, textures: mem.textures, calls: this.renderer.info.render.calls } });
     }
   }
 
@@ -2651,3 +2656,5 @@ function reachOf(o: WorldObj): number {
     default: return 0.8;
   }
 }
+
+if (typeof document !== 'undefined') document.addEventListener('visibilitychange', () => { if (!document.hidden) Game.lastShown = performance.now(); });

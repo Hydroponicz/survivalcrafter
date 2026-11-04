@@ -94,6 +94,8 @@ export function makeFigure(g: GLTF, armsOnly = false): { root: THREE.Object3D; c
       const m = o as THREE.SkinnedMesh;
       if (armsOnly) markArms(m);
       m.material = material;
+      // (Every copy of the body shares this: never freed with one of them.)
+      m.geometry.userData.shared = true;
       m.castShadow = true;
       m.receiveShadow = true;
       // The body moves about with the animation: don't let it be culled by its bind pose.
@@ -159,9 +161,13 @@ export class CharacterRig {
   /** The upper arms (fold them away to hide the arms, hands and whatever they hold). */
   readonly arms: THREE.Object3D[];
 
+  /** This body's own material (its colours): freed with it. */
+  readonly material: THREE.MeshStandardMaterial;
+
   constructor(g: GLTF, armsOnly = false) {
     const f = makeFigure(g, armsOnly);
     this.root = f.root;
+    this.material = f.material;
     this.colours = f.colours;
     this.mixer = new THREE.AnimationMixer(this.root);
     for (const clip of g.animations) {

@@ -79,6 +79,24 @@ generation tests each plant only against building pieces in its own 2 m square
 - Load: about 10 map tiles (5–6 s) are built before a new world starts; this was
   there before these features.
 
+### Follow-up: a 14-minute flight (player debug log, seed 135298584)
+
+The log showed a 1.1 s stall in the trader update, then frames of 6–38 s while
+flying, getting worse. Replaying the flight on the same seed (8 minutes of fast
+flight, about 2.5 km) and reading the code turned up:
+- **Traders planning settlements' neighbours on the spot** (the 1.1 s stall): a
+  destination is only used once the map is ready for its whole neighbourhood.
+- **Meshes freed from the scene but not from the graphics card**: every door a
+  villager opened or shut, every fire lit, every trader's cart that came and
+  went, every region unloaded left its geometry in GPU memory, so the longer you
+  travelled, the fuller it got. Everything is now freed; GPU geometry holds steady
+  (322–357 over 10 minutes of town life with frequent rendering).
+- In the replay itself, CPU frames stayed smooth (median 17 ms, worst 48–135 ms),
+  memory steady (390–585 MB, no climb), every cache bounded, and the save stayed
+  small (65 KB, 13 ms).
+- The debug log now ignores gaps while the tab is in the background, and records
+  GPU geometry, texture and draw-call counts with each slow frame.
+
 ## 4. What the data says about play
 
 - **Towns can't feed themselves.** By design they have no fields; three days in, a
