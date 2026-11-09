@@ -1145,8 +1145,12 @@ export const ACTIONS: ActionDef[] = [
   // ===== vessels (carts and boats: see data/vessels)
   {
     id: 'board_boat', label: (c) => `Get in the ${c.t.kind === 'cart' ? VESSELS[c.t.cart.type].name.toLowerCase() : 'boat'}`,
-    show: (c) => c.t.kind === 'cart' && !!VESSELS[c.t.cart.type].move.paddle && !c.g.boat && !c.g.riding,
-    check: (c) => (c.t.kind === 'cart' && !c.g.world.afloat(c.t.cart) ? 'It\'s aground: drag it into deeper water first (grab it and walk it in).' : null),
+    show: (c) => c.t.kind === 'cart' && !!VESSELS[c.t.cart.type].move.water && !c.g.boat && !c.g.riding,
+    check: (c) => {
+      if (c.t.kind !== 'cart') return null;
+      if (c.t.cart.dmg >= 100) return `It's swamped: patch the hull first (${itemDef(VESSELS[c.t.cart.type].repair!.item).name.toLowerCase()}).`;
+      return !c.g.world.afloat(c.t.cart) ? 'It\'s aground: drag it into deeper water first (grab it and walk it in).' : null;
+    },
     time: 0.8, fixedTime: true,
     run: (c) => { if (c.t.kind === 'cart') c.g.board(c.t.cart); },
   },
@@ -1190,7 +1194,7 @@ export const ACTIONS: ActionDef[] = [
     run: (c) => { if (c.t.kind === 'cart') { c.t.cart.hitched = undefined; c.g.msg('You unhitch the cart. It stays here.', 'info'); } },
   },
   {
-    id: 'pick_up_cart', label: 'Pick up the cart',
+    id: 'pick_up_cart', label: (c) => `Pick up the ${c.t.kind === 'cart' ? VESSELS[c.t.cart.type].name.toLowerCase() : 'cart'}`,
     show: (c) => c.t.kind === 'cart' && !!VESSELS[c.t.cart.type].item && c.t.cart.hitched === undefined && c.g.pushing !== c.t.cart,
     check: (c) => (c.t.kind === 'cart' && c.t.cart.items.length ? 'Empty it first.' : null),
     time: 2,
@@ -1198,11 +1202,31 @@ export const ACTIONS: ActionDef[] = [
       if (c.t.kind !== 'cart') return;
       const cart = c.t.cart, g = c.g;
       g.world.carts.splice(g.world.carts.indexOf(cart), 1);
-      const it = makeItem(cart.type, cart.ql);
+      const it = makeItem(VESSELS[cart.type].item!, cart.ql);
       it.dmg = cart.dmg;
       g.inv.add(it);
       g.inventoryChanged();
       g.msg(`You lift the ${VESSELS[cart.type].name.toLowerCase()} into your pack.`, 'info');
+    },
+  },
+  {
+    id: 'repair_vessel', label: (c) => `Patch the hull (${c.t.kind === 'cart' ? itemDef(VESSELS[c.t.cart.type].repair!.item).name.toLowerCase() : ''})`,
+    show: (c) => c.t.kind === 'cart' && !!VESSELS[c.t.cart.type].repair && c.t.cart.dmg > 0.5 && c.g.boat !== c.t.cart,
+    check: (c) => {
+      if (c.t.kind !== 'cart') return null;
+      const r = VESSELS[c.t.cart.type].repair!;
+      return c.g.inv.count(r.item) === 0 ? `You need a ${itemDef(r.item).name.toLowerCase()} to patch it.` : null;
+    },
+    time: 4, skill: 'carpentry', difficulty: 4, stamina: 4,
+    repeat: (c) => c.t.kind === 'cart' && c.t.cart.dmg > 0.5 && c.g.inv.count(VESSELS[c.t.cart.type].repair!.item) > 0,
+    run: (c, o) => {
+      if (c.t.kind !== 'cart') return;
+      const k = c.t.cart, r = VESSELS[k.type].repair!;
+      c.g.inv.take(r.item, 1);
+      c.g.inventoryChanged();
+      if (!o.success) return c.g.msg('The patch doesn\'t take. Try again.', 'fail');
+      k.dmg = Math.max(0, k.dmg - r.amount);
+      c.g.msg(k.dmg > 0.5 ? `You patch the hull (${Math.round(k.dmg)}% worn).` : 'The hull is sound again.', 'good');
     },
   },
   {
@@ -1212,7 +1236,8 @@ export const ACTIONS: ActionDef[] = [
       const k = c.t.cart, w = k.items.reduce((a, i) => a + itemDef(i.type).weight, 0);
       const def = VESSELS[k.type];
       const where = def.medium === 'water' ? (c.g.world.afloat(k) ? ' Afloat.' : ' Drawn up on the shore.') : '';
-      c.g.msg(`${def.name}, QL ${k.ql.toFixed(1)}: ${w.toFixed(0)} / ${CART_CAPACITY[k.type]} kg loaded.${k.hitched !== undefined ? ' Hitched to your ox.' : ''}${where}`, 'info');
+      const hull = def.medium === 'water' ? (k.dmg >= 100 ? ' Swamped: patch it to use it again.' : k.dmg >= 40 ? ` Leaking (${Math.round(k.dmg)}% worn).` : k.dmg > 0.5 ? ` A little worn (${Math.round(k.dmg)}%).` : ' Sound.') : '';
+      c.g.msg(`${def.name}, QL ${k.ql.toFixed(1)}: ${w.toFixed(0)} / ${CART_CAPACITY[k.type]} kg loaded.${k.hitched !== undefined ? ' Hitched to your ox.' : ''}${where}${hull}`, 'info');
     },
   },
 

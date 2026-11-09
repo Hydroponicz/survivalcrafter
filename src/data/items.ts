@@ -1,3 +1,4 @@
+import type { VesselId } from './vessels';
 import { FURNITURE } from './furniture';
 // Item definitions. Every item instance carries its own quality (QL 1-100)
 // and damage, like Wurm Online, rather than being an anonymous stack.
@@ -64,6 +65,8 @@ export interface ItemDef {
   sips?: number;
   /** A cart you set down and use (see game/carts): which kind. */
   cart?: 'hand' | 'ox';
+  /** A small boat you carry and set down at the water (see data/vessels): which kind. */
+  vessel?: VesselId;
 }
 
 const defs: ItemDef[] = [
@@ -105,6 +108,12 @@ const defs: ItemDef[] = [
     desc: 'A two-wheeled barrow of planks. Set it down from your pack, grab the handles to push it, and load it up: it holds 120 kg.' },
   { id: 'ox_cart', name: 'Ox cart', icon: '🛞', weight: 30, cart: 'ox',
     desc: 'A big wagon on two solid wheels, with shafts for an ox. Hitch it to your tamed ox (aim at the ox → Hitch ox cart) and lead the ox: it holds 400 kg.' },
+  { id: 'punt_pole', name: 'Punt pole', icon: '🦯', weight: 2, desc: 'A long pole for pushing a raft along off the bottom (it only reaches about 2.5 m down).' },
+  { id: 'oar', name: 'Oar', icon: '🚣', weight: 2.5, desc: 'A long oar with a narrow blade. A rowing boat needs a pair.' },
+  { id: 'reed_boat', name: 'Reed boat', icon: '🛶', weight: 18, vessel: 'reed_boat',
+    desc: 'Reed bundles bound into a light boat. Set it down at the water from your pack, get in and paddle. Holds 90 kg; the reeds tear on the bottom (patch them with plant fiber).' },
+  { id: 'coracle', name: 'Coracle', icon: '🥣', weight: 12, vessel: 'coracle',
+    desc: 'A round boat of hide over wicker, carried on your back. Set it down at the water, get in and paddle. One person, 60 kg; it spins easily. Patch tears with a hide.' },
   { id: 'paddle', name: 'Paddle', icon: '🏏', weight: 1.2, desc: 'A broad-bladed paddle carved from a plank. With one in your pack you paddle a canoe at full speed (without, you paddle with your hands).' },
   { id: 'hide_boots', name: 'Hide boots', icon: '🥾', weight: 0.6, wear: { slot: 'feet', armor: 0.04, colour: 0x4a3220 }, desc: 'Soft hide boots, bound at the ankle.' },
 

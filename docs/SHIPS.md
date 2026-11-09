@@ -38,9 +38,11 @@ Everything you can load and move that isn't an animal is a **vessel**
 | `medium` | `land` (on wheels) or `water` (it floats) |
 | `capacity` | kg it holds (a container like a chest, opened from the vessel) |
 | `hit` | its size, for aiming at it |
-| `move` | how it moves: `push` (by hand, at that walking speed), `hitch` (to an ox), `paddle` (speed, turn) |
+| `move` | how it moves: `push` (by hand, at that walking speed), `hitch` (to an ox), `water` (paddle, pole or oars: speed, turn, the gear it needs) |
 | `draft` | how deep it sits: it can't go where the water is shallower |
 | `seats` | where people sit (the first is the steerer) |
+| `stand` | you stand on it (a raft) rather than kneel in it |
+| `fragile`, `repair` | how easily running aground wears the hull, and what patches it |
 | `item` | carried in a pack as this item (else it stays in the world) |
 
 The shared code handles every vessel: placing it in the world, saving it,
@@ -69,13 +71,28 @@ too, only built from many pieces.
 
 ## Next phases
 
-**2. More small craft** (rows in the table, a model each, a build piece):
-- **Log raft:** logs and cordage, poled in shallow water, carries a lot, slow.
-- **Coracle:** a hide over a wicker frame, light enough to carry on your back
-  (an `item`), one person, spins easily.
-- **Bark or hide canoe:** fast and light, fragile.
-- **Rowing boat:** planks on frames, a carpenter's job: oars (a new `move`:
-  `row`), two to four seats.
+**2. More small craft (done).** Each is a row in the table, a model and a
+build piece or recipe:
+
+| Craft | Made from | Drive | Holds | Character |
+|---|---|---|---|---|
+| Log raft | 6 logs, 4 cordage (hatchet) | punt pole, standing | 300 kg | slow; the pole can't reach the bottom past 2.6 m deep |
+| Reed boat | 24 plant fiber, 6 cordage (knife) | paddle | 90 kg | carried in your pack (18 kg); tears on the bottom |
+| Coracle | 8 branches, 2 hides, 3 cordage (Crafting) | paddle | 60 kg | carried (12 kg); one person; spins on the spot |
+| Skin boat (currach) | 8 shafts, 6 hides, 6 cordage (knife) | paddle | 240 kg | fast for its weight; the hide can tear |
+| Rowing boat | 10 refined planks, 4 planks, 4 shafts (hammer) | a pair of oars | 450 kg | fastest and sturdiest |
+
+What came with them:
+- **Gear for each drive:** a paddle, a punt pole, or a pair of oars, all from
+  Crafting. Without the right gear you scoop with your hands at about a third
+  of the speed.
+- **Standing or kneeling:** you stand on a raft's deck and kneel in a hull.
+- **Small boats carry:** pick them up into your pack and set them down at the
+  water.
+- **Hull wear:** running aground hard wears a hull, more for fragile ones. A
+  worn hull leaks and is slower; a wrecked one is swamped and throws you out.
+  Patch it ashore with its own material: fiber for reeds, hide for
+  hide-covered boats, a log for a dugout, a refined plank for a planked boat.
 
 **3. The shipyard and its slipway**
 - **The slip:** a structure on a riverbank or shore that defines a building

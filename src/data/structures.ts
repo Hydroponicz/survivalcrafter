@@ -232,6 +232,27 @@ defs.push({ id: 'dugout', name: 'Dugout canoe', icon: '🛶', category: 'Boats',
   materials: [{ item: 'log', count: 3 }, { item: 'kindling', count: 4 }], tool: 'hatchet', skill: 'carpentry', difficulty: 14, stepTime: 6,
   desc: 'A canoe hollowed out of one great log with fire and axe. Build it near the water: it is heavy to drag. Paddle it with a paddle; it carries two and 160 kg.' });
 
+// A raft: logs laid side by side and lashed across with cordage.
+defs.push({ id: 'log_raft', name: 'Log raft', icon: '🪵', category: 'Boats', snap: false, becomes: 'log_raft',
+  boxes: [box(0, 0.2, 0, 1.3, 0.2, 1.6)], snaps: [],
+  materials: [{ item: 'log', count: 6 }, { item: 'cordage', count: 4 }], tool: 'hatchet', skill: 'carpentry', difficulty: 6, stepTime: 4,
+  desc: 'Logs lashed side by side. Slow, but it carries 300 kg and goes anywhere shallow. Pole it along with a punt pole (Crafting).' });
+// A reed boat: bundles of reeds (plant fiber from the marshes) bound tight with cordage.
+defs.push({ id: 'reed_boat', name: 'Reed boat', icon: '🌾', category: 'Boats', snap: false, becomes: 'reed_boat',
+  boxes: [box(0, 0.3, 0, 0.5, 0.3, 1.9)], snaps: [],
+  materials: [{ item: 'plant_fiber', count: 24 }, { item: 'cordage', count: 6 }], tool: 'knife', skill: 'ropemaking', difficulty: 6, stepTime: 2.5,
+  desc: 'Reed bundles bound into a light boat you can carry (18 kg). Cheap and quick, but it tears on the bottom: keep it off the rocks.' });
+// A skin boat: a frame of light timbers, hides stretched over it and stitched.
+defs.push({ id: 'skin_boat', name: 'Skin boat', icon: '🛶', category: 'Boats', snap: false, becomes: 'skin_boat',
+  boxes: [box(0, 0.32, 0, 0.6, 0.32, 2.6)], snaps: [],
+  materials: [{ item: 'shaft', count: 8 }, { item: 'hide', count: 6 }, { item: 'cordage', count: 6 }], tool: 'knife', skill: 'carpentry', difficulty: 12, stepTime: 4,
+  desc: 'Hides over a light frame, like an Irish currach: fast, roomy (240 kg, three seats) and light for its size. The hide can tear on rocks.' });
+// A rowing boat: planks fastened over frames, thwarts to sit on, oarlocks for a pair of oars.
+defs.push({ id: 'rowboat', name: 'Rowing boat', icon: '🚣', category: 'Boats', snap: false, becomes: 'rowboat',
+  boxes: [box(0, 0.4, 0, 0.75, 0.4, 2.3)], snaps: [],
+  materials: [{ item: 'refined_plank', count: 10 }, { item: 'plank', count: 4 }, { item: 'shaft', count: 4 }], tool: 'hammer', skill: 'carpentry', difficulty: 20, stepTime: 5,
+  desc: 'A planked boat with thwarts and oarlocks: the fastest and roomiest small boat (450 kg, three seats), and sturdy. Row it with a pair of oars.' });
+
 // A torch planted in the ground: it burns (its fuel is the burn left) and lights the spot.
 defs.push({ id: 'standing_torch', name: 'Torch', icon: '🔥', category: 'Crafting', snap: false, item: 'torch',
   boxes: [box(0, 0.55, 0, 0.09, 0.55, 0.09)], snaps: [], materials: [], skill: 'firemaking', difficulty: 1, stepTime: 0,

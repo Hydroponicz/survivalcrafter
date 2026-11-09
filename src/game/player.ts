@@ -77,7 +77,7 @@ export class Player {
    * the paddling (forward/back), the steering (left/right) and whether you dig
    * in hard, and says where the boat (and you in it) now are.
    */
-  boat: { step(dt: number, throttle: number, turn: number, hard: boolean): { x: number; y: number; z: number; rot: number; speed: number } } | null = null;
+  boat: { stand: boolean; step(dt: number, throttle: number, turn: number, hard: boolean): { x: number; y: number; z: number; rot: number; speed: number } } | null = null;
   /** The boat's heading (you face the way it points). */
   private boatRot = 0;
   /** Slowed by what you're doing (pushing a cart). */
@@ -256,7 +256,7 @@ export class Player {
   }
 
   get eye(): THREE.Vector3 {
-    return new THREE.Vector3(this.pos.x, this.pos.y + (this.boat ? 1.0 : this.swimming ? 1.2 : this.riding ? EYE + 0.95 : this.crouching ? CROUCH_EYE : EYE), this.pos.z);
+    return new THREE.Vector3(this.pos.x, this.pos.y + (this.boat ? (this.boat.stand ? EYE : 1.0) : this.swimming ? 1.2 : this.riding ? EYE + 0.95 : this.crouching ? CROUCH_EYE : EYE), this.pos.z);
   }
 
   forward(): THREE.Vector3 {
@@ -668,8 +668,8 @@ export class Player {
     const w = this.work, look = { x: -Math.sin(this.yaw), z: -Math.cos(this.yaw) };
     const fwd = vx * look.x + vz * look.z, side = vx * -look.z + vz * look.x;
     if (this.boat) {
-      // Kneeling in the hull, facing the bow (dipping into a stroke as you paddle).
-      pose = this.moving ? { kind: 'loop', clip: 'interact', speed: 0.8 } : { kind: 'loop', clip: 'crouch_idle' };
+      // Kneeling in the hull (or standing on a raft's deck), facing the bow, working the paddle, pole or oars.
+      pose = this.moving ? { kind: 'loop', clip: 'interact', speed: 0.8 } : { kind: 'loop', clip: this.boat.stand ? 'idle' : 'crouch_idle' };
       face = this.boatRot;
     } else if (this.riding) {
       // Sitting astride: knees bent, facing the way the horse goes.
@@ -714,7 +714,7 @@ export class Player {
     // Swimming: in the water to the chest. Riding: up in the saddle.
     if (this.swimming) this.model.position.y -= 0.3;
     // In a boat: down in the hull.
-    if (this.boat) this.model.position.y -= 0.15;
+    if (this.boat && !this.boat.stand) this.model.position.y -= 0.15;
     if (this.riding) {
       // In the saddle (a little behind the middle of the horse), bobbing with its stride.
       this.model.position.y += 1.2 + Math.abs(Math.sin(this.walkPhase * 0.9)) * Math.min(1, speed / 8) * 0.08;

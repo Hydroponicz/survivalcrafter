@@ -896,42 +896,151 @@ export function animalModel(species: AnimalSpecies, seed = 0, tamed = false): TH
   return g;
 }
 
-/** A vessel's model, in its own frame (its bow, or the way it rolls, along +z). */
+/** A vessel's model, in its own frame (its bow, or the way it rolls, along +z; its keel at y = 0). */
 export function vesselModel(type: VesselId, loaded: boolean): THREE.Group {
-  if (type === 'dugout') return dugoutModel(loaded);
-  return cartModel(type, loaded);
+  switch (type) {
+    case 'dugout': return hullModel({ L: 2.4, B: 0.45, D: 0.42, rim: 0.5, outer: 'rough_wood', inner: 0x3a2a1e, thwarts: [-1.1, 0.9], gunwale: 0.06 }, loaded);
+    case 'reed_boat': return reedBoatModel(loaded);
+    case 'coracle': return hullModel({ L: 0.68, B: 0.68, D: 0.36, rim: 0.4, outerColor: 0x5a3e28, inner: 0x6e5a3a, thwarts: [0], gunwale: 0.03, ribs: 6 }, loaded);
+    case 'skin_boat': return hullModel({ L: 2.6, B: 0.58, D: 0.45, rim: 0.55, outerColor: 0x6b4a30, inner: 0x7a5a3a, thwarts: [-1.4, 0, 1.4], gunwale: 0.04, ribs: 9, upsweep: 0.25 }, loaded);
+    case 'rowboat': return rowboatModel(loaded);
+    case 'log_raft': return raftModel(loaded);
+    default: return cartModel(type, loaded);
+  }
 }
 
 /**
- * A dugout canoe: one log, hollowed out, pointed at both ends, a little sheer
- * at bow and stern, two thwarts to sit on (and a bundle of goods if loaded).
- * Its keel is at y = 0; it is 4.8 m long and 0.9 m across.
+ * A small boat's hull: half an ellipsoid (pointed or round), its inside a
+ * darker colour, a gunwale round the rim, thwarts across to sit on; frames
+ * showing inside a skin boat or a coracle's wicker, a planked boat's strakes,
+ * the ends swept up a little; and a bundle of goods if it's loaded.
  */
-function dugoutModel(loaded: boolean): THREE.Group {
+function hullModel(o: { L: number; B: number; D: number; rim: number; outer?: Surface; outerColor?: number; inner: number; thwarts: number[]; gunwale: number; ribs?: number; upsweep?: number; strakes?: number[] }, loaded: boolean): THREE.Group {
   const g = new THREE.Group();
-  const L = 2.4, B = 0.45, D = 0.42, rim = 0.5;
+  const { L, B, D, rim } = o;
   const half = (r: number) => new THREE.SphereGeometry(1, 20, 8, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2).scale(B * r, D * r, L * r);
-  // The outside of the log (its bark mostly hewn off), and the hollow inside, charred dark.
-  const hull = new THREE.Mesh(worldUV(half(1), 'rough_wood'), surfaceMat('rough_wood'));
+  const outerMat = o.outer ? surfaceMat(o.outer) : mat(o.outerColor ?? 0x6b4a30, { roughness: 0.95 });
+  const hull = new THREE.Mesh(o.outer ? worldUV(half(1), o.outer) : half(1), outerMat);
   hull.position.y = rim; hull.castShadow = true; hull.receiveShadow = true;
   g.add(hull);
-  const inner = new THREE.Mesh(half(0.86), mat(0x3a2a1e, { side: THREE.BackSide, roughness: 1 }));
+  const inner = new THREE.Mesh(half(0.9), mat(o.inner, { side: THREE.BackSide, roughness: 1 }));
   inner.position.y = rim + 0.01;
   g.add(inner);
-  // The gunwale: the rim of the log, left thick.
-  const gun = new THREE.Mesh(new THREE.TorusGeometry(1, 0.06, 5, 32).rotateX(Math.PI / 2).scale(B * 0.93, 1, L * 0.93), surfaceMat('rough_wood'));
+  const wood = surfaceMat('rough_wood');
+  const gun = new THREE.Mesh(new THREE.TorusGeometry(1, o.gunwale, 5, 32).rotateX(Math.PI / 2).scale(B * 0.95, 1, L * 0.95), wood);
   gun.position.y = rim;
   gun.castShadow = true;
   g.add(gun);
-  // Two thwarts left standing in the hollow, to sit on.
-  for (const z of [-1.1, 0.9]) {
-    const th = new THREE.Mesh(worldUV(new THREE.BoxGeometry(B * 1.6, 0.06, 0.22), 'rough_wood'), surfaceMat('rough_wood'));
-    th.position.set(0, rim - 0.12, z);
+  // Lines of planking (a planked boat's strakes), round the outside at the given fractions of the depth.
+  for (const f of o.strakes ?? []) {
+    const r = Math.sqrt(1 - f * f);
+    const line = new THREE.Mesh(new THREE.TorusGeometry(1, 0.012, 3, 40).rotateX(Math.PI / 2).scale(B * r * 1.005, 1, L * r * 1.005), mat(0x2e241a));
+    line.position.y = rim - D * f;
+    g.add(line);
+  }
+  // Frames (ribs) across the inside, from gunwale to gunwale under the keel.
+  if (o.ribs) {
+    for (let i = 0; i < o.ribs; i++) {
+      const z = ((i + 0.5) / o.ribs * 2 - 1) * L * 0.8, w = Math.sqrt(Math.max(0, 1 - (z / L) ** 2));
+      const rib = new THREE.Mesh(new THREE.TorusGeometry(1, 0.018, 4, 16, Math.PI).rotateZ(Math.PI).scale(B * w * 0.88, D * w * 0.88, 1), wood);
+      rib.position.set(0, rim, z);
+      g.add(rib);
+    }
+  }
+  // Bow and stern swept up a little, as posts rising from the ends.
+  if (o.upsweep) {
+    for (const s of [-1, 1]) {
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.05, o.upsweep * 2, 6), wood);
+      post.position.set(0, rim + o.upsweep * 0.5, s * L * 0.97);
+      post.rotation.x = s * 0.5;
+      g.add(post);
+    }
+  }
+  for (const z of o.thwarts) {
+    const w = Math.sqrt(Math.max(0.05, 1 - (z / L) ** 2));
+    const th = new THREE.Mesh(worldUV(new THREE.BoxGeometry(B * 1.7 * w, 0.05, 0.2), 'rough_wood'), wood);
+    th.position.set(0, rim - 0.1, z);
     g.add(th);
   }
   if (loaded) {
-    const load = new THREE.Mesh(new THREE.SphereGeometry(0.5, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2).scale(0.6, 0.5, 1.0), mat(0x7a5a3a, { roughness: 1 }));
-    load.position.set(0, rim - 0.18, -0.1);
+    const load = new THREE.Mesh(new THREE.SphereGeometry(0.5, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2).scale(Math.min(0.6, B * 1.2), 0.5, Math.min(1.0, L * 0.6)), mat(0x7a5a3a, { roughness: 1 }));
+    load.position.set(0, rim - D * 0.5, o.thwarts.length > 1 ? (o.thwarts[0] + o.thwarts[1]) / 2 : 0);
+    load.castShadow = true;
+    g.add(load);
+  }
+  g.userData.wheels = [];
+  g.userData.r = 1;
+  g.userData.loaded = loaded;
+  return g;
+}
+
+/** A reed boat: a hull of bundled reeds, bound round at intervals, its ends drawn up into tight horns. */
+function reedBoatModel(loaded: boolean): THREE.Group {
+  const g = hullModel({ L: 1.9, B: 0.5, D: 0.38, rim: 0.45, outer: 'thatch', inner: 0x8a7440, thwarts: [-0.6], gunwale: 0.07 }, loaded);
+  const band = mat(0x5a4a2a, { roughness: 1 });
+  for (const z of [-1.3, -0.65, 0, 0.65, 1.3]) {
+    const w = Math.sqrt(1 - (z / 1.9) ** 2);
+    const b = new THREE.Mesh(new THREE.TorusGeometry(1, 0.025, 4, 16, Math.PI).rotateZ(Math.PI).scale(0.5 * w * 1.02, 0.38 * w * 1.02, 1), band);
+    b.position.set(0, 0.45, z);
+    g.add(b);
+  }
+  const reed = surfaceMat('thatch');
+  for (const s of [-1, 1]) {
+    const horn = new THREE.Mesh(worldUV(new THREE.ConeGeometry(0.12, 0.7, 7), 'thatch'), reed);
+    horn.position.set(0, 0.62, s * 1.9);
+    horn.rotation.x = s * 0.9;
+    g.add(horn);
+  }
+  return g;
+}
+
+/** A rowing boat: a planked hull (its strakes showing), three thwarts, oarlocks, and the oars shipped inside. */
+function rowboatModel(loaded: boolean): THREE.Group {
+  const g = hullModel({ L: 2.3, B: 0.72, D: 0.5, rim: 0.62, outer: 'planks', inner: 0x5a4430, thwarts: [0, -1.3, 1.3], gunwale: 0.05, ribs: 7, strakes: [0.25, 0.5, 0.72], upsweep: 0.12 }, loaded);
+  const wood = surfaceMat('rough_wood');
+  for (const s of [-1, 1]) {
+    const lock = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.14, 5), wood);
+    lock.position.set(s * 0.7, 0.69, 0.1);
+    g.add(lock);
+    // An oar lying along the thwarts, its blade forward.
+    const oar = new THREE.Group();
+    oar.position.set(s * 0.32, 0.6, 0.2);
+    oar.rotation.x = 0.04;
+    const loom = new THREE.Mesh(cylinderUV(new THREE.CylinderGeometry(0.025, 0.025, 2.6, 6), 'rough_wood').rotateX(Math.PI / 2), wood);
+    const blade = new THREE.Mesh(worldUV(new THREE.BoxGeometry(0.16, 0.02, 0.55), 'planks'), surfaceMat('planks'));
+    blade.position.z = 1.5;
+    oar.add(loom, blade);
+    g.add(oar);
+  }
+  return g;
+}
+
+/** A log raft: logs side by side, two cross-pieces lashed over them, and a low load lashed on top if it's carrying. */
+function raftModel(loaded: boolean): THREE.Group {
+  const g = new THREE.Group();
+  const wood = surfaceMat('rough_wood');
+  const n = 6, r = 0.2;
+  for (let i = 0; i < n; i++) {
+    const x = (i - (n - 1) / 2) * (2 * r + 0.03), len = 3.2 - (i % 2) * 0.25;
+    const log = new THREE.Mesh(cylinderUV(new THREE.CylinderGeometry(r, r * 0.92, len, 9), 'rough_wood').rotateX(Math.PI / 2), wood);
+    log.position.set(x, r, (i % 3 - 1) * 0.06);
+    log.castShadow = true; log.receiveShadow = true;
+    g.add(log);
+  }
+  const rope = mat(0x8a7450, { roughness: 1 });
+  for (const z of [-1.1, 1.1]) {
+    const bar = new THREE.Mesh(cylinderUV(new THREE.CylinderGeometry(0.09, 0.09, 2.7, 7), 'rough_wood').rotateZ(Math.PI / 2), wood);
+    bar.position.set(0, 2 * r + 0.06, z);
+    g.add(bar);
+    for (let i = 0; i < n; i++) {
+      const tie = new THREE.Mesh(new THREE.TorusGeometry(0.11, 0.015, 4, 8), rope);
+      tie.position.set((i - (n - 1) / 2) * (2 * r + 0.03), 2 * r + 0.03, z);
+      g.add(tie);
+    }
+  }
+  if (loaded) {
+    const load = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.45, 1.0), mat(0x7a5a3a, { roughness: 1 }));
+    load.position.set(0, 2 * r + 0.3, 0.3);
     load.castShadow = true;
     g.add(load);
   }
@@ -1455,9 +1564,13 @@ export function buildPieceMesh(type: string, state: { lit?: boolean; open?: bool
       tex(new THREE.BoxGeometry(1.0, 0.35, 1.9), 'dark_planks', 0, 0.18, 0, { turn: true });
       add(new THREE.BoxGeometry(0.9, 0.12, 1.8), 0x9b7552, 0, 0.42, 0);
       break;
-    case 'dugout': {
-      // A hull being carved: the finished canoe's shape (the ghost and the work in progress).
-      g.add(dugoutModel(false));
+    case 'dugout':
+    case 'log_raft':
+    case 'reed_boat':
+    case 'skin_boat':
+    case 'rowboat': {
+      // A hull being worked: the finished boat's shape (the ghost and the work in progress).
+      g.add(vesselModel(type, false));
       break;
     }
     case 'market_hall': {

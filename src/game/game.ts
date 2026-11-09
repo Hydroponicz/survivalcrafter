@@ -1257,49 +1257,71 @@ export class Game {
   /** The boat you're in, if any. */
   boat: CartObj | null = null;
 
-  /** Get into a boat (it must be afloat): you take the steerer's seat and paddle it. */
+  /** Get into a boat (it must be afloat and not swamped): you take the steerer's place and drive it. */
   board(k: CartObj) {
-    const def = VESSELS[k.type];
-    if (this.boat || this.riding || !def.move.paddle) return;
+    const def = VESSELS[k.type], drive = def.move.water;
+    if (this.boat || this.riding || !drive) return;
     if (!this.world.afloat(k)) return this.msg('It\'s aground: drag it into deeper water first (grab it and walk it in).', 'fail');
+    if (k.dmg >= 100) return this.msg(`It's swamped: patch the hull first (${itemDef(def.repair!.item).name.toLowerCase()}).`, 'fail');
     this.pushing = null;
     this.boat = k;
-    const st = { speed: 0 };
-    this.player.boat = { step: (dt, th, tu, hard) => this.stepBoat(k, st, dt, th, tu, hard) };
+    const st = { speed: 0, deep: false };
+    this.player.boat = { stand: !!def.stand, step: (dt, th, tu, hard) => this.stepBoat(k, st, dt, th, tu, hard) };
     this.player.vel.set(0, 0, 0);
     telemetry.event('boats', `Boarded a ${def.name.toLowerCase()}`, { id: k.id });
-    this.msg(this.inv.count('paddle') > 0
-      ? 'You climb in and take up the paddle. W/S to paddle ahead or back, A/D to steer, Shift to dig in; X to step out.'
-      : 'You climb in. With no paddle you can only scoop at the water with your hands (carve one from a plank and a shaft). W/S, A/D to steer; X to step out.', 'good');
+    const [gear, n] = drive.needs, has = this.inv.count(gear) >= n, gearName = itemDef(gear).name.toLowerCase();
+    const how = drive.by === 'pole' ? 'pole' : drive.by === 'oars' ? 'row' : 'paddle';
+    const keys = `W/S to ${how} ahead or back, A/D to steer, Shift to dig in; X to step out.`;
+    this.msg(has
+      ? `You ${def.stand ? 'step aboard' : 'climb in'} and take up the ${n > 1 ? `${gearName}s` : gearName}. ${keys}`
+      : `You ${def.stand ? 'step aboard' : 'climb in'}. With no ${n > 1 ? `pair of ${gearName}s` : gearName} you can only scoop at the water with your hands (see Crafting). ${keys}`, 'good');
+    if (k.dmg >= 40) this.msg(`The hull is leaking (${Math.round(k.dmg)}% worn): it's slow going. Patch it ashore.`, 'info');
   }
 
   /**
-   * A boat's handling, a frame at a time: paddling builds speed (a paddle, or
-   * slowly by hand; harder with Shift, slower astern), it coasts to a stop,
-   * turns faster with way on, and runs aground where the water's too shallow
-   * for its draft (bumping back off). Returns where you sit in it.
+   * A boat's handling, a frame at a time: its drive builds speed (with the
+   * right gear, or slowly by hand; harder with Shift, slower astern; a pole
+   * only out of the shallows), it coasts to a stop, turns faster with way on,
+   * leaks the more worn it is, and runs aground where the water's too shallow
+   * for its draft (bumping back off, and wearing a fragile hull). Returns
+   * where you are in it.
    */
-  private stepBoat(k: CartObj, st: { speed: number }, dt: number, th: number, tu: number, hard: boolean) {
-    const def = VESSELS[k.type], pad = def.move.paddle!, w = this.world, draft = def.draft ?? 0.2;
-    const by = this.inv.count('paddle') > 0 ? 1 : 0.35;
-    const target = th * pad.speed * by * (hard ? 1.45 : 1) * (th < 0 ? 0.5 : 1);
+  private stepBoat(k: CartObj, st: { speed: number; deep: boolean }, dt: number, th: number, tu: number, hard: boolean) {
+    const def = VESSELS[k.type], drive = def.move.water!, w = this.world, draft = def.draft ?? 0.2;
+    let by = this.inv.count(drive.needs[0]) >= drive.needs[1] ? 1 : 0.35;
+    // A pole has to reach the bottom.
+    if (drive.by === 'pole' && by === 1) {
+      const deep = w.depthAt(k.x, k.z) > (drive.maxDepth ?? 2.5);
+      if (deep && !st.deep && th) this.msg('Out of your depth: the pole can\'t reach the bottom. You scull it along slowly.', 'info');
+      st.deep = deep;
+      if (deep) by = 0.3;
+    }
+    // A worn hull is waterlogged and slow.
+    const leak = 1 - Math.min(0.6, k.dmg / 160);
+    const target = th * drive.speed * by * leak * (hard ? 1.45 : 1) * (th < 0 ? 0.5 : 1);
     st.speed += (target - st.speed) * Math.min(1, dt * (th ? 0.9 : 0.35));
     if (Math.abs(st.speed) < 0.02 && !th) st.speed = 0;
     // Steering bites with way on (a little even at rest: you can turn on the spot with a sweep stroke).
-    k.rot += tu * pad.turn * dt * (0.35 + 0.65 * Math.min(1, Math.abs(st.speed) / pad.speed));
+    k.rot += tu * drive.turn * dt * (0.35 + 0.65 * Math.min(1, Math.abs(st.speed) / drive.speed));
     const fx = Math.sin(k.rot), fz = Math.cos(k.rot);
     const nx = k.x + fx * st.speed * dt, nz = k.z + fz * st.speed * dt;
     const lead = Math.sign(st.speed || 1) * def.hit.hz * 0.85;
     if (st.speed !== 0) {
       if (w.depthAt(nx + fx * lead, nz + fz * lead) > draft && w.depthAt(nx, nz) > draft) { k.x = nx; k.z = nz; }
       else {
-        if (Math.abs(st.speed) > 1.2) this.msg('The hull grinds on the bottom: too shallow here.', 'fail');
+        const hit = Math.abs(st.speed);
+        if (hit > 1.0 && def.fragile) {
+          k.dmg = Math.min(100, k.dmg + def.fragile * hit * 4);
+          this.msg(k.dmg >= 100 ? 'The hull splits on the bottom and the boat fills with water: it\'s swamped. Get ashore and patch it.'
+            : `The hull scrapes the bottom${def.fragile >= 2 ? ' and tears' : ''} (${Math.round(k.dmg)}% worn).`, 'fail');
+          if (k.dmg >= 100) st.speed = 0;
+        } else if (hit > 1.2) this.msg('The hull grinds on the bottom: too shallow here.', 'fail');
         st.speed *= -0.15;
       }
     }
-    // You, in the steerer's seat.
+    // You, in the steerer's place (standing on a raft's deck).
     const seat = def.seats?.[0] ?? 0;
-    return { x: k.x + fx * seat, y: w.vesselY(k) + 0.18, z: k.z + fz * seat, rot: k.rot, speed: st.speed };
+    return { x: k.x + fx * seat, y: w.vesselY(k) + (def.stand ? (draft + 0.24) : 0.18), z: k.z + fz * seat, rot: k.rot, speed: st.speed };
   }
 
   /** Step out of the boat: onto the nearest bit of shore within reach, or else over the side into the water. */
@@ -1335,14 +1357,17 @@ export class Game {
   /** Set a cart down from your pack, just in front of you. */
   setDownCart(it: Item) {
     const def = itemDef(it.type);
-    if (!def.cart || !this.inv.find(it.uid)) return;
+    if ((!def.cart && !def.vessel) || !this.inv.find(it.uid)) return;
     const p = this.player.pos, f = this.player.forward();
-    const x = p.x + f.x * 1.8, z = p.z + f.z * 1.8;
-    if (this.world.terrain.heightAt(x, z) < this.world.terrain.waterAt(x, z) + 0.1) return this.msg('Not in the water.', 'fail');
+    // A boat goes down at the water's edge (or on the water); a cart only on dry ground.
+    const reach = def.vessel ? VESSELS[def.vessel].hit.hz + 1 : 1.8;
+    const x = p.x + f.x * reach, z = p.z + f.z * reach;
+    if (!def.vessel && this.world.terrain.heightAt(x, z) < this.world.terrain.waterAt(x, z) + 0.1) return this.msg('Not in the water.', 'fail');
     this.inv.remove(it.uid);
     if (this.activeUid === it.uid) this.activeUid = null;
-    this.world.addCart(it.type as CartObj['type'], x, z, Math.atan2(f.x, f.z), it.ql, it.dmg);
+    const k = this.world.addCart((def.vessel ?? it.type) as CartObj['type'], x, z, Math.atan2(f.x, f.z), it.ql, it.dmg);
     this.inventoryChanged();
+    if (def.vessel) return this.msg(`You set the ${VESSELS[def.vessel].name.toLowerCase()} down${this.world.afloat(k) ? ' on the water. Aim at it to get in.' : '. Drag it into the water (or set it down right at the edge), then get in.'}`, 'info');
     this.msg(def.cart === 'hand' ? 'You set the hand cart down. Aim at it to grab the handles, or open it to load it.' : 'You set the ox cart down. Bring your ox and hitch it (aim at the cart → Hitch to your ox).', 'info');
   }
 
@@ -2176,6 +2201,8 @@ export class Game {
     // --- player
     const over = this.dev.on('noWeight') ? 0 : this.inv.weight() - this.carryCapacity();
     p.update(dt, inp, this.world, !!this.action, over, !this.ui.menuOpen, this.dev.on('fly'));
+    // A swamped boat: over the side (or ashore, if it's close).
+    if (this.boat && this.boat.dmg >= 100) this.disembark(true);
     if (this.action && Math.hypot(p.pos.x - this.action.startPos.x, p.pos.z - this.action.startPos.z) > 0.6) {
       this.cancelAction('You moved and stopped what you were doing.');
     }

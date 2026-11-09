@@ -828,7 +828,7 @@ export class UI {
         actions.push({ label: 'Unload', fn: (it) => { const n = g.unloadQuiver(it); g.msg(`You take ${n} arrow(s) out of the quiver.`, 'info'); g.dressPlayer(); } });
       }
       if (def.places) actions.push({ label: 'Place', fn: (it) => g.startPlacingItem(it) });
-      if (def.cart) actions.push({ label: 'Set down', fn: (it) => g.setDownCart(it) });
+      if (def.cart || def.vessel) actions.push({ label: 'Set down', fn: (it) => g.setDownCart(it) });
       if (grp.type === 'bandage') actions.push({ label: 'Apply', fn: () => g.applyBandage() });
       if (!isIdentified(grp.type)) actions.push({ label: 'Study', fn: (it) => g.request(ACTION_MAP.study, { g, t: { kind: 'none' }, item: it }) });
       if (chest) {
