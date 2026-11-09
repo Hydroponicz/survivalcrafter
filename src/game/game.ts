@@ -4,6 +4,7 @@ import type { Recipe, StationKind } from '../data/recipes';
 import { SKILLS, Skills, type SkillId } from '../data/skills';
 import { pieceBoxes, STRUCTURES, type StructureDef, type V3 } from '../data/structures';
 import { VESSELS, vesselOf } from '../data/vessels';
+import { BuildGame } from './minigames/build';
 import { GREAT_SLIP_LENGTH, SLIP_LENGTH, shipLength, type ShipDesign } from '../data/ships';
 import { anvilGrade } from './smithy';
 import { isRock, Mat, WATER_LEVEL, type Volumes } from '../world/terrain';
@@ -249,6 +250,8 @@ export class Game {
     const gen = world.terrain.gen;
     this.distant = new DistantLand(gen.seed);
     this.distant.settlements = world.terrain.villages;
+    // (The building view keeps above the ground.)
+    BuildGame.groundAt = (x, z) => world.terrain.heightAt(x, z);
     this.distant.bakeTrees(this.renderer);
     this.distant.lakeLevels = (tx, tz) => gen.settledLakes(tx, tz);
     this.scene.add(this.distant.group);

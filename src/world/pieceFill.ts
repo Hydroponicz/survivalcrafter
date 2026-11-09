@@ -17,10 +17,21 @@ export function pieceBounds(def: StructureDef): { min: THREE.Vector3; max: THREE
   return { min, max };
 }
 
-/** Flat pieces (floors) fill across their length; the rest fill upward. */
+/** Flat pieces (floors, a slipway) fill across their length; the rest fill upward. */
 export function fillsAcross(def: StructureDef): boolean {
   const { min, max } = pieceBounds(def);
-  return max.y - min.y < 0.5 && max.x - min.x > 1;
+  return max.y - min.y < 0.5 && Math.max(max.x - min.x, max.z - min.z) > 1;
+}
+
+/**
+ * Which way a piece fills, in its own frame: up (most pieces), or for a flat
+ * one along its longer side (a floor's x; a long slipway's z, so each step is
+ * a section across its ways, not a sliver down its whole length).
+ */
+export function fillDir(def: StructureDef): 'x' | 'y' | 'z' {
+  if (!fillsAcross(def)) return 'y';
+  const { min, max } = pieceBounds(def);
+  return max.z - min.z > (max.x - min.x) * 1.5 ? 'z' : 'x';
 }
 
 /** Share built so far (0..1). */
@@ -31,7 +42,8 @@ export function builtShare(s: StructureObj): number {
 
 /** The direction a piece fills in, in the world. */
 export function fillAxis(s: StructureObj, def: StructureDef): THREE.Vector3 {
-  return fillsAcross(def) ? new THREE.Vector3(Math.cos(s.yaw), 0, -Math.sin(s.yaw)) : new THREE.Vector3(0, 1, 0);
+  const d = fillDir(def);
+  return d === 'x' ? new THREE.Vector3(Math.cos(s.yaw), 0, -Math.sin(s.yaw)) : d === 'z' ? new THREE.Vector3(Math.sin(s.yaw), 0, Math.cos(s.yaw)) : new THREE.Vector3(0, 1, 0);
 }
 
 /**
@@ -41,9 +53,9 @@ export function fillAxis(s: StructureObj, def: StructureDef): THREE.Vector3 {
 export function fillPlanes(s: StructureObj, share: number): { built: THREE.Plane; rest: THREE.Plane } {
   const def = STRUCTURES[s.type];
   const { min, max } = pieceBounds(def);
-  const across = fillsAcross(def);
+  const d = fillDir(def);
   const axis = fillAxis(s, def);
-  const lo = across ? min.x : min.y, hi = across ? max.x : max.y;
+  const lo = min[d], hi = max[d];
   const cut = axis.dot(new THREE.Vector3(s.x, s.y, s.z)) + lo + (hi - lo) * share;
   return { built: new THREE.Plane(axis.clone().negate(), cut), rest: new THREE.Plane(axis.clone(), -cut) };
 }

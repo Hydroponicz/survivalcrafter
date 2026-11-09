@@ -17,6 +17,12 @@ export interface MgInput {
   pressed: boolean;
   released: boolean;
   wheel: number;
+  /** Dragging with the right button held (a minigame that lets you look around): how far, in pixels. */
+  orbit?: { dx: number; dy: number };
+  /** Keys held (for moving the view about). */
+  keys?: Set<string>;
+  /** Keys pressed this frame. */
+  hit?: (code: string) => boolean;
   /** In-game pointer in pixels and in normalised device coordinates. */
   x: number;
   y: number;
@@ -42,6 +48,8 @@ export abstract class Minigame {
   done = false;
   /** Whether the in-game pointer is drawn. */
   showPointer = true;
+  /** Lets you look around it: right-drag to orbit, the wheel to zoom (a quick right-click still cancels). */
+  readonly orbits: boolean = false;
   abstract readonly title: string;
   abstract readonly instructions: string;
   feedback: { text: string; good: boolean; t: number } | null = null;
