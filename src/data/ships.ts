@@ -102,11 +102,82 @@ export function shipStats(d: ShipDesign) {
   const sail = rig * Math.sqrt(L / 12) * hull * (d.masts === 3 ? 1.28 : d.masts === 2 ? 1.15 : 1) * (1 - (d.castles === 3 ? 0.14 : 0.05 * d.castles)) * (d.build === 'carvel' ? 1.04 : 1);
   // Under oars: a long narrow hull rows best.
   const row = d.oars ? 1.6 * Math.sqrt(L / 12) * (d.beam === 'narrow' ? 1.3 : d.beam === 'medium' ? 1.0 : 0.7) : 0;
+  // (Her best under sail, with a good breeze on her best point of sailing: see sailPolar.)
   const speed = +Math.max(sail, row).toFixed(2);
   const turn = +(0.4 * (12 / L) * (d.rig === 'lateen' ? 1.3 : d.rig === 'mixed' ? 1.15 : 1) * (d.beam === 'narrow' ? 1.1 : d.beam === 'broad' ? 0.85 : 1) * (d.oars ? 1.3 : 1)).toFixed(3);
   // A crew to sail and (if she's oared) row her: the size of the problem phase 4 will hand you.
   const crew = Math.max(2, Math.round(L / 6 + d.masts * 2 + (d.oars ? d.bays * 4 : 0) + d.castles));
-  return { L, B: +B.toFixed(2), D: +D.toFixed(2), capacity, draft, speed, turn, knots: +(speed * 1.944).toFixed(1), crew, oarsmen: d.oars ? d.bays * 4 : 0 };
+  return { L, B: +B.toFixed(2), D: +D.toFixed(2), capacity, draft, speed, turn, knots: +(speed * 1.944).toFixed(1), crew, oarsmen: d.oars ? d.bays * 4 : 0,
+    sail: +sail.toFixed(2), row: +row.toFixed(2) };
+}
+
+// ---------- sailing: the wind, how each rig takes it, and the hands to work her
+
+/**
+ * How well a rig drives her at an angle off the wind (0: head to wind, 180°:
+ * running dead before it), as a share of her best. A square sail can't sail
+ * closer than about 65° to the wind and is at her best with it on the
+ * quarter or astern; a lateen points up to about 45° and is best on a beam
+ * reach, but runs poorly (the long yard blankets itself); the carrack's
+ * mixed rig falls in between and is good on every point once she bears off.
+ */
+const POLARS: Record<ShipDesign['rig'], [number, number][]> = {
+  square: [[0, 0], [62, 0], [75, 0.3], [90, 0.6], [115, 0.85], [140, 1], [180, 0.95]],
+  lateen: [[0, 0], [42, 0], [55, 0.5], [70, 0.8], [100, 1], [130, 0.95], [180, 0.75]],
+  mixed: [[0, 0], [52, 0], [65, 0.4], [85, 0.7], [120, 0.95], [145, 1], [180, 0.95]],
+};
+export function sailPolar(rig: ShipDesign['rig'], offWind: number): number {
+  const deg = Math.min(180, Math.abs(offWind) * 180 / Math.PI), t = POLARS[rig];
+  for (let i = 1; i < t.length; i++) {
+    if (deg <= t[i][0]) { const [a0, v0] = t[i - 1], [a1, v1] = t[i]; return v0 + (v1 - v0) * (deg - a0) / (a1 - a0); }
+  }
+  return t[t.length - 1][1];
+}
+/**
+ * The wind's angle off a ship's bow (radians, -π to π): 0 when it comes from
+ * dead ahead, ±π from dead astern, positive when it comes over her starboard
+ * side (her right). `rot` is her heading, `dir` the way the wind blows.
+ */
+export function windAngle(rot: number, dir: [number, number]): number {
+  const fx = Math.sin(rot), fz = Math.cos(rot), [wx, wz] = dir;
+  return Math.atan2(wx * fz - wz * fx, -(fx * wx + fz * wz));
+}
+/** How closely a rig can point (degrees off the wind): any closer and she's in irons. */
+export const pointsTo = (rig: ShipDesign['rig']) => POLARS[rig][1][0];
+
+/** The wind's force on her sails: a light air barely moves her, a fresh breeze (8 m/s) drives her at her best, a gale a little more. */
+export const windForce = (strength: number) => Math.max(0.15, Math.min(1.25, strength / 8));
+
+/** The point of sailing, by the angle off the wind. */
+export function pointOfSailing(offWind: number, rig: ShipDesign['rig']): string {
+  const deg = Math.abs(offWind) * 180 / Math.PI;
+  if (deg < pointsTo(rig)) return 'in irons (head to wind)';
+  if (deg < 75) return 'close-hauled';
+  if (deg < 105) return 'on a beam reach';
+  if (deg < 155) return 'on a broad reach';
+  return 'running before the wind';
+}
+
+/** The wind's name by its strength (m/s), after the old sailors' scale. */
+export function windName(strength: number): string {
+  return strength < 1.5 ? 'calm' : strength < 3.5 ? 'light air' : strength < 5.5 ? 'gentle breeze' : strength < 8 ? 'moderate breeze'
+    : strength < 10.8 ? 'fresh breeze' : strength < 13.9 ? 'strong breeze' : 'near gale';
+}
+
+/**
+ * The hands she has to work her, as a share of what each job needs: the
+ * sails (a few hands per mast, and the helmsman), and the oars (a man to
+ * each). `crew` is how many are aboard besides you; with none given she's
+ * taken to have a full crew (until crews can be hired, every ship sails as
+ * if fully manned). Crews will set this: a short-handed ship sets less sail
+ * and rows slower.
+ */
+export function shipHands(d: ShipDesign, crew?: number): { sails: number; oars: number } {
+  if (crew === undefined) return { sails: 1, oars: 1 };
+  const s = shipStats(d), forSails = Math.max(1, s.crew - s.oarsmen);
+  // You can handle a small ship's sail yourself, slowly; the sailhands come first, then the oars.
+  const sails = Math.min(1, (crew + 1) / forSails), oars = s.oarsmen ? Math.max(0, Math.min(1, (crew + 1 - forSails) / s.oarsmen)) : 0;
+  return { sails: Math.max(sails, d.bays <= 4 ? 0.5 : 0.2), oars };
 }
 
 /** One stage of the work, done a step at a time (each step takes its materials, worked with its tool). */

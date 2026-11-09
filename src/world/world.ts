@@ -102,6 +102,11 @@ export interface ShipBuild {
   /** Seconds into its launch, while it slides down the slip, and where it started from. */
   launching?: number;
   from?: [number, number, number];
+  /** Afloat: how much sail she has set (-0.25 aback to 1 full), and her way (m/s ahead); she keeps both with no one at the helm. */
+  sail?: number;
+  speed?: number;
+  /** Hands aboard besides you (not yet hired: none given means she's taken to be fully manned; see data/ships: shipHands). */
+  crew?: number;
 }
 
 /** How much each vessel holds (kg). */
@@ -637,6 +642,20 @@ export class World {
   /** How deep the water is at a point (≤ 0 on dry land). */
   depthAt(x: number, z: number): number {
     return this.terrain.waterAt(x, z) - this.terrain.heightAt(x, z);
+  }
+
+  /**
+   * The wind out on the water: which way it blows (a unit vector it blows
+   * toward) and how hard (m/s). It comes from the region's prevailing wind,
+   * veering and backing up to 60° either side of it over the hours and
+   * rising and falling between a light air and a strong breeze.
+   */
+  wind(time = this.time): { dir: [number, number]; strength: number } {
+    const [px, pz] = this.terrain.wind, h = time / (DAY_LENGTH / 24), seed = (this.terrain.seed % 1000) * 0.37;
+    const veer = (Math.sin(h * 0.21 + seed) * 0.7 + Math.sin(h * 0.53 + seed * 2.1) * 0.3) * (Math.PI / 3);
+    const c = Math.cos(veer), s = Math.sin(veer);
+    const strength = 7 + 3.5 * Math.sin(h * 0.37 + seed * 1.7) + 1.8 * Math.sin(h * 1.13 + seed * 0.6);
+    return { dir: [px * c - pz * s, px * s + pz * c], strength: Math.max(0.8, strength) };
   }
 
   /** Where a vessel's keel is: on the ground, or (a boat with water enough under it) floating at its draft. */

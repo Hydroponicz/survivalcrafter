@@ -14,10 +14,10 @@ import { builtShare, fillPlanes } from './pieceFill';
 import { furnitureMesh } from './furnitureMesh';
 import { STRUCTURES } from '../data/structures';
 import type { VesselId } from '../data/vessels';
-import { mastRig, shipSolids, shipStats, stageProgress, type ShipDesign } from '../data/ships';
+import { mastRig, shipSolids, windAngle, shipStats, stageProgress, type ShipDesign } from '../data/ships';
 import {
   APPLE_AGE, APPLES, CROP_STAGES, corpseSpecies, cropPos, type AnimalObj, type AnimalSpecies, type BushObj, type ForageObj, type PileObj, type Species, type StructureObj,
-  type ShipBuild, type TreeObj, type World, type WorldListener, type WorldObj,
+  type CartObj, type ShipBuild, type TreeObj, type World, type WorldListener, type WorldObj,
 } from './world';
 
 const mat = (color: number, extra: THREE.MeshStandardMaterialParameters = {}) => {
@@ -737,12 +737,33 @@ export class WorldView implements WorldListener {
         m.rotation.z = Math.sin(t * 0.9 + c.id * 2) * 0.03;
         m.rotation.x = Math.sin(t * 0.7 + c.id) * 0.012;
       } else { m.rotation.z = 0; m.rotation.x = 0; }
+      if (c.ship && m.userData.sails) this.trimSails(c, m);
       // The wheels turn as it rolls.
       const moved = Math.hypot(c.x - (m.userData.lx ?? c.x), c.z - (m.userData.lz ?? c.z));
       m.userData.lx = c.x; m.userData.lz = c.z;
       for (const w of m.userData.wheels as THREE.Object3D[]) w.rotation.x += moved / (m.userData.r as number);
     }
     for (const [id, m] of this.cartMeshes) if (!live.has(id)) { this.group.remove(m); disposeObject(m); this.cartMeshes.delete(id); }
+  }
+
+  /**
+   * A ship's sails braced round to the wind: a square sail's yard squared
+   * when she runs before it and braced round (the lee yardarm aft) as she
+   * comes up toward it; a lateen swung out to leeward, wider the more she
+   * bears away. Shortened sail is reefed up to the yard (a lateen is furled
+   * along its yard), and she heels a little to the wind on her sails.
+   */
+  private trimSails(c: CartObj, m: THREE.Group) {
+    const s = c.ship!, afloat = this.world.afloat(c), set = afloat ? s.sail ?? 0 : 0;
+    const rel = afloat ? windAngle(c.rot, this.world.wind().dir) : Math.PI, off = Math.abs(rel), side = Math.sign(rel) || 1;
+    for (const sl of m.userData.sails as { pivot: THREE.Group; rig: 'square' | 'lateen'; cloth: THREE.Object3D }[]) {
+      const want = sl.rig === 'square' ? side * Math.min(1.15, (Math.PI - off) * 0.55) : -side * Math.max(0.2, Math.min(1.4, off * 0.5));
+      // (Ease round, as the braces and sheets are worked.)
+      sl.pivot.rotation.y += (want - sl.pivot.rotation.y) * 0.03;
+      if (sl.rig === 'square') { sl.cloth.scale.y = Math.max(0.06, Math.abs(set)); sl.cloth.visible = true; }
+      else sl.cloth.visible = Math.abs(set) > 0.02;
+    }
+    if (afloat && set > 0) m.rotation.z += -side * Math.min(0.05, set * Math.sin(off) * this.world.wind().strength / 220);
   }
 
   syncAnimals(time: number) {
@@ -1065,26 +1086,37 @@ function shipModel(d: ShipDesign, done: number, onSlip: boolean, loaded: boolean
   }
   // Undyed wool canvas: pale and warm, a little lit from within so it doesn't go grey in its own shade.
   const sailMat = mat(0xf2e6cc, { side: THREE.DoubleSide, roughness: 1, emissive: 0x3a3226 });
+  // Each sail (with its yard) turns on its mast, braced round to the wind as she sails (see syncCarts), and a square sail is reefed up to its yard as you shorten sail.
+  const sails: { pivot: THREE.Group; rig: 'square' | 'lateen'; cloth: THREE.Object3D }[] = [];
+  g.userData.sails = sails;
   for (let k = 0; k < (P.sails ?? 0); k++) {
-    const h = mastH(k), z = mastAt(k);
+    const h = mastH(k), z = mastAt(k), pivot = new THREE.Group();
+    pivot.position.set(0, 0, z);
+    g.add(pivot);
+    const hang = (m: THREE.Mesh) => { pivot.add(m); m.position.z -= z; return m; };
     if (mastRig(d, k) === 'square') {
       const w = B * (k === 0 ? 1.7 : 1.3), sh = h * 0.5;
-      add(new THREE.Mesh(cylinderUV(new THREE.CylinderGeometry(0.07, 0.07, w + 0.6, 6), 'rough_wood').rotateZ(Math.PI / 2), wood)).position.set(0, h * 0.86, z + 0.25);
-      // The sail, bellied a little.
+      hang(add(new THREE.Mesh(cylinderUV(new THREE.CylinderGeometry(0.07, 0.07, w + 0.6, 6), 'rough_wood').rotateZ(Math.PI / 2), wood))).position.set(0, h * 0.86, 0.25);
+      // The sail, bellied a little, hung from its yard (so it reefs up toward it).
       const sail = new THREE.PlaneGeometry(w, sh, 6, 4), p = sail.getAttribute('position') as THREE.BufferAttribute;
       for (let i = 0; i < p.count; i++) { const u = p.getX(i) / (w / 2), v = p.getY(i) / (sh / 2); p.setZ(i, (1 - u * u) * (1 - v * v * 0.6) * 0.5); }
+      sail.translate(0, -sh / 2, 0);
       sail.computeVertexNormals();
-      add(new THREE.Mesh(sail, sailMat)).position.set(0, h * 0.86 - sh / 2, z + 0.35);
+      const cloth = hang(add(new THREE.Mesh(sail, sailMat)));
+      cloth.position.set(0, h * 0.86, 0.35);
+      sails.push({ pivot, rig: 'square', cloth });
     } else {
       // A lateen: a long yard slung slanting from the masthead, a triangle of sail under it.
       const yl = L * (k === 0 ? 0.55 : 0.4);
       const yard = add(new THREE.Mesh(cylinderUV(new THREE.CylinderGeometry(0.06, 0.06, yl, 6), 'rough_wood').rotateX(Math.PI / 2), wood), false);
-      yard.position.set(0.25, h * 0.75, z);
+      hang(yard).position.set(0.25, h * 0.75, 0);
       yard.rotation.x = 0.55;
-      const a = new THREE.Vector3(0.3, h * 0.75 + Math.sin(0.55) * yl / 2, z + Math.cos(0.55) * yl / 2), b2 = new THREE.Vector3(0.3, h * 0.75 - Math.sin(0.55) * yl / 2, z - Math.cos(0.55) * yl / 2), c = new THREE.Vector3(0.3, rim(z) + 0.8, z - yl * 0.15);
+      const a = new THREE.Vector3(0.3, h * 0.75 + Math.sin(0.55) * yl / 2, Math.cos(0.55) * yl / 2), b2 = new THREE.Vector3(0.3, h * 0.75 - Math.sin(0.55) * yl / 2, -Math.cos(0.55) * yl / 2), c = new THREE.Vector3(0.3, rim(z) + 0.8, -yl * 0.15);
       const tri = new THREE.BufferGeometry().setFromPoints([a, b2, c]);
       tri.computeVertexNormals();
-      add(new THREE.Mesh(tri, sailMat));
+      const cloth = add(new THREE.Mesh(tri, sailMat));
+      pivot.add(cloth);
+      sails.push({ pivot, rig: 'lateen', cloth });
     }
   }
   if (P.rudder) {

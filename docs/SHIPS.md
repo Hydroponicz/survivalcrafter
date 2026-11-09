@@ -163,21 +163,74 @@ The longship draws only 0.6 m, so she can be run up on a beach.
 **Repairs:** a ship's bottom can only be reached when she's careened (run
 aground on a beach) or on a slip. Patch it with refined planks.
 
-**Not yet:** wind, crews, walking on deck, oars on big ships, and the dry
-dock. Those are phase 4.
+**Then:** wind, walking on deck and oars on big ships came in phases 4 and 5.
 
-**4. Sailing and crews**
-- **Wind:** one prevailing wind direction and strength already drives the
-  climate. Under sail, speed depends on the angle to the wind (a polar curve
-  per rig: square sails run before the wind, lateen and fore-and-aft rigs
-  point higher).
-- **Walking aboard:** the deck is a moving platform. You walk on it while it
-  sails (the player's frame follows the hull), climb to the castles, and go
-  down into the hold. This also gives ladders and stairs, which the towns need.
+**4. Sailing (done; crews still to come)**
+
+**The wind:** it comes from the region's prevailing wind (the one that
+already drives the climate). Over the hours it veers and backs up to 60°
+either side of that, and rises and falls between a light air and a strong
+breeze (about 2 to 12 m/s). The grass sways with it, and it's loud out on
+the water.
+
+**How each rig takes it:** speed under sail depends on the wind's angle off
+her bow, from a polar curve for each rig (`sailPolar` in `data/ships.ts`),
+and on its strength (best at a fresh breeze, 8 m/s).
+- **Square:** can't sail closer than about 62° to the wind. Best with the wind
+  on the quarter or astern.
+- **Lateen:** points up to about 42°. Best on a beam reach; runs poorly.
+- **Mixed** (the carrack): about 52°, and good on every point once she bears
+  off.
+- **Oars:** drive her at any angle, even in a calm. The oarsmen row when you
+  make sail, and the faster of oars and sail wins.
+
+Measured, in knots at a fresh breeze, by angle off the wind:
+
+| Ship | 50° | 70° | 90° | 120° | 150° | 180° |
+|---|---|---|---|---|---|---|
+| Cog (square) | 0 | 0.7 | 2.3 | 3.4 | 3.8 | 3.7 |
+| Caravel (lateen) | 2.0 | 5.1 | 6.0 | 6.2 | 5.6 | 4.8 |
+| Carrack (mixed) | 0 | 3.3 | 5.1 | 6.6 | 6.9 | 6.6 |
+| Galley (oars too) | 6.4 | 7.5 | 8.8 | 9.1 | 8.2 | 7.0 |
+
+In a calm the galley still rows at 6.4 knots; the cog barely drifts (0.3).
+
+**Her sails:** each is braced round to the wind. A square yard is squared
+when she runs, and braced round (lee yardarm aft) as she comes up to the
+wind. A lateen swings out to leeward. Square sails reef up to the yard as you
+shorten sail; a lateen is furled along its yard. She heels a little to the
+wind.
+
+**The wind gauge** shows at the helm or anywhere aboard:
+- where the wind comes from round her bow, and the arc she can't point into
+- the wind's name and strength, and her point of sailing (in irons,
+  close-hauled, beam reach, broad reach, running)
+- how much sail is set and how well it's drawing, and her speed in knots
+
+**Leaving the helm:** **X** leaves the helm with the rudder lashed. She keeps
+her way and her sails as set, holding her course until she runs aground
+(then her sails are left flogging). Her state (`sail`, `speed`) is saved
+with her.
+
+**Walking aboard:** her deck is a moving floor. Whoever stands aboard is
+carried with her as she moves and turns, so you can walk the deck, climb to
+the castles and go down into the hold under way. Aim at her and **Take the
+helm** to steer again. **X** aboard goes ashore if there's land in reach,
+else over the side.
+
+**Still to come (the hooks are in):**
 - **Crews:** hire sailors in port towns (villagers with a `sailor` role) to
-  row and work the sails. Big ships need a crew to move at all.
+  row and work the sails.
+  - `ShipBuild.crew` holds the hands aboard. It's unset for now, which means
+    a full crew.
+  - `shipHands(design, crew)` turns that into the share of the sails and oars
+    that are worked. Sail power and rowing speed already scale by it.
+  - A short-handed ship will set less sail and row slower. A big ship with
+    one man aboard will barely move.
+  - The shipyard already shows the crew each design needs.
 - **Trade by sea:** the traders' system extended to ships between port towns.
   A ship carries tonnes where a cart carries a few hundred kg.
+- **The dry dock:** for repairing big hulls without careening.
 
 **5. Ship types (done)**
 
@@ -204,8 +257,8 @@ New choices that came with them:
 - **Great castles:** a two-storey sterncastle and a high forecastle.
 - **Lengths up to 34 m:** on the new **great slipway** (36 m on stone
   footings; its far end must reach water 2.2 m deep).
-- **Crew figure:** the shipyard shows the crew each design will need. That's
-  phase 4.
+- **Crew figure:** the shipyard shows the crew each design will need, ready
+  for crews.
 
 Some combinations aren't allowed:
 - two masts need 22 m or more, and three need 26 m

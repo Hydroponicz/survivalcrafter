@@ -1203,7 +1203,7 @@ export const ACTIONS: ActionDef[] = [
 
   // ===== vessels (carts and boats: see data/vessels)
   {
-    id: 'board_boat', label: (c) => `Get in the ${c.t.kind === 'cart' ? vesselOf(c.t.cart).name.toLowerCase() : 'boat'}`,
+    id: 'board_boat', label: (c) => c.t.kind === 'cart' && c.t.cart.ship ? 'Take the helm' : `Get in the ${c.t.kind === 'cart' ? vesselOf(c.t.cart).name.toLowerCase() : 'boat'}`,
     show: (c) => c.t.kind === 'cart' && !!vesselOf(c.t.cart).move.water && !c.g.boat && !c.g.riding,
     check: (c) => {
       if (c.t.kind !== 'cart') return null;

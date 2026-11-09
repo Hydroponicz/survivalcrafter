@@ -5,7 +5,7 @@ import { SKILLS, Skills, type SkillId } from '../data/skills';
 import { pieceBoxes, STRUCTURES, type StructureDef, type V3 } from '../data/structures';
 import { VESSELS, vesselOf } from '../data/vessels';
 import { BuildGame } from './minigames/build';
-import { GREAT_SLIP_LENGTH, SLIP_LENGTH, shipLength, type ShipDesign } from '../data/ships';
+import { GREAT_SLIP_LENGTH, SLIP_LENGTH, pointOfSailing, sailPolar, shipHands, shipLength, shipStats, windAngle, windForce, windName, type ShipDesign } from '../data/ships';
 import { anvilGrade } from './smithy';
 import { isRock, Mat, WATER_LEVEL, type Volumes } from '../world/terrain';
 import { forageHeight, forageScale } from '../world/forageProps';
@@ -1276,7 +1276,8 @@ export class Game {
     this.player.vel.set(0, 0, 0);
     telemetry.event('boats', `Boarded a ${def.name.toLowerCase()}`, { id: k.id });
     if (drive.by === 'sail') {
-      this.msg(`You take the helm of the ${def.name.toLowerCase()}. W to make sail (more), S to shorten sail and back her off, A/D for the rudder; X to go ashore.`, 'good');
+      const w = this.windOn(k);
+      this.msg(`You take the helm of the ${def.name.toLowerCase()}. The wind is a ${windName(w.strength)}, ${w.from}; she'd be ${w.point}. W makes more sail, S shortens it (and backs her off), A/D work the rudder; X leaves the helm (she sails on as she is).`, 'good');
       if (k.dmg >= 40) this.msg(`She's leaking (${Math.round(k.dmg)}% worn): careen her on a beach and patch the hull.`, 'info');
       return;
     }
@@ -1309,11 +1310,11 @@ export class Game {
     }
     // A worn hull is waterlogged and slow.
     const leak = 1 - Math.min(0.6, k.dmg / 160);
-    if (drive.by === 'sail') {
-      // Under sail: W makes more sail, S shortens it (and backs her off); she gathers way and loses it slowly.
-      st.sail = Math.max(-0.25, Math.min(1, (st.sail ?? 0) + th * dt * 0.4));
-      const target = st.sail * drive.speed * leak;
-      st.speed += (target - st.speed) * Math.min(1, dt * 0.25);
+    if (drive.by === 'sail' && k.ship) {
+      // A ship keeps her own way (she sails on when you leave the helm): see sailShip.
+      this.sailShip(k, dt, th, tu, true);
+      const seat = def.seats?.[0] ?? 0, speed = k.ship.speed ?? 0;
+      return { x: k.x + Math.sin(k.rot) * seat, y: w.vesselY(k) + (def.deck ?? draft + 0.24), z: k.z + Math.cos(k.rot) * seat, rot: k.rot, speed };
     } else {
       const target = th * drive.speed * by * leak * (hard ? 1.45 : 1) * (th < 0 ? 0.5 : 1);
       st.speed += (target - st.speed) * Math.min(1, dt * (th ? 0.9 : 0.35));
@@ -1342,9 +1343,127 @@ export class Game {
     return { x: k.x + fx * seat, y: w.vesselY(k) + (def.stand ? (def.deck ?? draft + 0.24) : 0.18), z: k.z + fz * seat, rot: k.rot, speed: st.speed };
   }
 
-  /** Step out of the boat: onto the nearest bit of shore within reach, or else over the side into the water. */
-  disembark(quiet = false) {
+  /** The wind as it comes to a ship: where it's from, its angle off her bow, her point of sailing, and how well her sails draw (0–1). */
+  windOn(k: CartObj) {
+    const wind = this.world.wind(), d = k.ship!.design;
+    const [wx, wz] = wind.dir, rel = windAngle(k.rot, wind.dir);
+    const off = Math.abs(rel);
+    const compass = ['north', 'north-east', 'east', 'south-east', 'south', 'south-west', 'west', 'north-west'];
+    // (North is -z on the map; the wind comes from opposite the way it blows.)
+    const fromAng = Math.atan2(-wx, wz);
+    const from = `from the ${compass[((Math.round(fromAng / (Math.PI / 4)) % 8) + 8) % 8]}`;
+    return { ...wind, rel, off, from, point: pointOfSailing(off, d.rig), drawing: sailPolar(d.rig, off) * windForce(wind.strength) };
+  }
+
+  /**
+   * A ship under sail (and oars), a frame at a time, whether or not anyone's
+   * at her helm: W/S at the helm make or shorten sail, and how hard it drives
+   * her depends on the wind's strength and its angle to her (her rig's polar:
+   * no rig can sail straight into the wind). Oars drive her at any angle, even
+   * in a calm. Both are worked by her hands (see shipHands: every ship is
+   * fully manned until crews come in). She gathers way and loses it slowly,
+   * answers the rudder with way on, and runs aground where it's too shallow.
+   */
+  private sailShip(k: CartObj, dt: number, th: number, tu: number, atHelm: boolean) {
+    const s = k.ship!, d = s.design, def = vesselOf(k), drive = def.move.water!, w = this.world, draft = def.draft ?? 1;
+    const st = shipStats(d), hands = shipHands(d, s.crew), wind = this.windOn(k);
+    s.sail = Math.max(-0.25, Math.min(1, (s.sail ?? 0) + th * dt * 0.4));
+    if (Math.abs(s.sail) < 0.02 && !th) s.sail = 0;
+    const leak = 1 - Math.min(0.6, k.dmg / 160);
+    // Sails set: driven as well as the wind's angle lets them. Backed: the wind presses them aback and she goes astern.
+    let target = s.sail >= 0 ? s.sail * st.sail * wind.drawing * hands.sails : s.sail * st.sail * 0.6 * windForce(wind.strength) * hands.sails;
+    // Her oars (if she has them) row her at whatever the wind, at the same order.
+    if (st.row) {
+      const row = s.sail * st.row * hands.oars * (s.sail < 0 ? 0.5 : 1);
+      target = s.sail >= 0 ? Math.max(target, row) : Math.min(target, row);
+    }
+    target *= leak;
+    let speed = s.speed ?? 0;
+    speed += (target - speed) * Math.min(1, dt * 0.25);
+    if (Math.abs(speed) < 0.02 && !s.sail) speed = 0;
+    k.rot += tu * drive.turn * dt * (0.35 + 0.65 * Math.min(1, Math.abs(speed) / drive.speed));
+    const fx = Math.sin(k.rot), fz = Math.cos(k.rot);
+    const nx = k.x + fx * speed * dt, nz = k.z + fz * speed * dt;
+    const lead = Math.sign(speed || 1) * def.hit.hz * 0.85;
+    if (speed !== 0) {
+      if (w.depthAt(nx + fx * lead, nz + fz * lead) > draft && w.depthAt(nx, nz) > draft) { k.x = nx; k.z = nz; }
+      else {
+        const hit = Math.abs(speed), near = atHelm || this.shipUnder() === k;
+        if (hit > 1.0 && def.fragile) {
+          k.dmg = Math.min(100, k.dmg + def.fragile * hit * 4);
+          if (near) this.msg(k.dmg >= 100 ? 'Her hull splits on the bottom and she fills: she\'s swamped. Get ashore, careen her and patch her.'
+            : `She runs aground with a shudder (${Math.round(k.dmg)}% worn).`, 'fail');
+        } else if (hit > 0.6 && near) this.msg('Her keel grinds on the bottom: too shallow here.', 'fail');
+        speed *= -0.15;
+        // With no one at the helm she stays on the bottom, her sails flogging, until someone takes her off.
+        if (!atHelm) { s.sail = 0; speed = 0; }
+        if (k.dmg >= 100) speed = 0;
+      }
+    }
+    s.speed = speed;
+  }
+
+  /** Where each ship was last frame (to carry anyone standing aboard her as she moves). */
+  private shipPoses = new Map<CartObj, { x: number; z: number; rot: number; y: number }>();
+
+  /** The ship you're standing aboard (afloat, on her deck or in her hold), if any. */
+  shipUnder(): CartObj | null {
+    const p = this.player.pos;
+    for (const k of this.world.carts) {
+      if (!k.ship || k.ship.slipY !== undefined) continue;
+      if (this.onShip(k, k, p.x, p.y, p.z)) return k;
+    }
+    return null;
+  }
+  private onShip(k: CartObj, pose: { x: number; z: number; rot: number; y?: number }, x: number, y: number, z: number) {
+    const def = vesselOf(k), dx = x - pose.x, dz = z - pose.z, c = Math.cos(pose.rot), s = Math.sin(pose.rot);
+    const lx = dx * c - dz * s, lz = dx * s + dz * c, ky = pose.y ?? this.world.vesselY(k);
+    return Math.abs(lx) < def.hit.hx + 0.5 && Math.abs(lz) < def.hit.hz + 0.5 && y > ky - 0.3 && y < ky + def.hit.h + 1.5 && !this.player.swimming;
+  }
+
+  /**
+   * Ships afloat: those with no one at the helm sail on as they were left
+   * (straight ahead, their sails as set); and anyone standing aboard a ship
+   * is carried with her as she moves and turns (her deck is a moving floor).
+   */
+  private updateShips(dt: number) {
+    const p = this.player, w = this.world;
+    for (const k of w.carts) {
+      const s = k.ship;
+      if (!s || s.slipY !== undefined || s.launching !== undefined) { this.shipPoses.delete(k); continue; }
+      const was = this.shipPoses.get(k) ?? { x: k.x, z: k.z, rot: k.rot, y: w.vesselY(k) };
+      // (Only near you: far out the water under her may not be known.)
+      if (k !== this.boat && (s.speed || s.sail) && Math.hypot(k.x - p.pos.x, k.z - p.pos.z) < 500) this.sailShip(k, dt, 0, 0, false);
+      const now = { x: k.x, z: k.z, rot: k.rot, y: w.vesselY(k) };
+      if (k !== this.boat && !p.boat && (now.x !== was.x || now.z !== was.z || now.rot !== was.rot || now.y !== was.y) && this.onShip(k, was, p.pos.x, p.pos.y, p.pos.z)) {
+        const dx = p.pos.x - was.x, dz = p.pos.z - was.z, c0 = Math.cos(was.rot), s0 = Math.sin(was.rot);
+        const lx = dx * c0 - dz * s0, lz = dx * s0 + dz * c0, c1 = Math.cos(now.rot), s1 = Math.sin(now.rot);
+        p.pos.set(now.x + lx * c1 + lz * s1, p.pos.y + now.y - was.y, now.z - lx * s1 + lz * c1);
+        p.yaw += now.rot - was.rot;
+      }
+      this.shipPoses.set(k, now);
+    }
+    for (const k of this.shipPoses.keys()) if (!w.carts.includes(k)) this.shipPoses.delete(k);
+  }
+
+  /** Leave a ship's helm: you stand where you were, on her deck, and she sails on as she is. */
+  leaveHelm() {
     const k = this.boat;
+    if (!k?.ship) return;
+    const helm = this.player.boat?.step(0, 0, 0, false);
+    this.boat = null;
+    this.player.boat = null;
+    if (helm) this.player.pos.set(helm.x, helm.y + 0.02, helm.z);
+    this.player.vel.set(0, 0, 0);
+    const way = Math.abs(k.ship.speed ?? 0) > 0.2 || Math.abs(k.ship.sail ?? 0) > 0.02;
+    this.msg(way ? 'You leave the helm with the rudder lashed: she holds her course and sails on as she is. Aim at her to take the helm again; X ashore (when there\'s land in reach) or over the side.'
+      : 'You leave the helm. Walk her deck; aim at her to take the helm again; X goes ashore (or over the side).', 'info');
+    telemetry.event('ships', 'Left the helm', { id: k.id, way });
+  }
+
+  /** Step out of the boat: onto the nearest bit of shore within reach, or else over the side into the water. */
+  disembark(quiet = false, from?: CartObj) {
+    const k = from ?? this.boat;
     if (!k) return;
     this.boat = null;
     this.player.boat = null;
@@ -2253,7 +2372,10 @@ export class Game {
     if (inp.hit('KeyM')) this.ui.toggle('map');
     if (inp.hit('KeyG') && !this.placing) this.request(ACTION_MAP.survey, { g: this, t: { kind: 'none' } });
     if (inp.hit('KeyR')) this.repeatLast();
-    if (inp.hit('KeyX')) { if (this.action) this.cancelAction('You stop what you are doing.'); else if (this.riding) this.dismount(); else if (this.boat) this.disembark(); else if (this.pushing) { this.pushing = null; this.msg('You set the cart down.', 'info'); } }
+    if (inp.hit('KeyX')) {
+      const aboard = !this.boat && !this.riding ? this.shipUnder() : null;
+      if (this.action) this.cancelAction('You stop what you are doing.'); else if (this.riding) this.dismount(); else if (this.boat?.ship) this.leaveHelm(); else if (this.boat) this.disembark(); else if (aboard) this.disembark(false, aboard); else if (this.pushing) { this.pushing = null; this.msg('You set the cart down.', 'info'); }
+    }
     if (inp.hit('Escape')) this.stopPlacing();
     if (inp.hit('Backquote') || inp.hit('F2')) this.ui.toggle('dev');
     if (inp.hit('Digit0')) this.setActive(null);
@@ -2281,6 +2403,8 @@ export class Game {
 
     // --- player
     const over = this.dev.on('noWeight') ? 0 : this.inv.weight() - this.carryCapacity();
+    // Ships first (they carry anyone standing aboard), then you.
+    this.updateShips(dt);
     p.update(dt, inp, this.world, !!this.action, over, !this.ui.menuOpen, this.dev.on('fly'));
     // A swamped boat: over the side (or ashore, if it's close).
     if (this.boat && this.boat.dmg >= 100) this.disembark(true);
@@ -2529,7 +2653,7 @@ export class Game {
       this.view.cull(this.viewCull);
       this.grassCull.update(this.camera);
     });
-    perf.time('grass', () => this.groundCover.update(this.camera.position, this.elapsed, this.world.terrain.wind, this.amb.sway));
+    perf.time('grass', () => this.groundCover.update(this.camera.position, this.elapsed, this.world.wind().dir, this.amb.sway));
     this.world.terrain.waterTime.value = this.elapsed;
     perf.time('sea floor', () => seaFloor.update(this.camera.position.x, this.camera.position.z, this.renderDt, (x, z) => this.seaBed(x, z), WATER_LEVEL));
     this.tileTimer -= this.renderDt;
@@ -2658,6 +2782,8 @@ export class Game {
     a.crickets = night * (warm ? 1 : 0.25);
     a.frogs = night * Math.min(1, (zone === 'marsh' ? 1 : 0) + water * 0.6);
     a.fireflies = night * (zone === 'marsh' ? 1 : zone === 'meadow' || zone === 'broadleaf' ? 0.6 : 0) * (t.moistureAt(p.x, p.z) > 0.4 ? 1 : 0.4);
+    // Out on the water the wind blows unbroken (and you hear it in the rigging).
+    if (this.boat || p.y < WATER_LEVEL + 3 && this.world.depthAt(p.x, p.z) > 1.5) a.wind = Math.max(a.wind, Math.min(1, this.world.wind().strength / 11));
     a.sway = 0.25 + a.wind * 0.9;
     if (underground) { a.wind *= 0.15; a.birds = 0; a.crickets *= 0.2; a.frogs = 0; a.water *= 0.4; }
   }

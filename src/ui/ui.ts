@@ -11,7 +11,7 @@ import { pieceBounds } from '../world/pieceFill';
 import { CharacterPreview } from './preview';
 import { BUILDABLE, STRUCTURES, totalMaterials } from '../data/structures';
 import { vesselOf } from '../data/vessels';
-import { allowed, nextStep, settle, SHIP_PRESETS, shipLength, shipMaterials, shipStats, totalSteps, type ShipDesign } from '../data/ships';
+import { allowed, nextStep, pointsTo, settle, SHIP_PRESETS, windName, shipLength, shipMaterials, shipStats, totalSteps, type ShipDesign } from '../data/ships';
 import { ACTION_MAP, craftProblem, forageName, type ActionDef, type Ctx, type Target } from '../game/actions';
 import { DEV_FLAGS, devCommands, type DevFlag } from '../game/dev';
 import { BIOME_NAMES, IDENTIFY } from '../data/forage';
@@ -64,6 +64,7 @@ export class UI {
   private clockEl: HTMLElement;
   private perfEl: HTMLElement;
   private statusEl: HTMLElement;
+  private windEl: HTMLElement;
   private logEl: HTMLElement;
   private menuEl: HTMLElement;
   private pauseEl: HTMLElement;
@@ -123,6 +124,11 @@ export class UI {
       <div class="clock"></div>
       <div class="perf-line"></div>
       <div class="status"></div>
+      <div class="wind-gauge"><svg viewBox="-50 -50 100 100" width="92" height="92">
+        <circle r="46" class="wg-ring"/><path class="wg-nogo" d=""/>
+        <path class="wg-ship" d="M0,-24 C7,-14 8,6 6,22 L-6,22 C-8,6 -7,-14 0,-24 Z"/>
+        <g class="wg-arrow"><path d="M0,-44 L0,-26 M-6,-33 L0,-25 L6,-33"/></g>
+      </svg><div class="wg-text"></div></div>
       <div class="bars"></div>
       <div class="hotbar"></div>
       <div class="log"></div>`;
@@ -136,6 +142,7 @@ export class UI {
     this.clockEl = hud.querySelector('.clock')!;
     this.perfEl = hud.querySelector('.perf-line')!;
     this.statusEl = hud.querySelector('.status')!;
+    this.windEl = hud.querySelector('.wind-gauge')!;
     this.logEl = hud.querySelector('.log')!;
     const bars = hud.querySelector('.bars')!;
     for (const [k, label] of [['health', 'Health'], ['food', 'Food'], ['water', 'Water'], ['stamina', 'Stamina']]) {
@@ -588,6 +595,7 @@ export class UI {
     if (g.placing) status.push(`Placing: ${g.placing.name} — Left-click place · ${g.placing.attach ? 'aim at the side of a forge' : 'Wheel or Q/E rotate'} · Right-click cancel${g.placement?.snapped ? ' · snapped' : ''}`);
     if (g.placement && !g.placement.valid) status.push(`<span class="warn">${esc(g.placement.reason)}</span>`);
     setHTML(this.statusEl, status.join(' · '));
+    this.updateWindGauge(g);
 
     // What you're aiming at, and what a click would do (worked out a few times a second, or when the aim changes).
     const t = g.target;
@@ -1010,6 +1018,27 @@ export class UI {
    * start from, then its length, beam, planking, masts, rig, castles and deck,
    * with what she'll be like and everything she'll take to build.
    */
+  /** At a ship's helm or aboard her: the wind (where it comes from, round her bow), her point of sailing, sail and speed. */
+  private updateWindGauge(g: Game) {
+    const k = g.boat?.ship ? g.boat : g.shipUnder();
+    setStyle(this.windEl, 'display', k ? '' : 'none');
+    if (!k?.ship) return;
+    const w = g.windOn(k), d = k.ship.design, sail = k.ship.sail ?? 0, kn = (k.ship.speed ?? 0) * 1.944;
+    // The arrow points from where the wind comes (round her, bow up), toward her.
+    const arrow = this.windEl.querySelector('.wg-arrow') as SVGGElement;
+    const deg = (w.rel * 180 / Math.PI).toFixed(1);
+    if (arrow.getAttribute('transform') !== `rotate(${deg})`) arrow.setAttribute('transform', `rotate(${deg})`);
+    // The arc she can't sail in (her rig's no-go zone, round her bow).
+    const nogo = this.windEl.querySelector('.wg-nogo') as SVGPathElement, a = pointsTo(d.rig) * Math.PI / 180, r = 46;
+    const arc = `M0,0 L${(-Math.sin(a) * r).toFixed(1)},${(-Math.cos(a) * r).toFixed(1)} A${r},${r} 0 0 1 ${(Math.sin(a) * r).toFixed(1)},${(-Math.cos(a) * r).toFixed(1)} Z`;
+    if (nogo.getAttribute('d') !== arc) nogo.setAttribute('d', arc);
+    const sailName = sail < -0.02 ? 'sails aback' : sail < 0.02 ? 'sails furled' : sail < 0.3 ? 'a little sail' : sail < 0.7 ? 'half sail' : sail < 0.97 ? 'most sail' : 'full sail';
+    const drawing = sail > 0.02 ? ` · drawing ${Math.round(Math.min(1, w.drawing) * 100)}%` : '';
+    const oars = shipStats(d).row && Math.abs(sail) > 0.02 ? ' · oars out' : '';
+    setHTML(this.windEl.querySelector('.wg-text') as HTMLElement,
+      `<b>${windName(w.strength)}</b> ${w.from} (${w.strength.toFixed(0)} m/s)<br>${w.point}<br>${sailName}${drawing}${oars}<br>${kn.toFixed(1)} knots${g.boat === k ? '' : ' · helm lashed'}`);
+  }
+
   private renderShipyard() {
     const g = this.g, slip = this.slipObj;
     if (!slip) return;
