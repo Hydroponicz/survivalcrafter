@@ -11,6 +11,7 @@ type Add = (geo: THREE.BufferGeometry, color: number, x?: number, y?: number, z?
 
 const HIDE = 0x8a5e3a, HIDE_DARK = 0x6e4628, IRON = 0x3a3a3c, CLAY = 0xa0583a, LEAF = 0x4f7a35, STUFFING = 0xc8b48a;
 const iron = { metalness: 0.6, roughness: 0.45 };
+const rnd2 = (i: number) => { const v = Math.sin(i * 127.1 + 311.7) * 43758.5453; return v - Math.floor(v); };
 
 /** Build the model of a piece of furniture into its group; false if it isn't one. */
 export function furnitureMesh(type: string, g: THREE.Group, tex: Tex, add: Add): boolean {
@@ -26,6 +27,12 @@ export function furnitureMesh(type: string, g: THREE.Group, tex: Tex, add: Add):
     return m;
   };
   const V = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
+  /** A coloured rod (a string, a wire) between two points. */
+  const bar = (a: THREE.Vector3, b: THREE.Vector3, r: number, color: number) => {
+    const m = add(new THREE.CylinderGeometry(r, r, a.distanceTo(b), 4), color, (a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2, { roughness: 0.8 });
+    m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), b.clone().sub(a).normalize());
+    return m;
+  };
   const knob = (x: number, y: number, z: number, r = 0.02) => add(new THREE.SphereGeometry(r, 8, 6), IRON, x, y, z, iron);
 
   switch (type) {
@@ -441,6 +448,214 @@ export function furnitureMesh(type: string, g: THREE.Group, tex: Tex, add: Add):
       }
       return true;
     }
+    // ---------- the study and the workshop
+    case 'bookcase': {
+      board(1.2, 1.9, 0.04, 0, 0.95, -0.18);
+      for (const x of [-0.58, 0.58]) board(0.04, 1.9, 0.4, x, 0.95, 0);
+      for (let r = 0; r <= 4; r++) board(1.16, 0.04, 0.38, 0, 0.04 + r * 0.45, 0, true);
+      const cols = [0x6a2a1a, 0x2a3a5a, 0x3a4a2a, 0x5a3a1a, 0x7a5a2a, 0x2a2018];
+      for (let r = 0; r < 4; r++) {
+        let x = -0.54;
+        for (let k = 0; x < 0.5; k++) {
+          const w = 0.04 + ((k * 7 + r * 3) % 5) * 0.012, h = 0.26 + ((k * 3 + r) % 4) * 0.03;
+          const b = add(new THREE.BoxGeometry(w, h, 0.24), cols[(k + r * 2) % cols.length], x + w / 2, 0.06 + r * 0.45 + h / 2, 0.02, { roughness: 0.9 });
+          if (k % 9 === 8) b.rotation.z = 0.25;
+          x += w + 0.005;
+        }
+      }
+      return true;
+    }
+    case 'alchemy_table': {
+      board(1.4, 0.05, 0.7, 0, 0.84, 0, true);
+      for (const [x, z] of [[-0.64, -0.3], [0.64, -0.3], [-0.64, 0.3], [0.64, 0.3]]) leg(x, z, 0.82, 0.03);
+      // The alembic: a flask on a little brazier, its beak running into a receiver.
+      add(new THREE.CylinderGeometry(0.08, 0.1, 0.1, 8), IRON, -0.35, 0.92, 0, iron);
+      add(new THREE.SphereGeometry(0.11, 12, 10), 0x8ab0a0, -0.35, 1.08, 0, { transparent: true, opacity: 0.6, roughness: 0.1 });
+      add(new THREE.ConeGeometry(0.06, 0.18, 10), 0x8ab0a0, -0.35, 1.25, 0, { transparent: true, opacity: 0.6, roughness: 0.1 });
+      { const beak = add(new THREE.CylinderGeometry(0.012, 0.012, 0.4, 6), 0x8ab0a0, -0.2, 1.17, 0, { transparent: true, opacity: 0.7 }); beak.rotation.z = 1.0; }
+      add(new THREE.SphereGeometry(0.07, 10, 8), 0x8ab0a0, -0.03, 0.94, 0, { transparent: true, opacity: 0.6, roughness: 0.1 });
+      for (const [x, z, h, c] of [[0.2, -0.2, 0.18, CLAY], [0.32, -0.18, 0.12, 0x3a5a3a], [0.45, -0.22, 0.2, CLAY], [0.55, 0.1, 0.1, 0x5a2a5a]] as const) add(new THREE.CylinderGeometry(0.04, 0.05, h, 10), c, x, 0.87 + h / 2, z, { roughness: 0.7 });
+      add(new THREE.CylinderGeometry(0.07, 0.05, 0.08, 10), 0x9a948c, 0.25, 0.9, 0.18);
+      rod(V(0.25, 0.92, 0.18), V(0.32, 1.02, 0.12), 0.012);
+      add(new THREE.BoxGeometry(0.3, 0.01, 0.22), 0xd8c8a0, 0.0, 0.87, 0.2, { roughness: 1 }).rotation.y = 0.3;
+      return true;
+    }
+    case 'armillary': {
+      tex(new THREE.CylinderGeometry(0.03, 0.06, 0.4, 8), 'planks', 0, 0.2, 0);
+      tex(new THREE.CylinderGeometry(0.15, 0.17, 0.04, 14), 'planks', 0, 0.02, 0);
+      const sph = new THREE.Group();
+      sph.position.y = 0.58; sph.rotation.z = 0.41;
+      const brass = { metalness: 0.8, roughness: 0.35 };
+      for (const [rx, ry] of [[0, 0], [Math.PI / 2, 0], [Math.PI / 2, Math.PI / 2], [Math.PI / 2 - 0.41, 0.6]]) { const r = add(new THREE.TorusGeometry(0.18, 0.008, 4, 28), 0xb89030, 0, 0, 0, brass, sph); r.rotation.set(rx, ry, 0); }
+      add(new THREE.SphereGeometry(0.05, 10, 8), 0x3a6a9a, 0, 0, 0, { roughness: 0.6 }, sph);
+      add(new THREE.CylinderGeometry(0.004, 0.004, 0.46, 4), 0xb89030, 0, 0, 0, brass, sph);
+      g.add(sph);
+      return true;
+    }
+    case 'potters_wheel': {
+      board(0.9, 0.05, 0.3, 0, 0.42, -0.25, true);
+      for (const x of [-0.4, 0.4]) leg(x, -0.25, 0.4, 0.03);
+      tex(new THREE.CylinderGeometry(0.38, 0.38, 0.06, 20), 'planks', 0.0, 0.1, 0.15);
+      tex(new THREE.CylinderGeometry(0.03, 0.03, 0.5, 8), 'planks', 0, 0.35, 0.15);
+      tex(new THREE.CylinderGeometry(0.17, 0.17, 0.04, 18), 'planks', 0, 0.6, 0.15);
+      add(new THREE.LatheGeometry([new THREE.Vector2(0.07, 0), new THREE.Vector2(0.11, 0.06), new THREE.Vector2(0.09, 0.16), new THREE.Vector2(0.06, 0.2)], 14), 0xa8683e, 0, 0.62, 0.15, { roughness: 0.6, side: THREE.DoubleSide });
+      return true;
+    }
+    case 'grindstone': {
+      for (const x of [-0.3, 0.3]) { board(0.06, 0.6, 0.06, x, 0.3, -0.18); board(0.06, 0.6, 0.06, x, 0.3, 0.18); }
+      board(0.7, 0.05, 0.42, 0, 0.6, 0, true);
+      tex(new THREE.CylinderGeometry(0.3, 0.3, 0.12, 22).rotateZ(Math.PI / 2), 'stone', 0, 0.62, 0, { tint: 0xc0b8a8 });
+      add(new THREE.CylinderGeometry(0.02, 0.02, 0.85, 6).rotateZ(Math.PI / 2), IRON, 0.05, 0.62, 0, iron);
+      rod(V(0.47, 0.62, 0), V(0.47, 0.45, 0.1), 0.015, 'planks');
+      return true;
+    }
+    case 'sawhorse':
+      board(1.0, 0.07, 0.09, 0, 0.66, 0, true);
+      for (const x of [-0.4, 0.4]) for (const z of [-1, 1]) rod(V(x, 0.64, 0), V(x, 0, z * 0.22), 0.025);
+      board(1.4, 0.04, 0.25, 0.2, 0.72, 0, true);
+      add(new THREE.BoxGeometry(0.3, 0.1, 0.005), 0xb8bcc0, 0.65, 0.78, 0.13, { metalness: 0.8, roughness: 0.3 });
+      return true;
+    case 'work_table': {
+      board(1.6, 0.08, 0.7, 0, 0.84, 0, true);
+      for (const [x, z] of [[-0.72, -0.28], [0.72, -0.28], [-0.72, 0.28], [0.72, 0.28]]) board(0.08, 0.8, 0.08, x, 0.4, z);
+      board(1.5, 0.04, 0.6, 0, 0.25, 0, true);
+      // A vice, a mallet, chisels, a plane, shavings.
+      board(0.12, 0.14, 0.14, 0.75, 0.9, 0.3);
+      add(new THREE.CylinderGeometry(0.01, 0.01, 0.2, 6).rotateZ(Math.PI / 2), IRON, 0.75, 0.88, 0.38, iron);
+      tex(new THREE.BoxGeometry(0.12, 0.08, 0.08), 'planks', -0.4, 0.92, 0.1);
+      rod(V(-0.4, 0.92, 0.1), V(-0.4, 0.9, 0.35), 0.012);
+      for (let k = 0; k < 3; k++) add(new THREE.BoxGeometry(0.015, 0.012, 0.22), IRON, -0.1 + k * 0.04, 0.887, -0.1, iron);
+      tex(new THREE.BoxGeometry(0.25, 0.07, 0.07), 'planks', 0.3, 0.915, -0.05);
+      for (let k = 0; k < 6; k++) add(new THREE.TorusGeometry(0.03, 0.006, 3, 8, 4), 0xd8b880, 0.1 + rnd2(k) * 0.4, 0.885, 0.05 + rnd2(k + 3) * 0.2, { roughness: 1 });
+      return true;
+    }
+    // ---------- the kitchen
+    case 'pantry_shelf': {
+      for (const x of [-0.53, 0.53]) board(0.04, 1.6, 0.38, x, 0.8, 0);
+      for (let r = 0; r < 4; r++) board(1.06, 0.03, 0.38, 0, 0.1 + r * 0.45, 0, true);
+      for (let r = 0; r < 4; r++) for (let k = 0; k < 4; k++) {
+        const x = -0.38 + k * 0.25, y = 0.115 + r * 0.45, kind = (r * 4 + k) % 5;
+        if (kind === 0) add(new THREE.CylinderGeometry(0.07, 0.08, 0.16, 10), CLAY, x, y + 0.08, 0, { roughness: 0.9 });
+        else if (kind === 1) add(new THREE.CylinderGeometry(0.09, 0.09, 0.08, 14), 0xe8c060, x, y + 0.04, 0, { roughness: 0.7 });
+        else if (kind === 2) add(new THREE.SphereGeometry(0.07, 8, 6), 0xd8c080, x, y + 0.06, 0, { roughness: 0.8 });
+        else if (kind === 3) add(new THREE.CylinderGeometry(0.05, 0.06, 0.2, 10), 0x5a3a2a, x, y + 0.1, 0, { roughness: 0.8 });
+      }
+      add(new THREE.SphereGeometry(0.1, 8, 6).scale(1, 1.5, 0.8), 0x8a3a2a, 0.35, 1.25, 0.1, { roughness: 0.8 });
+      return true;
+    }
+    case 'pot_rack': {
+      board(1.2, 0.06, 0.06, 0, 1.55, 0, true);
+      for (const x of [-0.5, 0.5]) board(0.04, 0.2, 0.04, x, 1.62, -0.05);
+      for (const [x, r] of [[-0.4, 0.13], [-0.05, 0.1], [0.3, 0.12]] as const) {
+        add(new THREE.CylinderGeometry(0.008, 0.008, 0.12, 4), IRON, x, 1.47, 0, iron);
+        add(new THREE.CylinderGeometry(r, r * 0.85, r * 1.2, 12, 1, true), IRON, x, 1.35 - r * 0.6, 0.02, { ...iron, side: THREE.DoubleSide });
+      }
+      add(new THREE.CylinderGeometry(0.015, 0.015, 0.4, 6), 0x5a3a24, 0.52, 1.35, 0.02);
+      add(new THREE.SphereGeometry(0.04, 8, 6, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), IRON, 0.52, 1.15, 0.02, iron);
+      return true;
+    }
+    case 'herb_rack': {
+      tex(new THREE.CylinderGeometry(0.02, 0.02, 1.0, 6).rotateZ(Math.PI / 2), 'planks', 0, 1.72, 0);
+      const herbs = [0x5a7a3a, 0x7a8a4a, 0x4a6a3a, 0x8a7a5a, 0x6a8a5a];
+      for (let k = 0; k < 6; k++) {
+        const x = -0.4 + k * 0.16;
+        add(new THREE.CylinderGeometry(0.004, 0.004, 0.08, 4), 0x8a7a5a, x, 1.68, 0);
+        add(new THREE.ConeGeometry(0.06, 0.28, 7), herbs[k % 5], x, 1.5, 0, { roughness: 1, flatShading: true });
+      }
+      return true;
+    }
+    case 'keg': {
+      for (const x of [-0.22, 0.22]) board(0.06, 0.18, 0.5, x, 0.09, 0);
+      tex(new THREE.CylinderGeometry(0.24, 0.24, 0.6, 16).rotateZ(Math.PI / 2), 'planks', 0, 0.33, 0);
+      for (const x of [-0.24, 0, 0.24]) add(new THREE.TorusGeometry(0.245, 0.01, 4, 18).rotateY(Math.PI / 2), IRON, x, 0.33, 0, iron);
+      add(new THREE.CylinderGeometry(0.02, 0.02, 0.08, 6).rotateZ(Math.PI / 2), 0x6a4a2a, 0.34, 0.25, 0);
+      return true;
+    }
+    case 'sack_pile':
+      for (const [x, y, z, r] of [[-0.25, 0.2, -0.15, 0.24], [0.25, 0.2, -0.1, 0.25], [0, 0.2, 0.2, 0.23], [0, 0.48, -0.05, 0.22]] as const) {
+        const sk = add(new THREE.SphereGeometry(r, 9, 7).scale(1, 0.85, 1.2), 0xb8a070, x, y, z, { roughness: 1 });
+        sk.rotation.y = x * 2;
+        add(new THREE.CylinderGeometry(0.04, 0.06, 0.08, 6), 0xb8a070, x, y + r * 0.8, z + r * 0.9, { roughness: 1 });
+      }
+      return true;
+    // ---------- the bedroom
+    case 'nightstand':
+      board(0.44, 0.56, 0.4, 0, 0.3, 0);
+      board(0.48, 0.03, 0.44, 0, 0.6, 0, true);
+      board(0.38, 0.22, 0.02, 0, 0.32, 0.205);
+      knob(0, 0.32, 0.22);
+      add(new THREE.CylinderGeometry(0.04, 0.05, 0.02, 10), IRON, -0.1, 0.62, 0, iron);
+      add(new THREE.CylinderGeometry(0.02, 0.02, 0.12, 8), 0xf0e6c8, -0.1, 0.69, 0, { roughness: 0.6 });
+      add(new THREE.CylinderGeometry(0.035, 0.03, 0.09, 10), CLAY, 0.1, 0.66, 0.05, { roughness: 0.8 });
+      return true;
+    case 'clothes_chest':
+      board(1.0, 0.44, 0.5, 0, 0.24, 0);
+      { const lid = new THREE.CylinderGeometry(0.25, 0.25, 1.0, 14, 1, false, 0, Math.PI).rotateZ(Math.PI / 2).scale(1, 0.4, 1); tex(lid, 'planks', 0, 0.46, 0); }
+      for (const x of [-0.35, 0.35]) add(new THREE.BoxGeometry(0.05, 0.46, 0.52), IRON, x, 0.25, 0, iron);
+      add(new THREE.BoxGeometry(0.08, 0.1, 0.02), IRON, 0, 0.38, 0.26, iron);
+      return true;
+    case 'wool_rug': {
+      add(new THREE.BoxGeometry(1.8, 0.012, 1.2), 0x8a2a1e, 0, 0.006, 0, { roughness: 1 });
+      add(new THREE.BoxGeometry(1.6, 0.014, 1.0), 0xc89040, 0, 0.007, 0, { roughness: 1 });
+      add(new THREE.BoxGeometry(1.4, 0.016, 0.8), 0x8a2a1e, 0, 0.008, 0, { roughness: 1 });
+      for (let k = 0; k < 4; k++) add(new THREE.BoxGeometry(0.2, 0.018, 0.2), 0x2a3a5a, -0.45 + k * 0.3, 0.009, 0, { roughness: 1 }).rotation.y = Math.PI / 4;
+      return true;
+    }
+    case 'mirror': {
+      for (const x of [-0.27, 0.27]) { board(0.05, 1.6, 0.05, x, 0.8, 0); board(0.05, 0.04, 0.4, x, 0.02, 0); }
+      const fr = new THREE.Group();
+      fr.position.y = 1.0; fr.rotation.x = -0.08;
+      tex(new THREE.BoxGeometry(0.46, 0.9, 0.04), 'planks', 0, 0, 0, { parent: fr });
+      add(new THREE.BoxGeometry(0.38, 0.8, 0.01), 0xc8a868, 0, 0, 0.022, { metalness: 0.95, roughness: 0.12 }, fr);
+      g.add(fr);
+      return true;
+    }
+    // ---------- music
+    case 'instruments': {
+      // A tabor drum, and a lute leaning against it.
+      add(new THREE.CylinderGeometry(0.2, 0.2, 0.28, 16), 0x8a5a34, 0.12, 0.14, -0.05, { roughness: 0.8 });
+      add(new THREE.CircleGeometry(0.2, 16).rotateX(-Math.PI / 2), 0xe0d0b0, 0.12, 0.282, -0.05, { roughness: 1 });
+      for (let k = 0; k < 8; k++) { const a = (k / 8) * Math.PI * 2; bar(V(0.12 + Math.cos(a) * 0.2, 0.02, -0.05 + Math.sin(a) * 0.2), V(0.12 + Math.cos(a + 0.4) * 0.2, 0.26, -0.05 + Math.sin(a + 0.4) * 0.2), 0.004, 0xd8c8a0); }
+      const lute = new THREE.Group();
+      lute.position.set(-0.15, 0.02, 0.05); lute.rotation.z = -0.35;
+      add(new THREE.SphereGeometry(0.17, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2).rotateX(-Math.PI / 2).scale(1, 1.3, 0.6), 0x9a5a2a, 0, 0.22, 0, { roughness: 0.5 }, lute);
+      add(new THREE.CircleGeometry(0.17, 16).scale(1, 1.3, 1), 0xd8b070, 0, 0.22, 0.001, { roughness: 0.6 }, lute);
+      add(new THREE.CircleGeometry(0.04, 12), 0x2a1a10, 0, 0.26, 0.003, {}, lute);
+      add(new THREE.BoxGeometry(0.05, 0.36, 0.03), 0x3a2414, 0, 0.6, 0.0, { roughness: 0.6 }, lute);
+      add(new THREE.BoxGeometry(0.07, 0.12, 0.03), 0x3a2414, 0, 0.82, -0.03, { roughness: 0.6 }, lute).rotation.x = -0.6;
+      g.add(lute);
+      return true;
+    }
+    case 'harp': {
+      board(0.4, 0.06, 0.22, 0, 0.03, 0, true);
+      rod(V(-0.15, 0.06, 0), V(-0.12, 1.35, 0), 0.035);
+      rod(V(0.15, 0.06, 0), V(0.0, 0.85, 0), 0.04);
+      const neck = tex(new THREE.TorusGeometry(0.3, 0.03, 6, 16, Math.PI * 0.8), 'planks', 0.12, 1.1, 0);
+      neck.rotation.z = Math.PI * 0.1;
+      // Strings from the soundboard up to the neck, shortening toward the pillar.
+      for (let k = 0; k < 9; k++) { const t = k / 8; bar(V(0.13 - t * 0.12, 0.12 + t * 0.6, 0), V(0.38 - t * 0.47, 1.12 + t * 0.2, 0), 0.003, 0xd8c8a0); }
+      return true;
+    }
+    // ---------- the chapel
+    case 'altar':
+      tex(new THREE.BoxGeometry(1.6, 0.95, 0.7), 'stone', 0, 0.475, 0, { tint: 0xc8c2b8 });
+      add(new THREE.BoxGeometry(1.64, 0.03, 0.74), 0xf0ece0, 0, 0.965, 0, { roughness: 1 });
+      add(new THREE.BoxGeometry(1.64, 0.35, 0.01), 0xf0ece0, 0, 0.8, 0.37, { roughness: 1 });
+      add(new THREE.BoxGeometry(0.4, 0.3, 0.012), 0x8a1c1c, 0, 0.78, 0.377, { roughness: 1 });
+      add(new THREE.BoxGeometry(0.04, 0.4, 0.04), 0xb89030, 0, 1.18, -0.1, { metalness: 0.8, roughness: 0.3 });
+      add(new THREE.BoxGeometry(0.22, 0.04, 0.04), 0xb89030, 0, 1.28, -0.1, { metalness: 0.8, roughness: 0.3 });
+      for (const x of [-0.55, 0.55]) {
+        add(new THREE.CylinderGeometry(0.02, 0.05, 0.3, 8), 0xb89030, x, 1.13, -0.1, { metalness: 0.8, roughness: 0.3 });
+        add(new THREE.CylinderGeometry(0.02, 0.02, 0.16, 8), 0xf0e6c8, x, 1.36, -0.1, { roughness: 0.6 });
+      }
+      return true;
+    case 'font':
+      tex(new THREE.BoxGeometry(0.6, 0.1, 0.6), 'stone', 0, 0.05, 0, { tint: 0xc8c2b8 });
+      tex(new THREE.CylinderGeometry(0.15, 0.2, 0.6, 8), 'stone', 0, 0.4, 0, { tint: 0xc8c2b8 });
+      tex(new THREE.CylinderGeometry(0.35, 0.22, 0.3, 8, 1, true), 'stone', 0, 0.85, 0, { tint: 0xc8c2b8 });
+      tex(new THREE.CylinderGeometry(0.22, 0.22, 0.02, 8), 'stone', 0, 0.71, 0, { tint: 0xc8c2b8 });
+      add(new THREE.CircleGeometry(0.31, 8).rotateX(-Math.PI / 2), 0x3f6f8a, 0, 0.94, 0, { roughness: 0.1 });
+      return true;
   }
   return false;
 }

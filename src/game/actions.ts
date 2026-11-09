@@ -172,6 +172,9 @@ function floorTop(c: Ctx): number | null {
   return Math.abs(c.t.point.y - top) < 0.12 ? top : null;
 }
 
+/** A built water source you're aiming at (a well, a rain barrel, a fountain). */
+const isSpring = (c: Ctx) => { const s = obj(c, 'structure'); return !!s && s.built && !!STRUCTURES[s.type].spring; };
+
 /** Torches set down in the world: planted in the ground, or on a wall. */
 const TORCHES = new Set(['standing_torch', 'wall_torch']);
 /** What a torch can be mounted on: walls (built ones), and the faces of town houses. */
@@ -591,8 +594,8 @@ export const ACTIONS: ActionDef[] = [
 
   // ===== water
   {
-    id: 'drink', label: 'Drink',
-    show: (c) => c.t.kind === 'water',
+    id: 'drink', label: (c) => (c.t.kind === 'water' ? 'Drink' : `Drink from the ${STRUCTURES[obj(c, 'structure')!.type].name.toLowerCase()}`),
+    show: (c) => c.t.kind === 'water' || isSpring(c),
     check: ({ g }) => (g.player.water >= 99 ? 'You are not thirsty.' : null),
     time: 2,
     repeat: (c) => c.g.player.water < 95,
@@ -604,7 +607,7 @@ export const ACTIONS: ActionDef[] = [
   },
   {
     id: 'fill_canteen', label: 'Fill canteen',
-    show: (c) => c.t.kind === 'water' && c.g.inv.items.some((i) => itemDef(i.type).sips && (i.fill ?? 0) < itemDef(i.type).sips!),
+    show: (c) => (c.t.kind === 'water' || isSpring(c)) && c.g.inv.items.some((i) => itemDef(i.type).sips && (i.fill ?? 0) < itemDef(i.type).sips!),
     time: 2,
     run: ({ g }) => {
       const it = g.inv.items.find((i) => itemDef(i.type).sips && (i.fill ?? 0) < itemDef(i.type).sips!);
@@ -616,7 +619,7 @@ export const ACTIONS: ActionDef[] = [
   },
   {
     id: 'fill_jar', label: 'Fill clay jar',
-    show: (c) => c.t.kind === 'water' && c.tool?.type === 'clay_jar',
+    show: (c) => (c.t.kind === 'water' || isSpring(c)) && c.tool?.type === 'clay_jar',
     time: 2,
     run: ({ g, tool }) => {
       if (!tool) return;

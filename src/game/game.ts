@@ -1992,12 +1992,12 @@ export class Game {
   }
 
   /**
-   * Where a waterside piece goes at a spot: its height (its top the set height
-   * above the water there), or why it can't go there. Snapped onto another,
+   * Where a waterside piece goes at a spot: its height (its deck, the top of
+   * its first box, the set height above the water there), or why it can't go there. Snapped onto another,
    * it keeps that height (`at`), as long as its footings reach the bed.
    */
   private watersideFit(def: StructureDef, x: number, z: number, at?: number): number | string {
-    const w = this.world, t = w.terrain, H = Math.max(...def.boxes.map((b) => b.c[1] + b.h[1]));
+    const w = this.world, t = w.terrain, H = def.boxes[0].c[1] + def.boxes[0].h[1];
     // The water it stands in: here, or (aimed at the shore) the nearest water within a few metres.
     let surf: number | null = w.depthAt(x, z) > 0 ? t.waterAt(x, z) : null;
     for (let r = 1; r <= 8 && surf === null; r += 1) {

@@ -15,6 +15,7 @@ import { furnitureMesh } from './furnitureMesh';
 import { STRUCTURES } from '../data/structures';
 import type { VesselId } from '../data/vessels';
 import { morePieceMesh } from './morePieces';
+import { morePieceMesh2 } from './morePieces2';
 import { mastRig, shipSolids, windAngle, shipStats, stageProgress, type ShipDesign } from '../data/ships';
 import {
   APPLE_AGE, APPLES, CROP_STAGES, corpseSpecies, cropPos, type AnimalObj, type AnimalSpecies, type BushObj, type ForageObj, type PileObj, type Species, type StructureObj,
@@ -263,6 +264,8 @@ export class WorldView implements WorldListener {
   private animalMeshes = new Map<number, THREE.Group>();
   private fireLights: THREE.PointLight[] = [];
   private flames = new Set<THREE.Mesh>();
+  /** Parts that turn (a windmill's sails, a waterwheel): `userData.spin` is their axis and speed (rad/s). */
+  private spinners = new Set<THREE.Object3D>();
   private m4 = new THREE.Matrix4();
   private q = new THREE.Quaternion();
   private up = new THREE.Vector3(0, 1, 0);
@@ -542,7 +545,7 @@ export class WorldView implements WorldListener {
 
   private disposeMesh(m: THREE.Object3D) {
     this.group.remove(m);
-    m.traverse((c) => { if (c instanceof THREE.Mesh) this.flames.delete(c); });
+    m.traverse((c) => { if (c instanceof THREE.Mesh) this.flames.delete(c); this.spinners.delete(c); });
     // (Freed on the graphics card too: doors open and shut all day in a village, and each look is new geometry.)
     disposeObject(m);
   }
@@ -674,7 +677,7 @@ export class WorldView implements WorldListener {
     const g = buildPieceMesh(o.type, { lit: o.lit, open: o.open, water: o.water });
     g.position.set(o.x, o.y, o.z);
     g.rotation.y = o.yaw;
-    g.traverse((c) => { if (c instanceof THREE.Mesh && c.userData.flame) this.flames.add(c); });
+    g.traverse((c) => { if (c instanceof THREE.Mesh && c.userData.flame) this.flames.add(c); if (c.userData.spin && o.built) this.spinners.add(c); });
     if (!o.built) {
       // A planned piece: what's been built is solid (walls course by course
       // from the ground up, floors plank by plank), the rest a blueprint ghost.
@@ -811,6 +814,10 @@ export class WorldView implements WorldListener {
       l.position.set(f.x + Math.sin(f.yaw) * out, f.y + (glow?.height ?? 1.2), f.z + Math.cos(f.yaw) * out);
       l.intensity = (9 + Math.sin(time * 13 + i) * 1.5 + Math.sin(time * 7.3) * 1) * (glow?.strength ?? 1);
     });
+    for (const sp of this.spinners) {
+      const { axis, speed } = sp.userData.spin as { axis: 'x' | 'y' | 'z'; speed: number };
+      sp.rotation[axis] = (time * speed) % (Math.PI * 2);
+    }
     for (const fl of this.flames) {
       const s = 1 + Math.sin(time * 15 + fl.id) * 0.12;
       fl.scale.set(s, 1 + Math.sin(time * 11 + fl.id) * 0.18, s);
@@ -1536,7 +1543,7 @@ const WOOD = 0x8a6440, DARK_WOOD = 0x6e4e30;
 const UNBATCHED = new Set(['campfire', 'forge', 'iron_anvil', 'quench_trough', 'standing_torch', 'wall_torch']);
 function batchedType(type: string): boolean {
   const d = STRUCTURES[type];
-  return !!d && !UNBATCHED.has(type) && !d.opens && !d.burns && !d.glow && d.water === undefined;
+  return !!d && !UNBATCHED.has(type) && !d.opens && !d.burns && !d.glow && !d.animated && d.water === undefined;
 }
 
 /**
@@ -1933,7 +1940,7 @@ export function buildPieceMesh(type: string, state: { lit?: boolean; open?: bool
       break;
     }
     default:
-      if (morePieceMesh(type, g, tex, add, state)) break;
+      if (morePieceMesh(type, g, tex, add, state) || morePieceMesh2(type, g, tex, add, state)) break;
       if (type.startsWith('th_')) townhouseMesh(type, tex, add);
       else furnitureMesh(type, g, tex, add);
   }

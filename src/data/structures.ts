@@ -12,7 +12,7 @@ export interface StructureDef {
   id: string;
   name: string;
   icon: string;
-  category: 'Foundations' | 'Walls' | 'Roofs & stairs' | 'Doors & fences' | 'Crafting' | 'Furniture' | 'Decor' | 'Smithy' | 'Boats' | 'Waterside';
+  category: 'Foundations' | 'Walls' | 'Roofs & stairs' | 'Doors & fences' | 'Crafting' | 'Furniture' | 'Decor' | 'Garden & paths' | 'Farm & mill' | 'Defences' | 'Smithy' | 'Boats' | 'Waterside';
   /** Structural pieces snap to each other Valheim-style; stations are placed freely on the ground. */
   snap: boolean;
   boxes: Box[];
@@ -54,8 +54,9 @@ export interface StructureDef {
   slip?: number;
   /**
    * Built out from the shore into the water (a quay, a jetty): it's set by the
-   * water, its top this high above the surface (m), its footings running down
-   * to the bed (as deep as the piece goes below its top, less a little).
+   * water, its deck (the top of its first box) this high above the surface
+   * (m), its footings running down to the bed (as deep as the piece goes below
+   * its deck).
    */
   waterside?: { top: number };
   /** What it is to the things you do with pieces: a floor (a torch stands on it) or a wall (a torch mounts on it). */
@@ -64,6 +65,10 @@ export interface StructureDef {
   climb?: Box;
   /** Ships are made fast to it: leave a ship's helm near one and she's moored. */
   mooring?: boolean;
+  /** Clean water you can draw from it: drink, fill a canteen or a jar (a well, a rain barrel, a fountain). */
+  spring?: boolean;
+  /** Has moving parts (sails, a wheel): drawn on its own, not merged with its neighbours. */
+  animated?: boolean;
   desc: string;
 }
 
@@ -189,7 +194,7 @@ const defs: StructureDef[] = [
 ];
 
 // A village well: a stone ring round deep water, a little roof over the winch.
-defs.push({ id: 'well', name: 'Village well', icon: '🪣', category: 'Crafting', snap: false, village: true,
+defs.push({ id: 'well', name: 'Village well', icon: '🪣', category: 'Crafting', snap: false, village: true, spring: true,
   boxes: [box(0, 0.45, 0, 0.85, 0.45, 0.85), box(-0.8, 1.2, 0, 0.08, 1.2, 0.08), box(0.8, 1.2, 0, 0.08, 1.2, 0.08)], snaps: [],
   materials: [{ item: 'rock_shard', count: 20 }, { item: 'mortar', count: 4 }, { item: 'plank', count: 4 }], tool: 'hammer', skill: 'masonry', difficulty: 15, stepTime: 3,
   desc: 'The village well: deep, clean water.' });
@@ -445,7 +450,7 @@ defs.push(
     boxes: [box(0, 1.2, 0, 0.45, 1.2, 0.45)], snaps: [],
     materials: [R(24), M(2)], tool: 'hammer', skill: 'masonry', difficulty: 25, stepTime: 4,
     desc: 'A robed figure carved in stone on a plinth: a saint for a church door, a founder for a square.' },
-  { id: 'fountain', name: 'Fountain', icon: '⛲', category: 'Decor', snap: false,
+  { id: 'fountain', name: 'Fountain', icon: '⛲', category: 'Decor', snap: false, spring: true,
     boxes: [box(0, 0.3, 0, 1.3, 0.3, 1.3), box(0, 1.1, 0, 0.2, 0.8, 0.2)], snaps: [],
     materials: [R(30), M(6)], tool: 'hammer', skill: 'masonry', difficulty: 22, stepTime: 4,
     desc: 'A round stone basin with a carved spout: the heart of a town square.' },
@@ -461,7 +466,8 @@ defs.push(
     materials: [R(16), M(4)], tool: 'hammer', skill: 'masonry', difficulty: 14, stepTime: 3,
     desc: 'A 2×2 m block of dressed stone built up from the bed, its top 1 m above the water: line them up along the shore for a harbour wall that ships can lie against. Floors and walls snap onto it.' },
   { id: 'quay_steps', name: 'Quay steps', icon: '🪜', category: 'Waterside', snap: true, waterside: { top: 1.0 },
-    boxes: [box(0, 1.9, 0, 1, 1.9, 1), ...[0, 1, 2, 3].map((k) => { const top = 3.8 + 0.3 * (k + 1), z0 = 1 - 0.5 * (k + 1); return box(0, (3.8 + top) / 2, (z0 - 1) / 2, 1, (top - 3.8) / 2, (z0 + 1) / 2); })],
+    // (The top step first: it's what stands the set height above the water.)
+    boxes: [...[3, 2, 1, 0].map((k) => { const top = 3.8 + 0.3 * (k + 1), z0 = 1 - 0.5 * (k + 1); return box(0, (3.8 + top) / 2, (z0 - 1) / 2, 1, (top - 3.8) / 2, (z0 + 1) / 2); }), box(0, 1.9, 0, 1, 1.9, 1)],
     snaps: [[-1, 5, -1], [1, 5, -1], [-1, 5, 1], [1, 5, 1], [-1, 0, -1], [1, 0, -1], [-1, 0, 1], [1, 0, 1]],
     materials: [R(14), M(4)], tool: 'hammer', skill: 'masonry', difficulty: 16, stepTime: 3,
     desc: 'Stone steps from the top of a quay down to the water (on the side it faces): to a boat, or out of a swim.' },
@@ -502,6 +508,243 @@ defs.push(
     boxes: [box(0, 0.9, 0, 1.1, 0.9, 0.08)], snaps: [],
     materials: [S(4), { item: 'cordage', count: 6 }], tool: 'knife', skill: 'ropemaking', difficulty: 5, stepTime: 2,
     desc: 'Poles with fishing nets hung to dry: every fishing village has them along the shore.' },
+);
+
+// ---------- a second batch: the harbour, the farm and the mill, defences, the house, gardens and paths, landmarks
+const L = (n: number) => ({ item: 'log', count: n }), RP = (n: number) => ({ item: 'refined_plank', count: n }), CO = (n: number) => ({ item: 'cordage', count: n });
+const IR = (n: number) => ({ item: 'iron_lump', count: n }), CL = (n: number) => ({ item: 'clay', count: n }), FI = (n: number) => ({ item: 'plant_fiber', count: n });
+const PATH_SNAPS: V3[] = [[-1, 0.05, -1], [1, 0.05, -1], [-1, 0.05, 1], [1, 0.05, 1]];
+defs.push(
+  // --- the harbour
+  { id: 'boat_shed', name: 'Boat shed', icon: '🛖', category: 'Waterside', snap: false, waterside: { top: 0.8 },
+    // Walkways down each side on piles, open water between them under a thatched roof.
+    snaps: [], boxes: [box(-1.6, 6.9, 0, 0.6, 0.1, 3), box(1.6, 6.9, 0, 0.6, 0.1, 3), ...[-2.1, 2.1].flatMap((x) => [-2.9, 0, 2.9].map((z) => box(x, 3.4, z, 0.12, 3.4, 0.12))),
+      box(0, 8.3, -2.95, 2.2, 1.3, 0.08)],
+    materials: [L(6), P(14), FI(16), S(4)], tool: 'hammer', skill: 'carpentry', difficulty: 14, stepTime: 3,
+    desc: 'A thatched shed over the water, walkways down each side and a back wall: float a boat in under its roof, out of the weather.' },
+  { id: 'plank_bridge', role: 'floor', name: 'Plank bridge', icon: '🌉', category: 'Waterside', snap: true,
+    boxes: [box(0, 0.1, 0, 1, 0.1, 2), box(-0.97, 0.6, 0, 0.03, 0.5, 2), box(0.97, 0.6, 0, 0.03, 0.5, 2)],
+    snaps: [[-1, 0.2, -2], [1, 0.2, -2], [-1, 0.2, 2], [1, 0.2, 2]],
+    materials: [L(2), P(6), S(4)], tool: 'hammer', skill: 'carpentry', difficulty: 10, stepTime: 3,
+    desc: 'A 4 m span of planks on two log beams, with handrails: across a stream, or from jetty to jetty. Its ends snap to floors, platforms and jetties.' },
+  { id: 'stone_bridge', role: 'floor', name: 'Stone bridge', icon: '🌉', category: 'Waterside', snap: false, waterside: { top: 2.0 },
+    snaps: [], boxes: [box(0, 6.85, 0, 1.4, 0.15, 4), box(-1.3, 7.35, 0, 0.1, 0.35, 4), box(1.3, 7.35, 0, 0.1, 0.35, 4), box(0, 3.5, -3.4, 1.4, 3.5, 0.6), box(0, 3.5, 3.4, 1.4, 3.5, 0.6)],
+    materials: [R(40), M(10)], tool: 'hammer', skill: 'masonry', difficulty: 24, stepTime: 4,
+    desc: 'A round stone arch 8 m long over a river, 2 m above the water, with low parapets: built to stand for centuries. Boats pass under its arch.' },
+  { id: 'channel_marker', name: 'Channel marker', icon: '📍', category: 'Waterside', snap: false, waterside: { top: 2.2 },
+    snaps: [], boxes: [box(0, 3.6, 0, 0.15, 3.6, 0.15)],
+    materials: [L(1), { item: 'kindling', count: 2 }], tool: 'hatchet', skill: 'carpentry', difficulty: 4, stepTime: 2,
+    desc: 'A tall stake driven into the bed with a tarred barrel on top: it marks the safe channel (or the rocks) for anyone sailing in.' },
+  { id: 'waterwheel', name: 'Waterwheel', icon: '🎡', category: 'Waterside', snap: false, waterside: { top: 4.0 }, animated: true,
+    snaps: [], boxes: [box(0, 5.2, 0, 0.6, 2.5, 2.5), box(-1.1, 4.0, 0, 0.5, 4.0, 0.3)],
+    materials: [L(4), RP(12), S(6), IR(2)], tool: 'hammer', skill: 'carpentry', difficulty: 20, stepTime: 4,
+    desc: 'A great undershot wheel turned by the stream, on a post-and-plank frame: the heart of a water mill. Build it in a river where the water is up to 4 m deep.' },
+  { id: 'fish_weir', name: 'Fish weir', icon: '🐟', category: 'Waterside', snap: false, waterside: { top: 0.4 },
+    snaps: [], boxes: [box(0, 1.6, 0, 1.5, 1.6, 0.06)],
+    materials: [{ item: 'branch', count: 12 }, S(4)], tool: 'hatchet', skill: 'carpentry', difficulty: 4, stepTime: 1.5,
+    desc: 'A fence of woven wands across the shallows that funnels fish into a wicker trap.' },
+  { id: 'ship_anchor', name: 'Anchor', icon: '⚓', category: 'Waterside', snap: false,
+    snaps: [], boxes: [box(0, 0.6, 0, 0.6, 0.6, 0.2)],
+    materials: [IR(6), L(1), CO(2)], tool: 'hammer', skill: 'smithing', difficulty: 14, stepTime: 3,
+    desc: 'A great iron anchor with a wooden stock and a coil of cable: lean it on a quay, or set it up over your door.' },
+  { id: 'cargo_pile', name: 'Cargo pile', icon: '📦', category: 'Waterside', snap: false,
+    snaps: [], boxes: [box(0, 0.6, 0, 1.0, 0.6, 0.8)], container: 400,
+    materials: [P(10), IR(1), CO(2)], tool: 'hammer', skill: 'carpentry', difficulty: 6, stepTime: 2,
+    desc: 'Barrels, crates and bales stacked on the quay under a net, waiting for a ship. Holds 400 kg.' },
+
+  // --- the farm and the mill
+  { id: 'windmill', name: 'Windmill', icon: '🌬️', category: 'Farm & mill', snap: false, animated: true,
+    snaps: [], boxes: [box(0, 3.2, 0, 1.8, 3.2, 1.8), box(0, 6.0, 2.0, 0.2, 0.2, 0.3)],
+    materials: [L(10), RP(20), S(8), CO(8), { item: 'wool', count: 12 }, R(20), M(4)], tool: 'hammer', skill: 'carpentry', difficulty: 26, stepTime: 4,
+    desc: 'A tower mill: a round stone tower, a thatched cap, and four great canvas sails turning in the wind. The landmark of a farming village.' },
+  { id: 'stone_well', name: 'Stone well', icon: '🪣', category: 'Farm & mill', snap: false, spring: true,
+    snaps: [], boxes: [box(0, 0.45, 0, 0.85, 0.45, 0.85), box(-0.8, 1.2, 0, 0.08, 1.2, 0.08), box(0.8, 1.2, 0, 0.08, 1.2, 0.08)],
+    materials: [R(20), M(4), P(4), CO(3)], tool: 'hammer', skill: 'masonry', difficulty: 14, stepTime: 3,
+    desc: 'A stone ring round a deep shaft, a winch and a bucket: clean water at your door. Drink from it, or fill a canteen or a jar.' },
+  { id: 'rain_barrel', name: 'Rain barrel', icon: '🛢️', category: 'Farm & mill', snap: false, spring: true,
+    snaps: [], boxes: [box(0, 0.45, 0, 0.32, 0.45, 0.32)],
+    materials: [P(6), IR(1)], tool: 'hammer', skill: 'carpentry', difficulty: 8, stepTime: 2,
+    desc: 'A big hooped barrel that catches the rain off a roof: water to drink or fill a jar from, without walking to the river.' },
+  { id: 'bread_oven', name: 'Bread oven', icon: '🍞', category: 'Farm & mill', snap: false, station: 'fire', burns: true, glow: { strength: 0.6, height: 0.6 },
+    snaps: [], boxes: [box(0, 0.65, 0, 0.8, 0.65, 0.8)],
+    materials: [CL(12), R(8), M(2)], tool: 'hammer', skill: 'masonry', difficulty: 12, stepTime: 3,
+    desc: 'A domed clay oven on a stone base. Fuel it and light it, and cook and bake at it like a fire.' },
+  { id: 'smokehouse', name: 'Smokehouse', icon: '🏚️', category: 'Farm & mill', snap: false, station: 'fire', burns: true, glow: { strength: 0.35, height: 0.5 },
+    snaps: [], boxes: [box(0, 1.2, 0, 1.0, 1.2, 1.0)],
+    materials: [P(10), S(4), R(6), FI(8)], tool: 'hammer', skill: 'carpentry', difficulty: 10, stepTime: 3,
+    desc: 'A small plank shed with a smouldering fire inside and meat and fish hung in the smoke. Fuel it and light it: it cooks like a fire.' },
+  { id: 'beehive', name: 'Beehive', icon: '🐝', category: 'Farm & mill', snap: false,
+    snaps: [], boxes: [box(0, 0.5, 0, 0.3, 0.5, 0.3)],
+    materials: [FI(10), S(2), P(1)], tool: 'knife', skill: 'farming', difficulty: 6, stepTime: 2,
+    desc: 'A woven straw skep on a little stand, bees humming round it.' },
+  { id: 'chicken_coop', name: 'Chicken coop', icon: '🐔', category: 'Farm & mill', snap: false,
+    snaps: [], boxes: [box(0, 0.6, 0, 0.8, 0.6, 0.6)],
+    materials: [P(6), S(4), FI(6)], tool: 'hammer', skill: 'carpentry', difficulty: 7, stepTime: 2,
+    desc: 'A little hen house on legs, with a ramp and nesting boxes.' },
+  { id: 'dovecote', name: 'Dovecote', icon: '🕊️', category: 'Farm & mill', snap: false,
+    snaps: [], boxes: [box(0, 1.6, 0, 0.6, 1.6, 0.6)],
+    materials: [L(1), P(6), S(2)], tool: 'hammer', skill: 'carpentry', difficulty: 10, stepTime: 2.5,
+    desc: 'A wooden dovecote up on a post, its walls full of little doors.' },
+  { id: 'drying_rack', name: 'Drying rack', icon: '🥩', category: 'Farm & mill', snap: false,
+    snaps: [], boxes: [box(0, 0.8, 0, 0.9, 0.8, 0.3)],
+    materials: [S(5), CO(2), { item: 'hide', count: 1 }], tool: 'knife', skill: 'carpentry', difficulty: 4, stepTime: 2,
+    desc: 'A frame of poles with a hide stretched out and strips of meat and fish hung up to dry.' },
+  { id: 'manger', name: 'Hay manger', icon: '🌾', category: 'Farm & mill', snap: false,
+    snaps: [], boxes: [box(0, 0.5, 0, 0.9, 0.5, 0.35)],
+    materials: [P(4), S(4), FI(6)], tool: 'hammer', skill: 'carpentry', difficulty: 5, stepTime: 2,
+    desc: 'A slatted hay rack over a trough, for a stable or a byre.' },
+
+  // --- defences
+  { id: 'crenellation', role: 'wall', name: 'Battlements', icon: '🏰', category: 'Defences', snap: true,
+    boxes: [box(0, 0.4, 0, 1, 0.4, 0.2), box(-0.65, 1.05, 0, 0.35, 0.25, 0.2), box(0.65, 1.05, 0, 0.35, 0.25, 0.2)],
+    snaps: [[-1, 0, 0], [1, 0, 0]],
+    materials: [R(6), M(2)], tool: 'hammer', skill: 'masonry', difficulty: 12, stepTime: 3,
+    desc: 'A crenellated parapet: a breast-high wall with merlons and gaps to shoot through. Set it on top of a stone wall for a wall walk.' },
+  { id: 'arrow_slit_wall', role: 'wall', name: 'Arrow-slit wall', icon: '🏹', category: 'Defences', snap: true,
+    boxes: [box(-0.53, 1, 0, 0.47, 1, 0.2), box(0.53, 1, 0, 0.47, 1, 0.2), box(0, 0.4, 0, 0.06, 0.4, 0.2), box(0, 1.75, 0, 0.06, 0.25, 0.2)],
+    snaps: WALL_SNAPS,
+    materials: [R(10), M(3)], tool: 'hammer', skill: 'masonry', difficulty: 16, stepTime: 3,
+    desc: 'A 2×2 m stone wall with a tall narrow loop to loose arrows through.' },
+  { id: 'portcullis', role: 'wall', name: 'Gatehouse arch with portcullis', icon: '🏯', category: 'Defences', snap: true,
+    boxes: [box(-0.8, 1.5, 0, 0.2, 1.5, 0.3), box(0.8, 1.5, 0, 0.2, 1.5, 0.3), box(0, 2.75, 0, 0.6, 0.25, 0.3), box(0, 1.25, 0, 0.6, 1.25, 0.05)],
+    openBoxes: [box(-0.8, 1.5, 0, 0.2, 1.5, 0.3), box(0.8, 1.5, 0, 0.2, 1.5, 0.3), box(0, 2.75, 0, 0.6, 0.25, 0.3)],
+    snaps: [[-1, 0, 0], [1, 0, 0], [-1, 3, 0], [1, 3, 0]],
+    materials: [R(16), M(5), IR(6), L(1)], tool: 'hammer', skill: 'masonry', difficulty: 22, stepTime: 4,
+    opens: true, desc: 'A stone gate arch 3 m high with an iron-shod portcullis that winds up into it: open it and shut it like a door.' },
+  { id: 'stockade_gate', role: 'wall', name: 'Palisade gate', icon: '🚪', category: 'Defences', snap: true,
+    boxes: [box(0, 1.5, 0, 1, 1.5, 0.15)], openBoxes: [], snaps: [[-1, 0, 0], [1, 0, 0]],
+    materials: [L(5), S(2), IR(1)], tool: 'hatchet', skill: 'carpentry', difficulty: 10, stepTime: 4,
+    opens: true, desc: 'A pair of gates of sharpened logs, to go in a palisade.' },
+  { id: 'barricade', name: 'Spiked barricade', icon: '🪵', category: 'Defences', snap: true,
+    boxes: [box(0, 0.5, 0, 1, 0.5, 0.45)], snaps: RUN_SNAPS,
+    materials: [L(1), S(6)], tool: 'hatchet', skill: 'carpentry', difficulty: 5, stepTime: 2,
+    desc: 'A log bristling with sharpened stakes: a barrier no animal (or raider) wants to cross.' },
+  { id: 'training_dummy', name: 'Training dummy', icon: '🎯', category: 'Defences', snap: false,
+    snaps: [], boxes: [box(0, 0.9, 0, 0.25, 0.9, 0.25)],
+    materials: [S(2), FI(10), { item: 'hide', count: 1 }], tool: 'knife', skill: 'carpentry', difficulty: 3, stepTime: 2,
+    desc: 'A straw man on a post in a leather jerkin, for sword practice.' },
+  { id: 'archery_target', name: 'Archery butt', icon: '🎯', category: 'Defences', snap: false,
+    snaps: [], boxes: [box(0, 0.8, 0, 0.6, 0.8, 0.25)],
+    materials: [FI(14), S(3), { item: 'wool', count: 1 }], tool: 'knife', skill: 'carpentry', difficulty: 3, stepTime: 2,
+    desc: 'A straw boss painted with rings on a tripod: a target to practise your bow on.' },
+
+  // --- the house
+  { id: 'roof_ridge', name: 'Roof ridge', icon: '🏠', category: 'Roofs & stairs', snap: true,
+    boxes: [box(0, 0.12, 0, 1, 0.12, 0.2)], snaps: [[-1, 0, 0], [1, 0, 0]],
+    materials: [P(1), FI(4)], tool: 'hammer', skill: 'carpentry', difficulty: 4, stepTime: 1.5,
+    desc: 'A capping along the ridge where two roof slopes meet, to keep the rain out.' },
+  { id: 'fireplace', name: 'Fireplace', icon: '🔥', category: 'Walls', snap: false, station: 'fire', burns: true, glow: { strength: 1.0, height: 0.6, out: 0.4 },
+    snaps: [], boxes: [box(-0.65, 0.65, -0.1, 0.25, 0.65, 0.4), box(0.65, 0.65, -0.1, 0.25, 0.65, 0.4), box(0, 1.6, -0.1, 0.9, 0.4, 0.4), box(0, 0.06, 0.1, 0.4, 0.06, 0.4)],
+    materials: [R(16), M(5)], tool: 'hammer', skill: 'masonry', difficulty: 14, stepTime: 3,
+    desc: 'A stone hearth and chimney breast, its back to the wall: fuel it and light it to warm and light the room, and cook at it like a fire.' },
+  { id: 'lantern_post', name: 'Lantern post', icon: '🏮', category: 'Decor', snap: false, burns: true, glow: { strength: 0.7, height: 2.3 },
+    snaps: [], boxes: [box(0, 1.2, 0, 0.12, 1.2, 0.12)],
+    materials: [S(2), IR(2), CO(1)], tool: 'hammer', skill: 'smithing', difficulty: 8, stepTime: 2,
+    desc: 'An iron lantern on a tall post, to light a street, a quay or your door. Fuel it and light it.' },
+  { id: 'candelabrum', name: 'Candelabrum', icon: '🕯️', category: 'Decor', snap: false, burns: true, glow: { strength: 0.45, height: 1.5 },
+    snaps: [], boxes: [box(0, 0.75, 0, 0.25, 0.75, 0.25)],
+    materials: [IR(3), FI(2)], tool: 'hammer', skill: 'smithing', difficulty: 10, stepTime: 2,
+    desc: 'A standing iron candlestick with five candles: soft light for a hall, a church or a bedside. Fuel it and light it.' },
+  { id: 'shuttered_window', role: 'wall', name: 'Shuttered window wall', icon: '🪟', category: 'Walls', snap: true,
+    boxes: windowBoxes, openBoxes: windowBoxes, snaps: WALL_SNAPS,
+    materials: [P(5), S(3), { item: 'iron_lump', count: 1 }], tool: 'hammer', skill: 'carpentry', difficulty: 12, stepTime: 2.5,
+    opens: true, desc: 'A plank wall with a window and a pair of shutters you can open to the light or close against the night.' },
+  { id: 'privy', name: 'Privy', icon: '🚽', category: 'Decor', snap: false,
+    snaps: [], boxes: [box(0, 1.1, -0.5, 0.6, 1.1, 0.06), box(-0.55, 1.1, 0, 0.06, 1.1, 0.55), box(0.55, 1.1, 0, 0.06, 1.1, 0.55), box(0, 0.25, -0.25, 0.5, 0.25, 0.2)],
+    materials: [P(8), S(2)], tool: 'hammer', skill: 'carpentry', difficulty: 6, stepTime: 2,
+    desc: 'A little plank outhouse with a heart cut in the door. Every homestead has one.' },
+
+  // --- gardens and paths
+  { id: 'cobble_path', role: 'floor', name: 'Cobbled path', icon: '🪨', category: 'Garden & paths', snap: true,
+    boxes: [box(0, 0.025, 0, 1, 0.025, 1)], snaps: PATH_SNAPS,
+    materials: [R(6)], tool: 'hammer', skill: 'masonry', difficulty: 4, stepTime: 1.5,
+    desc: 'A 2×2 m patch of cobbles set in the ground: lay them end to end for a street or a yard.' },
+  { id: 'gravel_path', role: 'floor', name: 'Gravel path', icon: '⚪', category: 'Garden & paths', snap: true,
+    boxes: [box(0, 0.025, 0, 1, 0.025, 1)], snaps: PATH_SNAPS,
+    materials: [{ item: 'sand', count: 2 }, R(2)], tool: 'hammer', skill: 'masonry', difficulty: 2, stepTime: 1,
+    desc: 'A 2×2 m patch of raked gravel edged with stones, for a garden walk.' },
+  { id: 'boardwalk', role: 'floor', name: 'Boardwalk', icon: '🟫', category: 'Garden & paths', snap: true,
+    boxes: [box(0, 0.08, 0, 1, 0.08, 1)], snaps: [[-1, 0.16, -1], [1, 0.16, -1], [-1, 0.16, 1], [1, 0.16, 1]],
+    materials: [P(3), S(2)], tool: 'hammer', skill: 'carpentry', difficulty: 3, stepTime: 1.5,
+    desc: 'Planks laid across sleepers: a dry way over a marsh or a muddy yard.' },
+  { id: 'stepping_stones', name: 'Stepping stones', icon: '🪨', category: 'Garden & paths', snap: false,
+    snaps: [], boxes: [box(0, 0.06, 0, 0.9, 0.06, 0.9)],
+    materials: [R(4)], skill: 'masonry', difficulty: 1, stepTime: 1,
+    desc: 'A few flat stones set in the grass.' },
+  { id: 'hedge', name: 'Hedge', icon: '🌳', category: 'Garden & paths', snap: true,
+    boxes: [box(0, 0.6, 0, 1, 0.6, 0.35)], snaps: RUN_SNAPS,
+    materials: [{ item: 'sprout', count: 2 }, { item: 'dirt', count: 2 }], tool: 'hoe', skill: 'farming', difficulty: 4, stepTime: 2,
+    desc: 'A clipped hedge of box and hawthorn, 2 m long: a living fence.' },
+  { id: 'topiary', name: 'Clipped shrub', icon: '🌲', category: 'Garden & paths', snap: false,
+    snaps: [], boxes: [box(0, 0.6, 0, 0.35, 0.6, 0.35)],
+    materials: [{ item: 'sprout', count: 1 }, { item: 'dirt', count: 1 }, CL(2)], tool: 'hoe', skill: 'farming', difficulty: 6, stepTime: 2,
+    desc: 'A shrub clipped into a neat cone, in a clay pot.' },
+  { id: 'garden_arch', name: 'Rose arch', icon: '🌹', category: 'Garden & paths', snap: false,
+    snaps: [], boxes: [box(-0.75, 1.1, 0, 0.06, 1.1, 0.2), box(0.75, 1.1, 0, 0.06, 1.1, 0.2), box(0, 2.25, 0, 0.8, 0.1, 0.2)],
+    materials: [S(6), { item: 'sprout', count: 2 }, CO(2)], tool: 'knife', skill: 'farming', difficulty: 6, stepTime: 2,
+    desc: 'A trellis arch over a garden path, climbing roses all over it.' },
+  { id: 'stone_bench', name: 'Stone bench', icon: '🪑', category: 'Garden & paths', snap: false,
+    snaps: [], boxes: [box(0, 0.23, 0, 0.8, 0.23, 0.22)],
+    materials: [R(8), M(1)], tool: 'hammer', skill: 'masonry', difficulty: 6, stepTime: 2,
+    desc: 'A slab of stone on two blocks: a seat in the garden or on the square.' },
+  { id: 'sundial', name: 'Sundial', icon: '🕰️', category: 'Garden & paths', snap: false,
+    snaps: [], boxes: [box(0, 0.5, 0, 0.25, 0.5, 0.25)],
+    materials: [R(6), IR(1)], tool: 'hammer', skill: 'masonry', difficulty: 12, stepTime: 2.5,
+    desc: 'A stone pillar with a bronze dial on top, its gnomon\'s shadow telling the hour.' },
+  { id: 'garden_pond', name: 'Garden pond', icon: '🪷', category: 'Garden & paths', snap: false,
+    snaps: [], boxes: [box(0, 0.1, 0, 1.2, 0.1, 1.2)],
+    materials: [R(10), CL(4), { item: 'sprout', count: 1 }], tool: 'shovel', skill: 'masonry', difficulty: 6, stepTime: 2,
+    desc: 'A little round pond edged with stones, lily pads on the water.' },
+
+  // --- landmarks, the village, the camp
+  { id: 'standing_stone', name: 'Standing stone', icon: '🗿', category: 'Decor', snap: false,
+    snaps: [], boxes: [box(0, 1.4, 0, 0.4, 1.4, 0.25)],
+    materials: [R(20)], tool: 'hammer', skill: 'masonry', difficulty: 8, stepTime: 3,
+    desc: 'A tall rough stone raised on end, as the old people did: a waymark, a boundary, or one of a ring.' },
+  { id: 'gravestone', name: 'Headstone', icon: '🪦', category: 'Decor', snap: false,
+    snaps: [], boxes: [box(0, 0.45, 0, 0.35, 0.45, 0.08)],
+    materials: [R(6)], tool: 'hammer', skill: 'masonry', difficulty: 6, stepTime: 2,
+    desc: 'A carved headstone with a round top. For a churchyard, or to remember someone.' },
+  { id: 'wayside_cross', name: 'Wayside cross', icon: '✝️', category: 'Decor', snap: false,
+    snaps: [], boxes: [box(0, 1.2, 0, 0.2, 1.2, 0.2)],
+    materials: [R(10), M(1)], tool: 'hammer', skill: 'masonry', difficulty: 10, stepTime: 2.5,
+    desc: 'A stone cross on a stepped base, where roads meet.' },
+  { id: 'shrine', name: 'Wayside shrine', icon: '⛩️', category: 'Decor', snap: false,
+    snaps: [], boxes: [box(0, 0.9, 0, 0.4, 0.9, 0.35)],
+    materials: [P(4), S(2), { item: 'clay_jar', count: 1 }], tool: 'hammer', skill: 'carpentry', difficulty: 8, stepTime: 2,
+    desc: 'A little roofed shrine on a post, with an offering of flowers.' },
+  { id: 'maypole', name: 'Maypole', icon: '🎀', category: 'Decor', snap: false,
+    snaps: [], boxes: [box(0, 3, 0, 0.12, 3, 0.12)],
+    materials: [L(2), { item: 'wool', count: 6 }, FI(4)], tool: 'hatchet', skill: 'carpentry', difficulty: 6, stepTime: 2,
+    desc: 'A tall pole hung with ribbons and a crown of flowers, for the spring festival on the green.' },
+  { id: 'stocks', name: 'Stocks', icon: '🪵', category: 'Decor', snap: false,
+    snaps: [], boxes: [box(0, 0.4, 0, 0.8, 0.4, 0.2)],
+    materials: [P(4), S(2), IR(1)], tool: 'hammer', skill: 'carpentry', difficulty: 6, stepTime: 2,
+    desc: 'The village stocks: a bench and a hinged board with holes for the ankles of the unruly.' },
+  { id: 'stall', name: 'Market stall', icon: '⛺', category: 'Decor', snap: false,
+    snaps: [], boxes: [box(0, 0.45, -0.4, 1.0, 0.45, 0.3), box(-0.95, 1.1, 0.4, 0.06, 1.1, 0.06), box(0.95, 1.1, 0.4, 0.06, 1.1, 0.06)],
+    materials: [P(6), S(4), { item: 'wool', count: 4 }], tool: 'hammer', skill: 'carpentry', difficulty: 8, stepTime: 2,
+    desc: 'A counter of goods under a striped awning: set up your own market.' },
+  { id: 'hide_tent', name: 'Hide tent', icon: '⛺', category: 'Decor', snap: false, bed: true,
+    snaps: [], boxes: [box(0, 0.06, 0, 1.0, 0.06, 1.3), box(-0.95, 0.6, 0, 0.05, 0.5, 1.3), box(0.95, 0.6, 0, 0.05, 0.5, 1.3)],
+    materials: [{ item: 'hide', count: 6 }, S(4), CO(3)], tool: 'knife', skill: 'carpentry', difficulty: 6, stepTime: 2,
+    desc: 'A ridge tent of stitched hides over a pole frame, a bedroll inside: sleep in it to rest and set your waking place, far from home.' },
+  { id: 'lean_to', name: 'Lean-to shelter', icon: '🛖', category: 'Decor', snap: false, bed: true,
+    snaps: [], boxes: [box(0, 0.05, 0, 1.0, 0.05, 0.9)],
+    materials: [{ item: 'branch', count: 10 }, FI(10)], tool: 'hatchet', skill: 'carpentry', difficulty: 2, stepTime: 1.5,
+    desc: 'Branches leaned on a ridge pole and thatched with grass, a bed of leaves under it: the first shelter of the wilds. Sleep in it to rest.' },
+  { id: 'bell_frame', name: 'Bell frame', icon: '🔔', category: 'Decor', snap: false,
+    snaps: [], boxes: [box(-0.75, 1.3, 0, 0.1, 1.3, 0.3), box(0.75, 1.3, 0, 0.1, 1.3, 0.3)],
+    materials: [L(2), S(2), IR(8), CO(2)], tool: 'hammer', skill: 'smithing', difficulty: 18, stepTime: 3,
+    desc: 'A great cast bell hung in a timber frame, to call the village to church or to the walls.' },
+  { id: 'hitching_post', name: 'Hitching rail', icon: '🐴', category: 'Decor', snap: false,
+    snaps: [], boxes: [box(0, 0.5, 0, 0.9, 0.5, 0.08)],
+    materials: [S(3), IR(1)], tool: 'hammer', skill: 'carpentry', difficulty: 3, stepTime: 1.5,
+    desc: 'A rail on two posts with iron rings, to tie a horse to outside the inn.' },
+  { id: 'milestone', name: 'Milestone', icon: '🪨', category: 'Decor', snap: false,
+    snaps: [], boxes: [box(0, 0.4, 0, 0.2, 0.4, 0.15)],
+    materials: [R(4)], tool: 'hammer', skill: 'masonry', difficulty: 4, stepTime: 1.5,
+    desc: 'A squat carved stone at the roadside, the miles to the next town cut into it.' },
 );
 
 // Fine furniture: made at a workbench and set down from your pack (see data/furniture).
