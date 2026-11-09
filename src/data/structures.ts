@@ -12,7 +12,7 @@ export interface StructureDef {
   id: string;
   name: string;
   icon: string;
-  category: 'Foundations' | 'Walls' | 'Roofs & stairs' | 'Doors & fences' | 'Crafting' | 'Furniture' | 'Smithy' | 'Boats';
+  category: 'Foundations' | 'Walls' | 'Roofs & stairs' | 'Doors & fences' | 'Crafting' | 'Furniture' | 'Decor' | 'Smithy' | 'Boats' | 'Waterside';
   /** Structural pieces snap to each other Valheim-style; stations are placed freely on the ground. */
   snap: boolean;
   boxes: Box[];
@@ -52,6 +52,18 @@ export interface StructureDef {
   reachesWater?: { z: number; depth: number };
   /** A slipway: the longest ship it takes (m). */
   slip?: number;
+  /**
+   * Built out from the shore into the water (a quay, a jetty): it's set by the
+   * water, its top this high above the surface (m), its footings running down
+   * to the bed (as deep as the piece goes below its top, less a little).
+   */
+  waterside?: { top: number };
+  /** What it is to the things you do with pieces: a floor (a torch stands on it) or a wall (a torch mounts on it). */
+  role?: 'floor' | 'wall';
+  /** Where you can climb it (a ladder): standing in this box, W climbs and S climbs down. */
+  climb?: Box;
+  /** Ships are made fast to it: leave a ship's helm near one and she's moored. */
+  mooring?: boolean;
   desc: string;
 }
 
@@ -68,30 +80,30 @@ const gableBoxes: Box[] = Array.from({ length: 4 }, (_, k) => box(-0.75 + k * 0.
 
 const defs: StructureDef[] = [
   // --- foundations
-  { id: 'floor', name: 'Wooden floor', icon: '🟫', category: 'Foundations', snap: true,
+  { id: 'floor', role: 'floor', name: 'Wooden floor', icon: '🟫', category: 'Foundations', snap: true,
     boxes: [box(0, 0.1, 0, 1, 0.1, 1)], snaps: [[-1, 0.2, -1], [1, 0.2, -1], [-1, 0.2, 1], [1, 0.2, 1]],
     materials: [{ item: 'plank', count: 4 }], tool: 'hammer', skill: 'carpentry', difficulty: 6, stepTime: 2.5,
     desc: 'A 2×2 m wooden floor. Snaps to other floors, walls and foundations.' },
-  { id: 'stone_foundation', name: 'Stone foundation', icon: '⬜', category: 'Foundations', snap: true,
+  { id: 'stone_foundation', role: 'floor', name: 'Stone foundation', icon: '⬜', category: 'Foundations', snap: true,
     boxes: [box(0, 0.5, 0, 1, 0.5, 1)],
     snaps: [[-1, 1, -1], [1, 1, -1], [-1, 1, 1], [1, 1, 1], [-1, 0, -1], [1, 0, -1], [-1, 0, 1], [1, 0, 1]],
     materials: [{ item: 'rock_shard', count: 10 }, { item: 'mortar', count: 2 }], tool: 'hammer', skill: 'masonry', difficulty: 10, stepTime: 3,
     desc: 'A solid stone block (2×1×2 m). Use it to make a flat base on a slope.' },
 
   // --- walls
-  { id: 'wood_wall', name: 'Plank wall', icon: '🪵', category: 'Walls', snap: true,
+  { id: 'wood_wall', role: 'wall', name: 'Plank wall', icon: '🪵', category: 'Walls', snap: true,
     boxes: [box(0, 1, 0, 1, 1, 0.1)], snaps: WALL_SNAPS,
     materials: [{ item: 'plank', count: 4 }, { item: 'shaft', count: 2 }], tool: 'hammer', skill: 'carpentry', difficulty: 8, stepTime: 2.5,
     desc: 'A 2×2 m wooden plank wall.' },
-  { id: 'log_wall', name: 'Log wall', icon: '🧱', category: 'Walls', snap: true,
+  { id: 'log_wall', role: 'wall', name: 'Log wall', icon: '🧱', category: 'Walls', snap: true,
     boxes: [box(0, 1, 0, 1, 1, 0.18)], snaps: WALL_SNAPS,
     materials: [{ item: 'log', count: 4 }], tool: 'hatchet', skill: 'carpentry', difficulty: 10, stepTime: 4,
     desc: 'A sturdy 2×2 m wall of stacked logs. Cheap to build: just logs and a hatchet.' },
-  { id: 'stone_wall', name: 'Stone wall', icon: '🏰', category: 'Walls', snap: true,
+  { id: 'stone_wall', role: 'wall', name: 'Stone wall', icon: '🏰', category: 'Walls', snap: true,
     boxes: [box(0, 1, 0, 1, 1, 0.2)], snaps: WALL_SNAPS,
     materials: [{ item: 'rock_shard', count: 10 }, { item: 'mortar', count: 3 }], tool: 'hammer', skill: 'masonry', difficulty: 15, stepTime: 3,
     desc: 'A 2×2 m stone wall. The strongest wall you can build.' },
-  { id: 'window_wall', name: 'Windowed wall', icon: '🪟', category: 'Walls', snap: true,
+  { id: 'window_wall', role: 'wall', name: 'Windowed wall', icon: '🪟', category: 'Walls', snap: true,
     boxes: windowBoxes, snaps: WALL_SNAPS,
     materials: [{ item: 'plank', count: 4 }, { item: 'shaft', count: 3 }], tool: 'hammer', skill: 'carpentry', difficulty: 10, stepTime: 2.5,
     desc: 'A 2×2 m plank wall with a window to let light in.' },
@@ -279,6 +291,218 @@ defs.push({ id: 'standing_torch', name: 'Torch', icon: '🔥', category: 'Crafti
 defs.push({ id: 'wall_torch', name: 'Wall torch', icon: '🔥', category: 'Crafting', snap: false, item: 'torch',
   boxes: [box(0, 0.08, 0.2, 0.08, 0.32, 0.2)], snaps: [], materials: [], skill: 'firemaking', difficulty: 1, stepTime: 0,
   glow: { strength: 0.55, height: 0.45, out: 0.45 }, desc: 'A torch in a bracket on the wall. Burns for about 3 days.' });
+
+
+// ---------- more ways to build: floors, walls, doorways, roofs, stairs, fences (all snapping like the rest)
+const HALF_WALL_SNAPS: V3[] = [[-1, 0, 0], [1, 0, 0], [-1, 1, 0], [1, 1, 0]];
+const FLOOR_SNAPS: V3[] = [[-1, 0.2, -1], [1, 0.2, -1], [-1, 0.2, 1], [1, 0.2, 1]];
+const RUN_SNAPS: V3[] = [[-1, 0, 0], [1, 0, 0]];
+/** An open doorway in a wall: a jamb each side and a lintel, the gap 1.1 m wide and 1.9 m high. */
+const doorwayBoxes = (t: number): Box[] => [box(-0.775, 1, 0, 0.225, 1, t), box(0.775, 1, 0, 0.225, 1, t), box(0, 1.95, 0, 0.55, 0.05, t)];
+const R = (n: number) => ({ item: 'rock_shard', count: n }), M = (n: number) => ({ item: 'mortar', count: n });
+const P = (n: number) => ({ item: 'plank', count: n }), S = (n: number) => ({ item: 'shaft', count: n });
+defs.push(
+  // --- foundations and floors
+  { id: 'stone_floor', role: 'floor', name: 'Flagstone floor', icon: '⬛', category: 'Foundations', snap: true,
+    boxes: [box(0, 0.1, 0, 1, 0.1, 1)], snaps: FLOOR_SNAPS,
+    materials: [R(6), M(1)], tool: 'hammer', skill: 'masonry', difficulty: 8, stepTime: 2.5,
+    desc: 'A 2×2 m floor of flat stones bedded in mortar. Snaps like a wooden floor; it won\'t rot or burn.' },
+  { id: 'timber_platform', role: 'floor', name: 'Timber platform', icon: '🟫', category: 'Foundations', snap: true,
+    boxes: [box(0, 0.9, 0, 1, 0.1, 1), ...[-0.85, 0.85].flatMap((x) => [box(x, 0.4, -0.85, 0.1, 0.4, 0.1), box(x, 0.4, 0.85, 0.1, 0.4, 0.1)])],
+    snaps: [[-1, 1, -1], [1, 1, -1], [-1, 1, 1], [1, 1, 1], [-1, 0, -1], [1, 0, -1], [-1, 0, 1], [1, 0, 1]],
+    materials: [{ item: 'log', count: 2 }, P(4)], tool: 'hammer', skill: 'carpentry', difficulty: 8, stepTime: 3,
+    desc: 'A plank floor up on four posts, 1 m off the ground: a cheap level base on a slope, or a porch, or a hut on stilts.' },
+
+  // --- walls
+  { id: 'wattle_wall', role: 'wall', name: 'Wattle and daub wall', icon: '🧺', category: 'Walls', snap: true,
+    boxes: [box(0, 1, 0, 1, 1, 0.1)], snaps: WALL_SNAPS,
+    materials: [{ item: 'branch', count: 6 }, { item: 'clay', count: 3 }, { item: 'plant_fiber', count: 2 }], tool: 'hatchet', skill: 'carpentry', difficulty: 4, stepTime: 2.5,
+    desc: 'Woven branches plastered with clay and straw on a frame of posts: the cheapest proper wall, the first house most people ever lived in.' },
+  { id: 'timber_frame_wall', role: 'wall', name: 'Timber-framed wall', icon: '🏠', category: 'Walls', snap: true,
+    boxes: [box(0, 1, 0, 1, 1, 0.12)], snaps: WALL_SNAPS,
+    materials: [P(3), S(2), { item: 'clay', count: 2 }, M(1)], tool: 'hammer', skill: 'carpentry', difficulty: 12, stepTime: 2.5,
+    desc: 'A frame of dark oak beams and braces, the panels between them filled and limewashed: the black-and-white wall of a town house.' },
+  { id: 'half_wall', role: 'wall', name: 'Plank half wall', icon: '🪵', category: 'Walls', snap: true,
+    boxes: [box(0, 0.5, 0, 1, 0.5, 0.1)], snaps: HALF_WALL_SNAPS,
+    materials: [P(2), S(1)], tool: 'hammer', skill: 'carpentry', difficulty: 5, stepTime: 2,
+    desc: 'A plank wall 1 m high: a parapet, a counter, a stall, or the top of a wall that needs a little more.' },
+  { id: 'stone_half_wall', role: 'wall', name: 'Stone half wall', icon: '🧱', category: 'Walls', snap: true,
+    boxes: [box(0, 0.5, 0, 1, 0.5, 0.2)], snaps: HALF_WALL_SNAPS,
+    materials: [R(5), M(2)], tool: 'hammer', skill: 'masonry', difficulty: 10, stepTime: 3,
+    desc: 'A stone wall 1 m high: a parapet for a wall walk or a terrace.' },
+  { id: 'stone_window_wall', role: 'wall', name: 'Stone windowed wall', icon: '🪟', category: 'Walls', snap: true,
+    boxes: windowBoxes.map((b) => box(b.c[0], b.c[1], b.c[2], b.h[0], b.h[1], 0.2)), snaps: WALL_SNAPS,
+    materials: [R(8), M(3), P(1)], tool: 'hammer', skill: 'masonry', difficulty: 16, stepTime: 3,
+    desc: 'A 2×2 m stone wall with a window, a timber lintel over it.' },
+  { id: 'palisade', role: 'wall', name: 'Palisade', icon: '🪵', category: 'Walls', snap: true,
+    boxes: [box(0, 1.5, 0, 1, 1.5, 0.2)], snaps: [[-1, 0, 0], [1, 0, 0]],
+    materials: [{ item: 'log', count: 5 }], tool: 'hatchet', skill: 'carpentry', difficulty: 8, stepTime: 4,
+    desc: 'A row of logs set upright and sharpened, 3 m high: the first defence of a camp or a village.' },
+  { id: 'stone_pillar', name: 'Stone pillar', icon: '🏛️', category: 'Walls', snap: true,
+    boxes: [box(0, 1, 0, 0.25, 1, 0.25)], snaps: [[0, 0, 0], [0, 2, 0]],
+    materials: [R(6), M(2)], tool: 'hammer', skill: 'masonry', difficulty: 10, stepTime: 3,
+    desc: 'A squared stone column 2 m tall, with a capital and a base. Stack them for a tall hall.' },
+  { id: 'stone_arch', name: 'Stone arch', icon: '🌉', category: 'Walls', snap: true,
+    boxes: [box(-0.85, 1, 0, 0.15, 1, 0.2), box(0.85, 1, 0, 0.15, 1, 0.2), box(0, 1.9, 0, 1, 0.1, 0.2)], snaps: WALL_SNAPS,
+    materials: [R(8), M(3)], tool: 'hammer', skill: 'masonry', difficulty: 18, stepTime: 3,
+    desc: 'A round stone arch spanning a 2 m bay: a cloister, an arcade, a gateway, a bridge.' },
+  { id: 'chimney', name: 'Stone chimney', icon: '🏭', category: 'Walls', snap: true,
+    boxes: [box(0, 1, 0, 0.4, 1, 0.4)], snaps: [[0, 0, 0], [0, 2, 0], [-0.4, 0, 0], [0.4, 0, 0]],
+    materials: [R(8), M(3)], tool: 'hammer', skill: 'masonry', difficulty: 12, stepTime: 3,
+    desc: 'A 2 m section of stone chimney stack. Stack them up through the roof.' },
+
+  // --- doorways and doors
+  { id: 'wood_doorway', role: 'wall', name: 'Plank doorway', icon: '🚪', category: 'Doors & fences', snap: true,
+    boxes: doorwayBoxes(0.1), snaps: WALL_SNAPS,
+    materials: [P(3), S(2)], tool: 'hammer', skill: 'carpentry', difficulty: 7, stepTime: 2.5,
+    desc: 'A plank wall with an open doorway: between rooms, or onto a porch.' },
+  { id: 'stone_doorway', role: 'wall', name: 'Stone doorway', icon: '🚪', category: 'Doors & fences', snap: true,
+    boxes: doorwayBoxes(0.2), snaps: WALL_SNAPS,
+    materials: [R(7), M(3)], tool: 'hammer', skill: 'masonry', difficulty: 14, stepTime: 3,
+    desc: 'A stone wall with an open doorway under a round arch.' },
+  { id: 'stone_door', role: 'wall', name: 'Stone wall with door', icon: '🚪', category: 'Doors & fences', snap: true,
+    boxes: [box(0, 1, 0, 1, 1, 0.2)], openBoxes: [box(-0.75, 1, 0, 0.25, 1, 0.2), box(0.75, 1, 0, 0.25, 1, 0.2)], snaps: WALL_SNAPS,
+    materials: [R(7), M(3), P(3), { item: 'iron_lump', count: 1 }], tool: 'hammer', skill: 'masonry', difficulty: 16, stepTime: 3,
+    opens: true, desc: 'A stone wall with a heavy iron-strapped plank door you can open and close.' },
+  { id: 'trapdoor', role: 'floor', name: 'Floor with trapdoor', icon: '🕳️', category: 'Doors & fences', snap: true,
+    boxes: [box(0, 0.1, 0, 1, 0.1, 1)],
+    openBoxes: [box(0, 0.1, -0.725, 1, 0.1, 0.275), box(0, 0.1, 0.725, 1, 0.1, 0.275), box(-0.725, 0.1, 0, 0.275, 0.1, 0.45), box(0.725, 0.1, 0, 0.275, 0.1, 0.45)],
+    snaps: FLOOR_SNAPS,
+    materials: [P(5), { item: 'cordage', count: 1 }], tool: 'hammer', skill: 'carpentry', difficulty: 10, stepTime: 2.5,
+    opens: true, desc: 'A wooden floor with a hatch in it: open it and climb down a ladder to the cellar, or up to the loft.' },
+  { id: 'railing', name: 'Railing', icon: '🚧', category: 'Doors & fences', snap: true,
+    boxes: [box(0, 0.5, 0, 1, 0.5, 0.04)], snaps: RUN_SNAPS,
+    materials: [P(1), S(3)], tool: 'hammer', skill: 'carpentry', difficulty: 5, stepTime: 2,
+    desc: 'A light railing of turned balusters, for the edge of a balcony, a gallery or a jetty.' },
+  { id: 'dry_stone_wall', name: 'Dry stone wall', icon: '🪨', category: 'Doors & fences', snap: true,
+    boxes: [box(0, 0.5, 0, 1, 0.5, 0.3)], snaps: RUN_SNAPS,
+    materials: [R(10)], tool: 'hammer', skill: 'masonry', difficulty: 5, stepTime: 2.5,
+    desc: 'A field wall of stones laid without mortar: it lasts for centuries and keeps sheep in.' },
+  { id: 'wattle_fence', name: 'Wattle fence', icon: '🧺', category: 'Doors & fences', snap: true,
+    boxes: [box(0, 0.5, 0, 1, 0.5, 0.05)], snaps: RUN_SNAPS,
+    materials: [{ item: 'branch', count: 6 }], tool: 'hatchet', skill: 'carpentry', difficulty: 2, stepTime: 1.5,
+    desc: 'Branches woven between stakes: a quick fence for a garden or a pen.' },
+
+  // --- roofs and stairs
+  { id: 'shingle_roof', name: 'Shingle roof (45°)', icon: '🏠', category: 'Roofs & stairs', snap: true,
+    boxes: roofBoxes, snaps: SLOPE_SNAPS,
+    materials: [P(4), S(1)], tool: 'hammer', skill: 'carpentry', difficulty: 10, stepTime: 2,
+    desc: 'A sloped 2×2 m roof covered in split oak shingles. Lasts longer than thatch.' },
+  { id: 'slate_roof', name: 'Slate roof (45°)', icon: '🏚️', category: 'Roofs & stairs', snap: true,
+    boxes: roofBoxes, snaps: SLOPE_SNAPS,
+    materials: [P(3), R(8)], tool: 'hammer', skill: 'masonry', difficulty: 14, stepTime: 2.5,
+    desc: 'A sloped 2×2 m roof of grey slates hung on battens: the roof of a church or a rich man\'s house.' },
+  { id: 'stone_gable', name: 'Stone gable', icon: '📐', category: 'Roofs & stairs', snap: true,
+    boxes: gableBoxes.map((b) => box(b.c[0], b.c[1], b.c[2], b.h[0], b.h[1], 0.2)), snaps: [[-1, 0, 0], [1, 0, 0], [1, 2, 0]],
+    materials: [R(6), M(2)], tool: 'hammer', skill: 'masonry', difficulty: 12, stepTime: 3,
+    desc: 'A stone triangle to close the end of a roof over stone walls.' },
+  { id: 'stone_stairs', name: 'Stone stairs', icon: '🪜', category: 'Roofs & stairs', snap: true,
+    boxes: stairBoxes, snaps: SLOPE_SNAPS,
+    materials: [R(10), M(2)], tool: 'hammer', skill: 'masonry', difficulty: 14, stepTime: 3,
+    desc: 'Solid stone steps that climb 2 m.' },
+  { id: 'ladder', name: 'Ladder', icon: '🪜', category: 'Roofs & stairs', snap: false,
+    boxes: [box(-0.23, 1.3, 0, 0.03, 1.3, 0.03), box(0.23, 1.3, 0, 0.03, 1.3, 0.03)], snaps: [],
+    climb: box(0, 1.5, 0.3, 0.35, 1.8, 0.35),
+    materials: [S(4), P(1)], tool: 'hammer', skill: 'carpentry', difficulty: 4, stepTime: 2,
+    desc: 'A 2.6 m ladder. Stand it against a wall (Q/E to turn it, its back to the wall), and walk into it with W to climb, S to climb down.' },
+);
+
+// ---------- decor: things to make a place your own
+defs.push(
+  { id: 'brazier', name: 'Iron brazier', icon: '🔥', category: 'Decor', snap: false,
+    boxes: [box(0, 0.5, 0, 0.3, 0.5, 0.3)], snaps: [],
+    materials: [{ item: 'iron_lump', count: 2 }, R(2)], tool: 'hammer', skill: 'smithing', difficulty: 10, stepTime: 3,
+    burns: true, glow: { strength: 0.9, height: 1.1 }, desc: 'An iron fire bowl on three legs: light for a hall or a courtyard. Feed it fuel and light it.' },
+  { id: 'banner', name: 'Banner', icon: '🚩', category: 'Decor', snap: false,
+    boxes: [box(0, 1.5, 0, 0.06, 1.5, 0.06)], snaps: [],
+    materials: [S(2), { item: 'wool', count: 3 }, { item: 'cordage', count: 1 }], tool: 'knife', skill: 'carpentry', difficulty: 6, stepTime: 2,
+    desc: 'A woollen banner on a pole: mark your hall, your gate or your camp.' },
+  { id: 'woodpile', name: 'Woodpile', icon: '🪵', category: 'Decor', snap: false,
+    boxes: [box(0, 0.5, 0, 0.9, 0.5, 0.4)], snaps: [],
+    materials: [{ item: 'log', count: 2 }, { item: 'kindling', count: 6 }], tool: 'hatchet', skill: 'woodcutting', difficulty: 2, stepTime: 1.5,
+    desc: 'Split logs stacked against the winter, under a little lean-to.' },
+  { id: 'haystack', name: 'Haystack', icon: '🌾', category: 'Decor', snap: false,
+    boxes: [box(0, 0.8, 0, 0.9, 0.8, 0.9)], snaps: [],
+    materials: [{ item: 'plant_fiber', count: 16 }], skill: 'farming', difficulty: 2, stepTime: 1.5,
+    desc: 'A stack of dried grass, thatched against the rain.' },
+  { id: 'scarecrow', name: 'Scarecrow', icon: '🎃', category: 'Decor', snap: false,
+    boxes: [box(0, 0.9, 0, 0.1, 0.9, 0.1)], snaps: [],
+    materials: [S(2), { item: 'plant_fiber', count: 6 }, { item: 'wool', count: 1 }], skill: 'farming', difficulty: 3, stepTime: 2,
+    desc: 'Old clothes stuffed with straw on a cross of sticks, to keep the birds off the wheat.' },
+  { id: 'signpost', name: 'Signpost', icon: '🪧', category: 'Decor', snap: false,
+    boxes: [box(0, 1, 0, 0.06, 1, 0.06)], snaps: [],
+    materials: [S(1), P(2)], tool: 'hammer', skill: 'carpentry', difficulty: 3, stepTime: 2,
+    desc: 'A post with pointing boards, for a crossroads or your gate.' },
+  { id: 'animal_trough', name: 'Water trough', icon: '🪣', category: 'Decor', snap: false,
+    boxes: [box(0, 0.25, 0, 0.8, 0.25, 0.3)], snaps: [],
+    materials: [{ item: 'log', count: 1 }, P(2)], tool: 'hatchet', skill: 'carpentry', difficulty: 5, stepTime: 2.5,
+    desc: 'A hollowed log trough for the animals in a pen.' },
+  { id: 'planter', name: 'Raised garden bed', icon: '🌷', category: 'Decor', snap: false,
+    boxes: [box(0, 0.2, 0, 0.9, 0.2, 0.45)], snaps: [],
+    materials: [P(3), { item: 'dirt', count: 2 }, { item: 'sprout', count: 1 }], tool: 'hammer', skill: 'farming', difficulty: 4, stepTime: 2,
+    desc: 'A plank box of earth, planted with flowers and herbs.' },
+  { id: 'statue', name: 'Stone statue', icon: '🗿', category: 'Decor', snap: false,
+    boxes: [box(0, 1.2, 0, 0.45, 1.2, 0.45)], snaps: [],
+    materials: [R(24), M(2)], tool: 'hammer', skill: 'masonry', difficulty: 25, stepTime: 4,
+    desc: 'A robed figure carved in stone on a plinth: a saint for a church door, a founder for a square.' },
+  { id: 'fountain', name: 'Fountain', icon: '⛲', category: 'Decor', snap: false,
+    boxes: [box(0, 0.3, 0, 1.3, 0.3, 1.3), box(0, 1.1, 0, 0.2, 0.8, 0.2)], snaps: [],
+    materials: [R(30), M(6)], tool: 'hammer', skill: 'masonry', difficulty: 22, stepTime: 4,
+    desc: 'A round stone basin with a carved spout: the heart of a town square.' },
+);
+
+// ---------- waterside: quays, jetties, moorings
+// Built out into the water from the shore: each is set by the water's surface (its top a set height above
+// it) and its footings run down to the bed (they can be built where it's up to about 4 m deep).
+defs.push(
+  { id: 'quay', role: 'floor', name: 'Stone quay', icon: '⚓', category: 'Waterside', snap: true, waterside: { top: 1.0 },
+    boxes: [box(0, 2.5, 0, 1, 2.5, 1)],
+    snaps: [[-1, 5, -1], [1, 5, -1], [-1, 5, 1], [1, 5, 1], [-1, 0, -1], [1, 0, -1], [-1, 0, 1], [1, 0, 1]],
+    materials: [R(16), M(4)], tool: 'hammer', skill: 'masonry', difficulty: 14, stepTime: 3,
+    desc: 'A 2×2 m block of dressed stone built up from the bed, its top 1 m above the water: line them up along the shore for a harbour wall that ships can lie against. Floors and walls snap onto it.' },
+  { id: 'quay_steps', name: 'Quay steps', icon: '🪜', category: 'Waterside', snap: true, waterside: { top: 1.0 },
+    boxes: [box(0, 1.9, 0, 1, 1.9, 1), ...[0, 1, 2, 3].map((k) => { const top = 3.8 + 0.3 * (k + 1), z0 = 1 - 0.5 * (k + 1); return box(0, (3.8 + top) / 2, (z0 - 1) / 2, 1, (top - 3.8) / 2, (z0 + 1) / 2); })],
+    snaps: [[-1, 5, -1], [1, 5, -1], [-1, 5, 1], [1, 5, 1], [-1, 0, -1], [1, 0, -1], [-1, 0, 1], [1, 0, 1]],
+    materials: [R(14), M(4)], tool: 'hammer', skill: 'masonry', difficulty: 16, stepTime: 3,
+    desc: 'Stone steps from the top of a quay down to the water (on the side it faces): to a boat, or out of a swim.' },
+  { id: 'breakwater', name: 'Rubble breakwater', icon: '🪨', category: 'Waterside', snap: true, waterside: { top: 0.6 },
+    boxes: [box(0, 2.3, 0, 1, 2.3, 1)],
+    snaps: [[-1, 4.6, -1], [1, 4.6, -1], [-1, 4.6, 1], [1, 4.6, 1], [-1, 0, -1], [1, 0, -1], [-1, 0, 1], [1, 0, 1]],
+    materials: [R(24)], tool: 'hammer', skill: 'masonry', difficulty: 6, stepTime: 2,
+    desc: 'Rough stone heaped up from the bed: a cheap mole to break the waves and shelter a harbour. You can walk along its top.' },
+  { id: 'jetty', role: 'floor', name: 'Timber jetty', icon: '🛶', category: 'Waterside', snap: true, waterside: { top: 0.8 },
+    boxes: [box(0, 6.9, 0, 1, 0.1, 1), ...[-0.85, 0.85].flatMap((x) => [box(x, 3.4, -0.85, 0.1, 3.4, 0.1), box(x, 3.4, 0.85, 0.1, 3.4, 0.1)])],
+    snaps: [[-1, 7, -1], [1, 7, -1], [-1, 7, 1], [1, 7, 1]],
+    materials: [{ item: 'log', count: 2 }, P(6)], tool: 'hammer', skill: 'carpentry', difficulty: 8, stepTime: 3,
+    desc: 'A 2×2 m plank deck on four piles driven into the bed, 0.8 m above the water: run them out from the shore for a landing stage.' },
+  { id: 'jetty_ladder', role: 'floor', name: 'Jetty end with ladder', icon: '🪜', category: 'Waterside', snap: true, waterside: { top: 0.8 },
+    boxes: [box(0, 6.9, 0, 1, 0.1, 1), ...[-0.85, 0.85].flatMap((x) => [box(x, 3.4, -0.85, 0.1, 3.4, 0.1), box(x, 3.4, 0.85, 0.1, 3.4, 0.1)])],
+    // (The ladder's rails are drawn but not solid: you climb up between them and step off onto the deck.)
+    climb: box(0, 6.1, 1.4, 0.4, 1.6, 0.4),
+    snaps: [[-1, 7, -1], [1, 7, -1], [-1, 7, 1], [1, 7, 1]],
+    materials: [{ item: 'log', count: 2 }, P(6), S(4)], tool: 'hammer', skill: 'carpentry', difficulty: 9, stepTime: 3,
+    desc: 'A jetty deck with a ladder down into the water off its end: climb up out of the water, or down to a boat.' },
+  { id: 'mooring_post', name: 'Mooring post', icon: '🪝', category: 'Waterside', snap: false, mooring: true,
+    boxes: [box(0, 0.45, 0, 0.14, 0.45, 0.14)], snaps: [],
+    materials: [{ item: 'log', count: 1 }, { item: 'cordage', count: 2 }], tool: 'hatchet', skill: 'carpentry', difficulty: 3, stepTime: 2,
+    desc: 'A stout post to make a boat fast to. Leave a ship\'s helm near one and her crew make her fast: she stays put.' },
+  { id: 'bollard', name: 'Stone bollard', icon: '🪝', category: 'Waterside', snap: false, mooring: true,
+    boxes: [box(0, 0.35, 0, 0.2, 0.35, 0.2)], snaps: [],
+    materials: [R(6), M(1), { item: 'iron_lump', count: 1 }], tool: 'hammer', skill: 'masonry', difficulty: 8, stepTime: 2.5,
+    desc: 'A squat stone bollard with an iron ring, for the edge of a quay. Leave a ship\'s helm near one and she\'s moored.' },
+  { id: 'harbour_beacon', name: 'Harbour beacon', icon: '🗼', category: 'Waterside', snap: false,
+    boxes: [box(0, 1.6, 0, 0.5, 1.6, 0.5)], snaps: [],
+    materials: [R(20), M(4), { item: 'iron_lump', count: 2 }], tool: 'hammer', skill: 'masonry', difficulty: 16, stepTime: 3,
+    burns: true, glow: { strength: 2.2, height: 3.7 }, desc: 'A stone tower with an iron fire basket on top: lit at night, it guides ships home. Feed it fuel and light it.' },
+  { id: 'harbour_crane', name: 'Treadwheel crane', icon: '🏗️', category: 'Waterside', snap: false,
+    boxes: [box(0, 1.6, 0, 1.2, 1.6, 1.0), box(0, 4.2, 1.8, 0.2, 0.2, 2.0)], snaps: [],
+    materials: [{ item: 'log', count: 6 }, { item: 'refined_plank', count: 10 }, S(6), { item: 'cordage', count: 8 }, { item: 'iron_lump', count: 2 }], tool: 'hammer', skill: 'carpentry', difficulty: 22, stepTime: 4,
+    desc: 'A great wooden wheel men walk inside to wind the rope, and a jib out over the water: the harbour crane that loads the ships.' },
+  { id: 'net_rack', name: 'Net drying rack', icon: '🎣', category: 'Waterside', snap: false,
+    boxes: [box(0, 0.9, 0, 1.1, 0.9, 0.08)], snaps: [],
+    materials: [S(4), { item: 'cordage', count: 6 }], tool: 'knife', skill: 'ropemaking', difficulty: 5, stepTime: 2,
+    desc: 'Poles with fishing nets hung to dry: every fishing village has them along the shore.' },
+);
 
 // Fine furniture: made at a workbench and set down from your pack (see data/furniture).
 for (const f of FURNITURE) {

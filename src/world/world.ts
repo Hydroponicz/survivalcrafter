@@ -516,6 +516,17 @@ export class World {
     return out;
   }
 
+  /** Whether you can climb here (on a ladder): inside a built piece's climbing space. */
+  climbAt(x: number, y: number, z: number): boolean {
+    for (const s of this.piecesNear(x, z, 2)) {
+      const c = STRUCTURES[s.type].climb;
+      if (!c || !s.built) continue;
+      const [lx, ly, lz] = toLocal(s, x, y, z);
+      if (Math.abs(lx - c.c[0]) <= c.h[0] && Math.abs(ly - c.c[1]) <= c.h[1] && Math.abs(lz - c.c[2]) <= c.h[2]) return true;
+    }
+    return false;
+  }
+
   /**
    * Everything solid near a point: built pieces (long ones found from
    * anywhere along them), and ships, by what of them is built so far (and the

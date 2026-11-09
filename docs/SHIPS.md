@@ -273,6 +273,38 @@ Measured in a test:
 - **Galley:** 30 m, 21 t, about 9.4 knots, handy (102° in 6 s), a crew of 38
   (28 at the oars), 36 steps.
 
+**6. Harbours (done)**
+
+The waterside pieces (Build menu, Waterside) are set by the water: each has a
+`waterside: { top }` field saying how high its top stands above the surface.
+Its footings run down to the bed, and it can't go where the bed is deeper than
+they reach.
+
+| Piece | Top above water | Reaches down | Notes |
+|---|---|---|---|
+| Stone quay | 1.0 m | 4 m | 2×2 m block; floors and walls snap onto it |
+| Quay steps | 1.0 m | 4 m | steps down to the water on the side it faces |
+| Rubble breakwater | 0.6 m | 4 m | rock only, no mortar |
+| Timber jetty | 0.8 m | 6.2 m | deck on four piles |
+| Jetty end with ladder | 0.8 m | 6.2 m | climb out of the water |
+
+What came with them:
+- **Mooring posts and stone bollards** (`mooring`). Leave a ship's helm within
+  her length of one, with little way on, and she's made fast: her sails come
+  in and she stays put.
+- **A harbour beacon** to light at night, a **treadwheel crane** and **net
+  racks**.
+- **Boats and ships bump against built pieces**, at the bow and either side of
+  it, instead of sailing through quays and piles.
+- **Ladders** (`climb`, a box you climb in): W climbs and S climbs down, from
+  the water too, and you step off at the top. There's a stand-alone ladder for
+  houses too.
+
+Measured in a test: quays could be placed from the waterline out to 3.8 m
+deep. A knarr sailed at a quay stopped against it with 3% hull wear, and
+leaving her helm by a bollard moored her. Climbing the jetty ladder took you
+from the water onto the deck and back along the jetty to the quay.
+
 ## Streamlining (how new things should be added)
 
 - **Data first.** A new vessel is a row in `VESSELS`, a model in `view.ts`

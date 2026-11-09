@@ -77,6 +77,8 @@ export class Player {
    * in hard, and says where the boat (and you in it) now are.
    */
   boat: { stand: boolean; step(dt: number, throttle: number, turn: number, hard: boolean): { x: number; y: number; z: number; rot: number; speed: number } } | null = null;
+  /** On a ladder, climbing. */
+  climbing = false;
   /** The boat's heading (you face the way it points). */
   private boatRot = 0;
   /** Slowed by what you're doing (pushing a cart). */
@@ -378,6 +380,23 @@ export class Player {
     const k = input.keys;
     if (fly) return this.flyUpdate(dt, k, world, allowMove);
     if (this.boat) return this.boatUpdate(dt, k, allowMove);
+    // On a ladder: W climbs, S climbs down (out of the water too), rather than walking; at the top you step off; let go and you drop.
+    const climbing = allowMove && (k.has('KeyW') || k.has('KeyS')) && !this.riding && world.climbAt(this.pos.x, this.pos.y + 0.6, this.pos.z);
+    if (climbing) {
+      const dir = k.has('KeyW') ? 1 : -1;
+      let ground = this.groundAt(world, this.pos.x, this.pos.y, this.pos.z).y;
+      if (!Number.isFinite(ground)) ground = Y_MIN;
+      this.pos.y = Math.max(ground, this.pos.y + dir * 2.2 * dt);
+      this.vel.x = this.vel.z = 0;
+      this.moving = true;
+      this.vel.y = 0;
+      this.onGround = true; this.swimming = false; this.wading = false; this.crouching = false;
+      this.stamina = Math.max(0, this.stamina - dt * 0.8);
+      this.climbing = true;
+      this.animate(dt);
+      return;
+    }
+    this.climbing = false;
     let mx = 0, mz = 0;
     if (allowMove) {
       if (k.has('KeyW')) mz -= 1;

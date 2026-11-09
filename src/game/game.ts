@@ -1326,7 +1326,7 @@ export class Game {
     const nx = k.x + fx * st.speed * dt, nz = k.z + fz * st.speed * dt;
     const lead = Math.sign(st.speed || 1) * def.hit.hz * 0.85;
     if (st.speed !== 0) {
-      if (w.depthAt(nx + fx * lead, nz + fz * lead) > draft && w.depthAt(nx, nz) > draft) { k.x = nx; k.z = nz; }
+      if (w.depthAt(nx + fx * lead, nz + fz * lead) > draft && w.depthAt(nx, nz) > draft && !this.bumpsPiece(k, nx, nz, lead)) { k.x = nx; k.z = nz; }
       else {
         const hit = Math.abs(st.speed);
         if (hit > 1.0 && def.fragile) {
@@ -1386,7 +1386,7 @@ export class Game {
     const nx = k.x + fx * speed * dt, nz = k.z + fz * speed * dt;
     const lead = Math.sign(speed || 1) * def.hit.hz * 0.85;
     if (speed !== 0) {
-      if (w.depthAt(nx + fx * lead, nz + fz * lead) > draft && w.depthAt(nx, nz) > draft) { k.x = nx; k.z = nz; }
+      if (w.depthAt(nx + fx * lead, nz + fz * lead) > draft && w.depthAt(nx, nz) > draft && !this.bumpsPiece(k, nx, nz, lead)) { k.x = nx; k.z = nz; }
       else {
         const hit = Math.abs(speed), near = atHelm || this.shipUnder() === k;
         if (hit > 1.0 && def.fragile) {
@@ -1401,6 +1401,16 @@ export class Game {
       }
     }
     s.speed = speed;
+  }
+
+  /** Whether a boat at this spot would run into a built piece (a quay, a jetty's piles): at her bow (or stern, going astern), and either side of it. */
+  private bumpsPiece(k: CartObj, x: number, z: number, lead: number) {
+    const def = vesselOf(k), fx = Math.sin(k.rot), fz = Math.cos(k.rot), y = this.world.terrain.waterAt(x, z) + 0.15;
+    const bx = x + fx * lead, bz = z + fz * lead, hx = def.hit.hx * 0.7;
+    for (const [px, pz] of [[bx, bz], [x + fx * lead * 0.6 + fz * hx, z + fz * lead * 0.6 - fx * hx], [x + fx * lead * 0.6 - fz * hx, z + fz * lead * 0.6 + fx * hx]]) {
+      for (const o of this.world.piecesNear(px, pz, 1)) if (o.built && pointInPiece(o, px, y, pz, 0.05)) return true;
+    }
+    return false;
   }
 
   /** Where each ship was last frame (to carry anyone standing aboard her as she moves). */
@@ -1455,6 +1465,15 @@ export class Game {
     this.player.boat = null;
     if (helm) this.player.pos.set(helm.x, helm.y + 0.02, helm.z);
     this.player.vel.set(0, 0, 0);
+    // Near a mooring post or bollard (and with little way on): made fast to it, she stays put.
+    const reach = vesselOf(k).hit.hz + 8;
+    const moor = this.world.piecesNear(k.x, k.z, reach).find((o) => o.built && STRUCTURES[o.type].mooring && Math.hypot(o.x - k.x, o.z - k.z) < reach);
+    if (moor && Math.abs(k.ship.speed ?? 0) < 1.6) {
+      k.ship.sail = 0; k.ship.speed = 0;
+      this.msg(`You take in her sails and make her fast to the ${STRUCTURES[moor.type].name.toLowerCase()}: she's moored. Aim at her to take the helm again.`, 'good');
+      telemetry.event('ships', 'Moored', { id: k.id });
+      return;
+    }
     const way = Math.abs(k.ship.speed ?? 0) > 0.2 || Math.abs(k.ship.sail ?? 0) > 0.02;
     this.msg(way ? 'You leave the helm with the rudder lashed: she holds her course and sails on as she is. Aim at her to take the helm again; X ashore (when there\'s land in reach) or over the side.'
       : 'You leave the helm. Walk her deck; aim at her to take the helm again; X goes ashore (or over the side).', 'info');
@@ -1939,7 +1958,11 @@ export class Game {
       else { valid = false; reason = 'Bellows have to go against the side of a forge. Aim at a forge.'; }
     }
     if (!snapped && hit.kind === 'terrain' && !def.snap && hit.normal.y < 0.75) { valid = false; reason = 'The ground is too steep here. Level it with a hoe.'; }
-    if (!snapped && hit.kind === 'water') { valid = false; reason = 'You cannot build on water.'; }
+    // Built out into the water (a quay, a jetty): set by the water's surface, its footings down to the bed.
+    if (def.waterside) {
+      const fit = this.watersideFit(def, x, z, snapped ? y : undefined);
+      if (typeof fit === 'string') { valid = false; reason = fit; } else y = fit;
+    } else if (!snapped && hit.kind === 'water') { valid = false; reason = 'You cannot build on water.'; }
     if (!snapped && hit.kind === 'object' && hit.obj.kind !== 'structure') { valid = false; reason = 'Something is in the way.'; }
     const probe: StructureObj = { kind: 'structure', id: -1, type: def.id, x, y, z, yaw, consumed: {}, built: true, ql: 0, fuel: 0, lit: false };
     const pp = this.player.pos;
@@ -1952,7 +1975,7 @@ export class Game {
       if (o.kind === 'tree' && o.age > 0.2 && pointInPiece(probe, o.x, this.world.terrain.heightAt(o.x, o.z) + 0.5, o.z, 0.3)) { valid = false; reason = 'A tree is in the way.'; }
       if (o.kind === 'structure' && o.type === def.id && Math.hypot(o.x - x, o.y - y, o.z - z) < 0.15) { valid = false; reason = 'There is already one there.'; }
     }
-    if (!def.snap && y < this.world.terrain.waterAt(x, z) - 0.3) { valid = false; reason = 'That spot is under water.'; }
+    if (!def.snap && !def.waterside && y < this.world.terrain.waterAt(x, z) - 0.3) { valid = false; reason = 'That spot is under water.'; }
     // A slipway runs down into the water: its far end out over deep enough water.
     if (valid && def.reachesWater) {
       const [wx, , wz] = toWorld({ x, y, z, yaw }, [0, 0, def.reachesWater.z]);
@@ -1966,6 +1989,28 @@ export class Game {
     const m = valid ? this.ghostMats.ok : this.ghostMats.bad;
     g.traverse((c) => { if (c instanceof THREE.Mesh) c.material = m; });
     this.placement = { def, valid, reason, x, y, z, yaw, snapped };
+  }
+
+  /**
+   * Where a waterside piece goes at a spot: its height (its top the set height
+   * above the water there), or why it can't go there. Snapped onto another,
+   * it keeps that height (`at`), as long as its footings reach the bed.
+   */
+  private watersideFit(def: StructureDef, x: number, z: number, at?: number): number | string {
+    const w = this.world, t = w.terrain, H = Math.max(...def.boxes.map((b) => b.c[1] + b.h[1]));
+    // The water it stands in: here, or (aimed at the shore) the nearest water within a few metres.
+    let surf: number | null = w.depthAt(x, z) > 0 ? t.waterAt(x, z) : null;
+    for (let r = 1; r <= 8 && surf === null; r += 1) {
+      for (let a = 0; a < 12; a++) {
+        const wx = x + Math.cos(a / 12 * Math.PI * 2) * r, wz = z + Math.sin(a / 12 * Math.PI * 2) * r;
+        if (w.depthAt(wx, wz) > 0) { surf = t.waterAt(wx, wz); break; }
+      }
+    }
+    if (surf === null && at === undefined) return `A ${def.name.toLowerCase()} is built at the water's edge or out in the water: aim at the shore or the water.`;
+    const y = at ?? surf! + def.waterside!.top - H, bed = t.heightAt(x, z);
+    if (bed > y + H - 0.3) return 'The ground is too high here: build it where the shore meets the water.';
+    if (bed < y - 0.2) return `Too deep here: its footings only reach ${(H - def.waterside!.top).toFixed(1)} m down (it's ${(y + H - def.waterside!.top - bed).toFixed(1)} m). Build it in shallower water, or out from the end of another.`;
+    return y;
   }
 
   /**

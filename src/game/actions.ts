@@ -162,12 +162,12 @@ function fillItem(g: Game): string | undefined {
 const FILL_MAT: Record<string, Mat> = { dirt: Mat.Dirt, sand: Mat.Sand, clay: Mat.Clay };
 
 // ---------- actions
-/** Floors a torch can be stood on (in a ring of stones). */
-const FLOORS = new Set(['floor', 'stone_foundation']);
+/** Floors a torch can be stood on (in a ring of stones): any piece that's a floor (its first box is what you stand on). */
+const isFloor = (type: string) => STRUCTURES[type]?.role === 'floor';
 /** The top of the floor you're looking at, if you're looking down onto one (null otherwise). */
 function floorTop(c: Ctx): number | null {
   const s = obj(c, 'structure');
-  if (!s || !s.built || !FLOORS.has(s.type) || c.t.kind !== 'object') return null;
+  if (!s || !s.built || !isFloor(s.type) || c.t.kind !== 'object') return null;
   const b = STRUCTURES[s.type].boxes[0], top = s.y + b.c[1] + b.h[1];
   return Math.abs(c.t.point.y - top) < 0.12 ? top : null;
 }
@@ -175,7 +175,7 @@ function floorTop(c: Ctx): number | null {
 /** Torches set down in the world: planted in the ground, or on a wall. */
 const TORCHES = new Set(['standing_torch', 'wall_torch']);
 /** What a torch can be mounted on: walls (built ones), and the faces of town houses. */
-const MOUNTABLE = (type: string) => type === 'wood_wall' || type === 'log_wall' || type === 'stone_wall' || type === 'window_wall' || type.startsWith('th_');
+const MOUNTABLE = (type: string) => STRUCTURES[type]?.role === 'wall' || type.startsWith('th_');
 
 /**
  * Where a torch would go on the wall you're looking at: on the face toward

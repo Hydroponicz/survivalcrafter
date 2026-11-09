@@ -14,6 +14,7 @@ import { builtShare, fillPlanes } from './pieceFill';
 import { furnitureMesh } from './furnitureMesh';
 import { STRUCTURES } from '../data/structures';
 import type { VesselId } from '../data/vessels';
+import { morePieceMesh } from './morePieces';
 import { mastRig, shipSolids, windAngle, shipStats, stageProgress, type ShipDesign } from '../data/ships';
 import {
   APPLE_AGE, APPLES, CROP_STAGES, corpseSpecies, cropPos, type AnimalObj, type AnimalSpecies, type BushObj, type ForageObj, type PileObj, type Species, type StructureObj,
@@ -1932,6 +1933,7 @@ export function buildPieceMesh(type: string, state: { lit?: boolean; open?: bool
       break;
     }
     default:
+      if (morePieceMesh(type, g, tex, add, state)) break;
       if (type.startsWith('th_')) townhouseMesh(type, tex, add);
       else furnitureMesh(type, g, tex, add);
   }
