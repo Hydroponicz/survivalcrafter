@@ -14,9 +14,10 @@ import { builtShare, fillPlanes } from './pieceFill';
 import { furnitureMesh } from './furnitureMesh';
 import { STRUCTURES } from '../data/structures';
 import type { VesselId } from '../data/vessels';
+import { shipStats, stageProgress, type ShipDesign } from '../data/ships';
 import {
   APPLE_AGE, APPLES, CROP_STAGES, corpseSpecies, cropPos, type AnimalObj, type AnimalSpecies, type BushObj, type ForageObj, type PileObj, type Species, type StructureObj,
-  type TreeObj, type World, type WorldListener, type WorldObj,
+  type ShipBuild, type TreeObj, type World, type WorldListener, type WorldObj,
 } from './world';
 
 const mat = (color: number, extra: THREE.MeshStandardMaterialParameters = {}) => {
@@ -718,9 +719,12 @@ export class WorldView implements WorldListener {
       live.add(c.id);
       const loaded = c.items.length > 0;
       let m = this.cartMeshes.get(c.id);
-      if (m && m.userData.loaded !== loaded) { this.group.remove(m); disposeObject(m); this.cartMeshes.delete(c.id); m = undefined; }
+      // (A ship is redrawn as it's built, and once off its cradle.)
+      const sig = c.ship ? `${c.ship.done}:${c.ship.slipY !== undefined && !c.ship.launching}` : '';
+      if (m && (m.userData.loaded !== loaded || m.userData.sig !== sig)) { this.group.remove(m); disposeObject(m); this.cartMeshes.delete(c.id); m = undefined; }
       if (!m) {
-        m = vesselModel(c.type, loaded);
+        m = vesselModel(c.type, loaded, c.ship);
+        m.userData.sig = sig;
         this.cartMeshes.set(c.id, m);
         this.group.add(m);
       }
@@ -896,9 +900,168 @@ export function animalModel(species: AnimalSpecies, seed = 0, tamed = false): TH
   return g;
 }
 
+/**
+ * A ship from its design, as far as it's built: the keel, the stem and
+ * sternpost, a frame for each bay framed, the planking bay by bay, then the
+ * deck, castles, masts, sails and rudder as each is done; a cradle of blocks
+ * under it while it stands on the slip. Its keel at y = 0, its bow along +z.
+ */
+function shipModel(d: ShipDesign, done: number, onSlip: boolean, loaded: boolean): THREE.Group {
+  const g = new THREE.Group();
+  const s = shipStats(d), L = s.L, B = s.B, D = s.D - (d.decked ? 0.3 : 0), P = stageProgress(d, done);
+  const wood = surfaceMat('rough_wood'), planks = surfaceMat('planks'), dark = surfaceMat('dark_planks');
+  // The hull's lines: half-breadth and the bottom's rise along it, the sheer (the gunwale rising toward the ends).
+  const full = d.beam === 'narrow' ? 2 : d.beam === 'medium' ? 2.6 : 3.6;
+  const sheer = d.beam === 'narrow' ? 1.3 : 0.7;
+  const halfB = (z: number) => (B / 2) * Math.pow(Math.max(0, 1 - Math.pow(Math.abs(2 * z / L), full)), 0.5);
+  const bottom = (z: number) => D * 0.7 * Math.pow(Math.abs(2 * z / L), 4);
+  const rim = (z: number) => D + sheer * Math.pow(2 * z / L, 2);
+  const flat = d.beam === 'broad' ? 0.55 : d.beam === 'medium' ? 0.8 : 1;
+  /** The shell of planking between two points along the keel. */
+  const shell = (z0: number, z1: number) => {
+    const nz = Math.max(2, Math.ceil((z1 - z0) / 0.6)), nu = 14, pos: number[] = [], idx: number[] = [];
+    for (let i = 0; i <= nz; i++) {
+      const z = z0 + (z1 - z0) * (i / nz), w = halfB(z), lo = bottom(z), hi = rim(z);
+      for (let j = 0; j <= nu; j++) {
+        const t = -Math.PI / 2 + Math.PI * (j / nu);
+        const c = Math.cos(t);
+        pos.push(w * Math.sin(t), hi - (hi - lo) * Math.pow(c, flat), z);
+      }
+    }
+    for (let i = 0; i < nz; i++) for (let j = 0; j < nu; j++) {
+      const a = i * (nu + 1) + j, b = a + nu + 1;
+      idx.push(a, b, a + 1, a + 1, b, b + 1);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setIndex(idx);
+    geo.computeVertexNormals();
+    return worldUV(geo, 'planks');
+  };
+  const add = (m: THREE.Mesh, shadow = true) => { m.castShadow = shadow; m.receiveShadow = true; g.add(m); return m; };
+  // The cradle on the slip.
+  if (onSlip) for (let z = -L / 2 + 2; z <= L / 2 - 2; z += 3) add(new THREE.Mesh(worldUV(new THREE.BoxGeometry(B * 0.5, 0.6, 0.5), 'rough_wood'), wood)).position.set(0, -0.25, z);
+  if (P.keel) add(new THREE.Mesh(worldUV(new THREE.BoxGeometry(0.3, 0.35, L * 0.92), 'rough_wood'), wood)).position.set(0, 0.17, 0);
+  if (P.posts) {
+    for (const sgn of [-1, 1]) {
+      const h = rim(sgn * L / 2) + (d.type === 'Longship' ? 1.4 : 0.5);
+      const post = add(new THREE.Mesh(worldUV(new THREE.BoxGeometry(0.28, h, 0.35), 'rough_wood'), wood));
+      post.position.set(0, h / 2, sgn * (L / 2 - 0.25));
+      post.rotation.x = sgn * 0.22;
+    }
+  }
+  const bayLen = (L - 2) / d.bays, bayZ = (i: number) => -L / 2 + 1 + bayLen * (i + 0.5);
+  // Frames: ribs across each framed bay (two to a bay), from gunwale to keel.
+  for (let i = 0; i < P.frames; i++) {
+    for (const f of [-0.25, 0.25]) {
+      const z = bayZ(i) + f * bayLen, w = halfB(z), hi = rim(z), lo = bottom(z);
+      const rib = add(new THREE.Mesh(new THREE.TorusGeometry(1, 0.1, 4, 14, Math.PI).rotateZ(Math.PI).scale(w, hi - lo, 1), wood), false);
+      rib.position.set(0, hi, z);
+    }
+  }
+  // Planking, bay by bay (with the ends, closed in with the first and last bays).
+  for (let i = 0; i < P.planking; i++) {
+    const z0 = i === 0 ? -L / 2 : -L / 2 + 1 + bayLen * i, z1 = i === d.bays - 1 ? L / 2 : -L / 2 + 1 + bayLen * (i + 1);
+    const m = new THREE.Mesh(shell(z0, z1), planks);
+    (m.material as THREE.Material).side = THREE.DoubleSide;
+    add(m);
+  }
+  // Strakes showing along a fully planked hull, and a wale at the gunwale.
+  if (P.planking === d.bays) {
+    const pts = (k: number) => { const out: THREE.Vector3[] = []; for (let i = 0; i <= 24; i++) { const z = -L / 2 + 0.3 + (L - 0.6) * (i / 24); const w = halfB(z), hi = rim(z), lo = bottom(z), t = k; out.push(new THREE.Vector3(w * Math.sin(t) * 1.01, hi - (hi - lo) * Math.pow(Math.cos(t), flat), z)); } return out; };
+    for (const sgn of [-1, 1]) {
+      for (const t of [0.5, 0.95, 1.4]) {
+        const curve = new THREE.CatmullRomCurve3(pts(sgn * t));
+        add(new THREE.Mesh(new THREE.TubeGeometry(curve, 24, t > 1.3 ? 0.07 : 0.03, 4), t > 1.3 ? dark : mat(0x2e241a)), false);
+      }
+    }
+  }
+  // The deck, bay by bay, just under the gunwale.
+  for (let i = 0; i < (P.deck ?? 0); i++) {
+    const z = bayZ(i), w = Math.min(halfB(z - bayLen / 2), halfB(z + bayLen / 2)) * 1.9;
+    add(new THREE.Mesh(worldUV(new THREE.BoxGeometry(w, 0.1, bayLen), 'planks', true), planks)).position.set(0, D - 0.25, z);
+  }
+  // Castles: the sterncastle (and the forecastle): a raised deck on posts with a rail.
+  const castle = (z: number, len: number, high: number) => {
+    const w = halfB(z) * 1.9 + 0.2, y = rim(z);
+    add(new THREE.Mesh(worldUV(new THREE.BoxGeometry(w, high, len), 'planks'), planks)).position.set(0, y + high / 2 - 0.2, z);
+    add(new THREE.Mesh(worldUV(new THREE.BoxGeometry(w + 0.2, 0.12, len + 0.2), 'dark_planks', true), dark)).position.set(0, y + high - 0.15, z);
+    for (const sx of [-1, 1]) add(new THREE.Mesh(worldUV(new THREE.BoxGeometry(0.1, 0.7, len), 'dark_planks'), dark)).position.set(sx * w / 2, y + high + 0.2, z);
+  };
+  if ((P.castles ?? 0) >= 1) castle(-L / 2 + L * 0.13, L * 0.22, 1.8);
+  if ((P.castles ?? 0) >= 2) castle(L / 2 - L * 0.1, L * 0.16, 1.4);
+  // Masts (the main mast just forward of amidships, a mizzen aft), and their sails.
+  const mastAt = (k: number) => (k === 0 ? (d.masts === 2 ? L * 0.08 : 0) : -L * 0.27);
+  const mastH = (k: number) => (k === 0 ? L * 0.85 : L * 0.55);
+  for (let k = 0; k < P.masts; k++) {
+    const h = mastH(k), z = mastAt(k);
+    add(new THREE.Mesh(cylinderUV(new THREE.CylinderGeometry(0.12, 0.2, h, 8), 'rough_wood'), wood)).position.set(0, h / 2 + 0.2, z);
+    // Shrouds down to the gunwales.
+    for (const sx of [-1, 1]) {
+      const from = new THREE.Vector3(0, h * 0.92, z), to = new THREE.Vector3(sx * halfB(z), rim(z), z - 0.5);
+      const len = from.distanceTo(to), mid = from.clone().add(to).multiplyScalar(0.5);
+      const line = add(new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, len, 3), mat(0x3a3020)), false);
+      line.position.copy(mid);
+      line.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), to.clone().sub(from).normalize());
+    }
+  }
+  // Undyed wool canvas: pale and warm, a little lit from within so it doesn't go grey in its own shade.
+  const sailMat = mat(0xf2e6cc, { side: THREE.DoubleSide, roughness: 1, emissive: 0x3a3226 });
+  for (let k = 0; k < (P.sails ?? 0); k++) {
+    const h = mastH(k), z = mastAt(k);
+    if (d.rig === 'square') {
+      const w = B * (k === 0 ? 1.7 : 1.2), sh = h * 0.5;
+      add(new THREE.Mesh(cylinderUV(new THREE.CylinderGeometry(0.07, 0.07, w + 0.6, 6), 'rough_wood').rotateZ(Math.PI / 2), wood)).position.set(0, h * 0.86, z + 0.25);
+      // The sail, bellied a little.
+      const sail = new THREE.PlaneGeometry(w, sh, 6, 4), p = sail.getAttribute('position') as THREE.BufferAttribute;
+      for (let i = 0; i < p.count; i++) { const u = p.getX(i) / (w / 2), v = p.getY(i) / (sh / 2); p.setZ(i, (1 - u * u) * (1 - v * v * 0.6) * 0.5); }
+      sail.computeVertexNormals();
+      add(new THREE.Mesh(sail, sailMat)).position.set(0, h * 0.86 - sh / 2, z + 0.35);
+    } else {
+      // A lateen: a long yard slung slanting from the masthead, a triangle of sail under it.
+      const yl = L * (k === 0 ? 0.55 : 0.4);
+      const yard = add(new THREE.Mesh(cylinderUV(new THREE.CylinderGeometry(0.06, 0.06, yl, 6), 'rough_wood').rotateX(Math.PI / 2), wood), false);
+      yard.position.set(0.25, h * 0.75, z);
+      yard.rotation.x = 0.55;
+      const a = new THREE.Vector3(0.3, h * 0.75 + Math.sin(0.55) * yl / 2, z + Math.cos(0.55) * yl / 2), b2 = new THREE.Vector3(0.3, h * 0.75 - Math.sin(0.55) * yl / 2, z - Math.cos(0.55) * yl / 2), c = new THREE.Vector3(0.3, rim(z) + 0.8, z - yl * 0.15);
+      const tri = new THREE.BufferGeometry().setFromPoints([a, b2, c]);
+      tri.computeVertexNormals();
+      add(new THREE.Mesh(tri, sailMat));
+    }
+  }
+  if (P.rudder) {
+    if (d.type === 'Longship' || d.type === 'Knarr') {
+      // A steering oar on the starboard quarter.
+      const oar = add(new THREE.Mesh(worldUV(new THREE.BoxGeometry(0.12, D + 0.8, 0.5), 'dark_planks'), dark));
+      oar.position.set(-halfB(-L / 2 + 2) - 0.15, D * 0.4, -L / 2 + 2);
+    } else {
+      // A rudder hung on the sternpost, its tiller over the stern.
+      add(new THREE.Mesh(worldUV(new THREE.BoxGeometry(0.14, D + 0.4, 0.9), 'dark_planks'), dark)).position.set(0, (D + 0.4) / 2, -L / 2 - 0.35);
+    }
+  }
+  if (loaded && P.planking === d.bays && !d.decked) {
+    for (let i = 0; i < 3; i++) add(new THREE.Mesh(worldUV(new THREE.BoxGeometry(0.8, 0.6, 0.8), 'dark_planks'), dark)).position.set((i - 1) * 0.9, bottom(0) + 0.6, 1.2 - (i % 2) * 1.0);
+  }
+  g.userData.wheels = [];
+  g.userData.r = 1;
+  g.userData.loaded = loaded;
+  return g;
+}
+
+/** A slipway: two long ways on sleepers, running down into the water on piles. */
+function slipwayModel(tex: (geo: THREE.BufferGeometry, s: Surface, x?: number, y?: number, z?: number, o?: { turn?: boolean; tint?: number }) => THREE.Mesh) {
+  for (const x of [-1.4, 1.4]) tex(new THREE.BoxGeometry(0.5, 0.4, 28), 'rough_wood', x, 0.2, 8);
+  for (let z = -5.5; z <= 21.5; z += 1.5) tex(new THREE.BoxGeometry(4.6, 0.18, 0.3), 'dark_planks', 0, -0.05, z, { turn: true });
+  // Piles under its seaward half, down into the water.
+  for (let z = 8; z <= 21.5; z += 3) for (const x of [-2.1, 2.1]) tex(new THREE.CylinderGeometry(0.15, 0.17, 5, 7), 'rough_wood', x, -2.5, z);
+  // A bollard at the head of the slip.
+  tex(new THREE.CylinderGeometry(0.22, 0.25, 0.9, 8), 'rough_wood', 0, 0.45, -6.4);
+}
+
 /** A vessel's model, in its own frame (its bow, or the way it rolls, along +z; its keel at y = 0). */
-export function vesselModel(type: VesselId, loaded: boolean): THREE.Group {
+export function vesselModel(type: VesselId, loaded: boolean, ship?: ShipBuild): THREE.Group {
   switch (type) {
+    case 'ship': return shipModel(ship!.design, ship!.done, ship!.slipY !== undefined && !ship!.launching, loaded);
     case 'dugout': return hullModel({ L: 2.4, B: 0.45, D: 0.42, rim: 0.5, outer: 'rough_wood', inner: 0x3a2a1e, thwarts: [-1.1, 0.9], gunwale: 0.06 }, loaded);
     case 'reed_boat': return reedBoatModel(loaded);
     case 'coracle': return hullModel({ L: 0.68, B: 0.68, D: 0.36, rim: 0.4, outerColor: 0x5a3e28, inner: 0x6e5a3a, thwarts: [0], gunwale: 0.03, ribs: 6 }, loaded);
@@ -1564,6 +1727,10 @@ export function buildPieceMesh(type: string, state: { lit?: boolean; open?: bool
       tex(new THREE.BoxGeometry(1.0, 0.35, 1.9), 'dark_planks', 0, 0.18, 0, { turn: true });
       add(new THREE.BoxGeometry(0.9, 0.12, 1.8), 0x9b7552, 0, 0.42, 0);
       break;
+    case 'slipway': {
+      slipwayModel(tex);
+      break;
+    }
     case 'dugout':
     case 'log_raft':
     case 'reed_boat':

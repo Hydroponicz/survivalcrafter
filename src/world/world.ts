@@ -1,6 +1,7 @@
 import { type Item } from '../data/items';
 import { pieceBoxes, STRUCTURES, type V3 } from '../data/structures';
-import { VESSELS, type VesselId } from '../data/vessels';
+import { VESSELS, vesselOf, type VesselId } from '../data/vessels';
+import type { ShipDesign } from '../data/ships';
 import { mulberry32 } from './noise';
 import { Mat, Terrain } from './terrain';
 import { TreeCover, VEGETATION, type Species } from './trees';
@@ -86,6 +87,21 @@ export interface CartObj {
   items: Item[]; ql: number; dmg: number;
   /** The ox it's hitched to (an animal id), if any. */
   hitched?: number;
+  /** A ship: its design, how many steps of its building are done, and (while it's on the slipway) the slip it stands on. */
+  ship?: ShipBuild;
+}
+
+/** A ship being built on a slipway, or launched. */
+export interface ShipBuild {
+  design: ShipDesign;
+  /** Building steps done (see data/ships: shipStages). */
+  done: number;
+  /** The slipway it stands on (its id) and its keel's height there, until it's launched. */
+  slip?: number;
+  slipY?: number;
+  /** Seconds into its launch, while it slides down the slip, and where it started from. */
+  launching?: number;
+  from?: [number, number, number];
 }
 
 /** How much each vessel holds (kg). */
@@ -566,14 +582,17 @@ export class World {
 
   /** Where a vessel's keel is: on the ground, or (a boat with water enough under it) floating at its draft. */
   vesselY(c: CartObj): number {
-    const def = VESSELS[c.type], ground = this.terrain.heightAt(c.x, c.z);
+    const def = vesselOf(c), ground = this.terrain.heightAt(c.x, c.z);
+    // A ship on the slipway stands on its cradle.
+    if (c.ship?.slipY !== undefined) return c.ship.slipY;
     if (def.medium !== 'water') return ground;
     return Math.max(ground, this.terrain.waterAt(c.x, c.z) - (def.draft ?? 0.2));
   }
 
   /** Whether a boat has water enough under it to float. */
   afloat(c: CartObj): boolean {
-    const def = VESSELS[c.type];
+    const def = vesselOf(c);
+    if (c.ship?.slipY !== undefined) return false;
     return def.medium === 'water' && this.depthAt(c.x, c.z) > (def.draft ?? 0.2);
   }
 

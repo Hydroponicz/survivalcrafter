@@ -7,18 +7,20 @@
 // In the world each one is a `CartObj` (world.ts: its place, heading, load,
 // quality and wear); this table says what that kind of vessel can do.
 
+import { shipVessel, type ShipDesign } from './ships';
+
 /** The kinds of vessel. */
-export type VesselId = 'hand_cart' | 'ox_cart' | 'dugout' | 'log_raft' | 'reed_boat' | 'coracle' | 'skin_boat' | 'rowboat';
+export type VesselId = 'hand_cart' | 'ox_cart' | 'dugout' | 'log_raft' | 'reed_boat' | 'coracle' | 'skin_boat' | 'rowboat' | 'ship';
 
 /** How a boat is driven through the water. */
 export interface WaterDrive {
-  /** Paddled (kneeling, a paddle), poled (standing, a pole pushed off the bottom), or rowed (a pair of oars). */
-  by: 'paddle' | 'pole' | 'oars';
+  /** Paddled (kneeling, a paddle), poled (standing, a pole pushed off the bottom), rowed (a pair of oars), or sailed (a ship, from the helm). */
+  by: 'paddle' | 'pole' | 'oars' | 'sail';
   /** Top speed (m/s) with the right gear, and how fast it turns (rad/s, with way on). */
   speed: number;
   turn: number;
-  /** The gear for full speed (item, how many); without it you scoop with your hands (slowly). */
-  needs: [string, number];
+  /** The gear for full speed (item, how many); without it you scoop with your hands (slowly). A ship needs none. */
+  needs?: [string, number];
   /** A pole only reaches the bottom this deep (m); out deeper you can barely push it along. */
   maxDepth?: number;
 }
@@ -47,8 +49,9 @@ export interface VesselDef {
   draft?: number;
   /** Where people sit (metres along its heading, from the middle): the first is the steerer's. */
   seats?: number[];
-  /** You stand on it (a raft's deck) rather than sit down in it. */
+  /** You stand on it (a raft's deck, a ship's) rather than sit down in it: at this height above the keel. */
   stand?: boolean;
+  deck?: number;
   /**
    * How easily the hull is hurt running aground (wear per hard knock, at full
    * speed): bark, reed and hide tear; a dugout or planked boat shrugs it off.
@@ -83,7 +86,7 @@ export const VESSELS: Record<VesselId, VesselDef> = {
   // poled along off the bottom (out of your depth, you can only scull it).
   log_raft: {
     id: 'log_raft', name: 'Log raft', medium: 'water', capacity: 300, hit: { hx: 1.3, hz: 1.6, h: 0.45 },
-    move: { push: 0.3, water: { by: 'pole', speed: 1.6, turn: 0.45, needs: ['punt_pole', 1], maxDepth: 2.6 } }, draft: 0.14, seats: [-0.6], stand: true,
+    move: { push: 0.3, water: { by: 'pole', speed: 1.6, turn: 0.45, needs: ['punt_pole', 1], maxDepth: 2.6 } }, draft: 0.14, seats: [-0.6], stand: true, deck: 0.42,
     fragile: 0.2, repair: { item: 'cordage', amount: 30 },
     desc: 'Logs lashed side by side, poled along.',
   },
@@ -119,6 +122,17 @@ export const VESSELS: Record<VesselId, VesselDef> = {
     fragile: 0.4, repair: { item: 'refined_plank', amount: 35 },
     desc: 'A planked boat with thwarts and oarlocks.',
   },
+
+  // A ship's real row is worked out from its design (data/ships.ts: shipVessel); this is only its kind.
+  ship: {
+    id: 'ship', name: 'Ship', medium: 'water', capacity: 0, hit: { hx: 2, hz: 10, h: 3 }, move: {}, draft: 1, stand: true,
+    desc: 'A ship, built on a slipway.',
+  },
 };
 
-export const vessel = (id: string): VesselDef => VESSELS[id as VesselId];
+/** A vessel in the world: its kind, and a ship's design. */
+export interface VesselLike { type: VesselId; ship?: { design: ShipDesign } }
+/** What a vessel can do: its row in the table, or a ship's, worked out from its design. */
+export function vesselOf(v: VesselLike): VesselDef {
+  return v.type === 'ship' && v.ship ? shipVessel(v.ship.design) : VESSELS[v.type];
+}

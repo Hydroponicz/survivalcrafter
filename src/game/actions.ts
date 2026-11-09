@@ -2,12 +2,13 @@ import * as THREE from 'three';
 import { isIdentified, itemDef, itemName, learnSpecies, makeItem, TOOL_NAMES, TORCH_BURN, typeDesc, typeName, type Item, type ToolKind } from '../data/items';
 import { RECIPES, STATION_NAMES, type Recipe } from '../data/recipes';
 import { STRUCTURES, totalMaterials, type StructureDef } from '../data/structures';
-import { VESSELS } from '../data/vessels';
+import { vesselOf } from '../data/vessels';
+import { nextStep, shipLength, totalSteps } from '../data/ships';
 import type { SkillId } from '../data/skills';
 import { isRock, isSoft, Mat, MAT_NAMES, Y_MIN } from '../world/terrain';
 import { telemetry } from './telemetry';
 import {
-  ANIMALS, APPLE_AGE, APPLES, CART_CAPACITY, corpseSpecies, toLocal, toWorld, CROP_STAGES, type CartObj, cropKey, type AnimalObj, type BushObj, type Crop, type ForageObj, type PileObj, type StructureObj, type Stump, type TreeObj, type WorldObj,
+  ANIMALS, APPLE_AGE, APPLES, corpseSpecies, toLocal, toWorld, CROP_STAGES, type CartObj, cropKey, type AnimalObj, type BushObj, type Crop, type ForageObj, type PileObj, type StructureObj, type Stump, type TreeObj, type WorldObj,
 } from '../world/world';
 import { FORAGE, IDENTIFY } from '../data/forage';
 import type { Boulder } from '../world/groundcover';
@@ -897,6 +898,7 @@ export const ACTIONS: ActionDef[] = [
   {
     id: 'demolish', label: 'Demolish',
     show: (c) => { const s = obj(c, 'structure'); return !!s && s.built && !STRUCTURES[s.type].item && !STRUCTURES[s.type].village && (toolIs(c, 'hammer') || toolIs(c, 'hatchet')); },
+    check: (c) => { const s = obj(c, 'structure'); return s?.type === 'slipway' && c.g.shipOn(s) ? 'There\'s a ship on the slip: launch her first.' : null; },
     time: 12, skill: 'carpentry', difficulty: 5, stamina: 15, toolWear: 0.2,
     run: (c) => {
       const s = obj(c, 'structure')!;
@@ -1142,32 +1144,90 @@ export const ACTIONS: ActionDef[] = [
     },
   },
 
+  // ===== the shipyard (see data/ships)
+  {
+    id: 'open_shipyard', label: (c) => { const s = obj(c, 'structure'); return s && c.g.shipOn(s) ? 'The shipyard (the ship on the slip)' : 'Lay down a ship'; },
+    show: (c) => { const s = obj(c, 'structure'); return !!s && s.type === 'slipway' && s.built; },
+    time: 0,
+    run: (c) => { const s = obj(c, 'structure'); if (s) c.g.ui.openShipyard(s); },
+  },
+  {
+    id: 'work_ship', label: (c) => {
+      const s = c.t.kind === 'cart' ? c.t.cart.ship : undefined, n = s && nextStep(s.design, s.done);
+      return n ? `${n.stage.name}${n.stage.steps > 1 ? ` (${n.index + 1} of ${n.stage.steps})` : ''}` : 'Work on the ship';
+    },
+    show: (c) => c.t.kind === 'cart' && !!c.t.cart.ship && c.t.cart.ship.slipY !== undefined && !!nextStep(c.t.cart.ship.design, c.t.cart.ship.done),
+    check: (c) => {
+      if (c.t.kind !== 'cart' || !c.t.cart.ship) return null;
+      const n = nextStep(c.t.cart.ship.design, c.t.cart.ship.done)!;
+      if (c.g.dev.on('freeBuild')) return null;
+      if (!toolIs(c, n.stage.tool)) return `You need to hold a ${n.stage.tool} for this (${n.stage.name.toLowerCase()}).`;
+      const short = n.stage.per.filter((m) => c.g.inv.count(m.item) < m.count);
+      return short.length ? `Bring ${short.map((m) => `${m.count} ${itemDef(m.item).name.toLowerCase()}${m.count > 1 && !itemDef(m.item).name.endsWith('s') ? 's' : ''} (you have ${c.g.inv.count(m.item)})`).join(', ')}.` : null;
+    },
+    time: 10, skill: 'carpentry', stamina: 10, toolWear: 0.15,
+    difficulty: (c) => (c.t.kind === 'cart' && c.t.cart.ship ? 10 + c.t.cart.ship.design.bays * 2 + (c.t.cart.ship.design.build === 'carvel' ? 6 : 0) : 10),
+    minigame: (c) => {
+      const s = c.t.kind === 'cart' ? c.t.cart.ship : undefined, n = s && nextStep(s.design, s.done);
+      if (!n) return undefined;
+      // Hewing, sawing frames, riveting or nailing planks, sewing a sail.
+      return n.stage.tool === 'saw' ? { kind: 'saw', cuts: 2 } : n.stage.tool === 'hammer' ? { kind: 'strike', variant: 'nail', hits: 5 }
+        : n.stage.tool === 'knife' ? { kind: 'cord', plies: 4 } : { kind: 'strike', variant: 'split', hits: 4 };
+    },
+    repeat: (c) => c.t.kind === 'cart' && !!c.t.cart.ship && !!nextStep(c.t.cart.ship.design, c.t.cart.ship.done),
+    run: (c, o) => {
+      if (c.t.kind !== 'cart' || !c.t.cart.ship) return;
+      const k = c.t.cart, s = k.ship!, n = nextStep(s.design, s.done)!;
+      if (!c.g.dev.on('freeBuild')) for (const m of n.stage.per) c.g.inv.take(m.item, m.count);
+      c.g.inventoryChanged();
+      if (!o.success) return c.g.msg('The work goes wrong and has to be done again (the timber is spoiled).', 'fail');
+      s.done++;
+      k.ql = (k.ql * (s.done - 1) + o.ql) / s.done;
+      const left = nextStep(s.design, s.done);
+      c.g.msg(left ? `${n.stage.name}: done. Next: ${left.stage.name.toLowerCase()}. (${s.done}/${totalSteps(s.design)})`
+        : `The ${s.design.type.toLowerCase()} is finished (QL ${k.ql.toFixed(1)})! Aim at her to launch her down the slip.`, left ? 'info' : 'good');
+    },
+  },
+  {
+    id: 'launch_ship', label: 'Launch her!',
+    show: (c) => c.t.kind === 'cart' && !!c.t.cart.ship && c.t.cart.ship.slipY !== undefined && c.t.cart.ship.launching === undefined && !nextStep(c.t.cart.ship.design, c.t.cart.ship.done),
+    time: 3, fixedTime: true,
+    run: (c) => {
+      if (c.t.kind !== 'cart' || !c.t.cart.ship) return;
+      const k = c.t.cart, s = k.ship!;
+      s.from = [k.x, k.z, s.slipY!];
+      s.launching = 0;
+      c.g.msg('You knock out the last wedges. She creaks, shifts, and starts down the ways...', 'good');
+    },
+  },
+
   // ===== vessels (carts and boats: see data/vessels)
   {
-    id: 'board_boat', label: (c) => `Get in the ${c.t.kind === 'cart' ? VESSELS[c.t.cart.type].name.toLowerCase() : 'boat'}`,
-    show: (c) => c.t.kind === 'cart' && !!VESSELS[c.t.cart.type].move.water && !c.g.boat && !c.g.riding,
+    id: 'board_boat', label: (c) => `Get in the ${c.t.kind === 'cart' ? vesselOf(c.t.cart).name.toLowerCase() : 'boat'}`,
+    show: (c) => c.t.kind === 'cart' && !!vesselOf(c.t.cart).move.water && !c.g.boat && !c.g.riding,
     check: (c) => {
       if (c.t.kind !== 'cart') return null;
-      if (c.t.cart.dmg >= 100) return `It's swamped: patch the hull first (${itemDef(VESSELS[c.t.cart.type].repair!.item).name.toLowerCase()}).`;
+      if (c.t.cart.ship && (c.t.cart.ship.slipY !== undefined || nextStep(c.t.cart.ship.design, c.t.cart.ship.done))) return nextStep(c.t.cart.ship.design, c.t.cart.ship.done) ? 'She isn\'t finished yet.' : 'Launch her first.';
+      if (c.t.cart.dmg >= 100) return `It's swamped: patch the hull first (${itemDef(vesselOf(c.t.cart).repair!.item).name.toLowerCase()}).`;
       return !c.g.world.afloat(c.t.cart) ? 'It\'s aground: drag it into deeper water first (grab it and walk it in).' : null;
     },
     time: 0.8, fixedTime: true,
     run: (c) => { if (c.t.kind === 'cart') c.g.board(c.t.cart); },
   },
   {
-    id: 'open_cart', label: (c) => `Open ${c.t.kind === 'cart' ? VESSELS[c.t.cart.type].name.toLowerCase() : 'cart'}`,
+    id: 'open_cart', label: (c) => `Open ${c.t.kind === 'cart' ? vesselOf(c.t.cart).name.toLowerCase() : 'cart'}`,
     show: (c) => c.t.kind === 'cart', time: 0,
     run: (c) => { if (c.t.kind === 'cart') c.g.ui.openContainer(c.t.cart); },
   },
   {
-    id: 'grab_cart', label: (c) => (c.t.kind === 'cart' && VESSELS[c.t.cart.type].medium === 'water' ? 'Drag it' : 'Grab the handles'),
-    show: (c) => c.t.kind === 'cart' && !!VESSELS[c.t.cart.type].move.push && c.g.pushing !== c.t.cart && !c.g.riding && !c.g.boat,
-    check: (c) => (c.t.kind === 'cart' && VESSELS[c.t.cart.type].medium === 'water' && c.t.cart.items.length ? 'Unload it first: it\'s too heavy to drag loaded.' : null),
+    id: 'grab_cart', label: (c) => (c.t.kind === 'cart' && vesselOf(c.t.cart).medium === 'water' ? 'Drag it' : 'Grab the handles'),
+    show: (c) => c.t.kind === 'cart' && !!vesselOf(c.t.cart).move.push && c.g.pushing !== c.t.cart && !c.g.riding && !c.g.boat,
+    check: (c) => (c.t.kind === 'cart' && vesselOf(c.t.cart).medium === 'water' && c.t.cart.items.length ? 'Unload it first: it\'s too heavy to drag loaded.' : null),
     time: 0.4, fixedTime: true,
     run: (c) => {
       if (c.t.kind !== 'cart') return;
       c.g.pushing = c.t.cart;
-      c.g.msg(VESSELS[c.t.cart.type].medium === 'water'
+      c.g.msg(vesselOf(c.t.cart).medium === 'water'
         ? 'You take hold of the bow and heave. Walk it down into the water (slowly: it\'s heavy); press X to let go, then get in once it floats.'
         : 'You take the handles. Walk to push the cart; press X (or aim at it) to let go.', 'info');
     },
@@ -1175,7 +1235,7 @@ export const ACTIONS: ActionDef[] = [
   {
     id: 'let_go_cart', label: 'Let go',
     show: (c) => c.t.kind === 'cart' && c.g.pushing === c.t.cart, time: 0,
-    run: (c) => { c.g.pushing = null; c.g.msg(c.t.kind === 'cart' && VESSELS[c.t.cart.type].medium === 'water' ? 'You let go of it.' : 'You set the cart down.', 'info'); },
+    run: (c) => { c.g.pushing = null; c.g.msg(c.t.kind === 'cart' && vesselOf(c.t.cart).medium === 'water' ? 'You let go of it.' : 'You set the cart down.', 'info'); },
   },
   {
     id: 'hitch_world_cart', label: 'Hitch to your ox',
@@ -1194,34 +1254,35 @@ export const ACTIONS: ActionDef[] = [
     run: (c) => { if (c.t.kind === 'cart') { c.t.cart.hitched = undefined; c.g.msg('You unhitch the cart. It stays here.', 'info'); } },
   },
   {
-    id: 'pick_up_cart', label: (c) => `Pick up the ${c.t.kind === 'cart' ? VESSELS[c.t.cart.type].name.toLowerCase() : 'cart'}`,
-    show: (c) => c.t.kind === 'cart' && !!VESSELS[c.t.cart.type].item && c.t.cart.hitched === undefined && c.g.pushing !== c.t.cart,
+    id: 'pick_up_cart', label: (c) => `Pick up the ${c.t.kind === 'cart' ? vesselOf(c.t.cart).name.toLowerCase() : 'cart'}`,
+    show: (c) => c.t.kind === 'cart' && !!vesselOf(c.t.cart).item && c.t.cart.hitched === undefined && c.g.pushing !== c.t.cart,
     check: (c) => (c.t.kind === 'cart' && c.t.cart.items.length ? 'Empty it first.' : null),
     time: 2,
     run: (c) => {
       if (c.t.kind !== 'cart') return;
       const cart = c.t.cart, g = c.g;
       g.world.carts.splice(g.world.carts.indexOf(cart), 1);
-      const it = makeItem(VESSELS[cart.type].item!, cart.ql);
+      const it = makeItem(vesselOf(cart).item!, cart.ql);
       it.dmg = cart.dmg;
       g.inv.add(it);
       g.inventoryChanged();
-      g.msg(`You lift the ${VESSELS[cart.type].name.toLowerCase()} into your pack.`, 'info');
+      g.msg(`You lift the ${vesselOf(cart).name.toLowerCase()} into your pack.`, 'info');
     },
   },
   {
-    id: 'repair_vessel', label: (c) => `Patch the hull (${c.t.kind === 'cart' ? itemDef(VESSELS[c.t.cart.type].repair!.item).name.toLowerCase() : ''})`,
-    show: (c) => c.t.kind === 'cart' && !!VESSELS[c.t.cart.type].repair && c.t.cart.dmg > 0.5 && c.g.boat !== c.t.cart,
+    id: 'repair_vessel', label: (c) => `Patch the hull (${c.t.kind === 'cart' ? itemDef(vesselOf(c.t.cart).repair!.item).name.toLowerCase() : ''})`,
+    show: (c) => c.t.kind === 'cart' && !!vesselOf(c.t.cart).repair && c.t.cart.dmg > 0.5 && c.g.boat !== c.t.cart,
     check: (c) => {
       if (c.t.kind !== 'cart') return null;
-      const r = VESSELS[c.t.cart.type].repair!;
+      const r = vesselOf(c.t.cart).repair!;
+      if (c.t.cart.ship && c.g.world.afloat(c.t.cart)) return 'Careen her first: run her aground on a beach (or bring her onto a slip) to get at her bottom.';
       return c.g.inv.count(r.item) === 0 ? `You need a ${itemDef(r.item).name.toLowerCase()} to patch it.` : null;
     },
     time: 4, skill: 'carpentry', difficulty: 4, stamina: 4,
-    repeat: (c) => c.t.kind === 'cart' && c.t.cart.dmg > 0.5 && c.g.inv.count(VESSELS[c.t.cart.type].repair!.item) > 0,
+    repeat: (c) => c.t.kind === 'cart' && c.t.cart.dmg > 0.5 && c.g.inv.count(vesselOf(c.t.cart).repair!.item) > 0,
     run: (c, o) => {
       if (c.t.kind !== 'cart') return;
-      const k = c.t.cart, r = VESSELS[k.type].repair!;
+      const k = c.t.cart, r = vesselOf(k).repair!;
       c.g.inv.take(r.item, 1);
       c.g.inventoryChanged();
       if (!o.success) return c.g.msg('The patch doesn\'t take. Try again.', 'fail');
@@ -1234,10 +1295,14 @@ export const ACTIONS: ActionDef[] = [
     run: (c) => {
       if (c.t.kind !== 'cart') return;
       const k = c.t.cart, w = k.items.reduce((a, i) => a + itemDef(i.type).weight, 0);
-      const def = VESSELS[k.type];
+      const def = vesselOf(k);
+      if (k.ship && nextStep(k.ship.design, k.ship.done)) {
+        const n = nextStep(k.ship.design, k.ship.done)!;
+        return c.g.msg(`A ${k.ship.design.type.toLowerCase()} on the slip, ${shipLength(k.ship.design)} m: ${k.ship.done} of ${totalSteps(k.ship.design)} steps done. Next: ${n.stage.name.toLowerCase()} (${n.stage.per.map((m) => `${m.count} ${itemDef(m.item).name.toLowerCase()}`).join(', ')}; a ${n.stage.tool}).`, 'info');
+      }
       const where = def.medium === 'water' ? (c.g.world.afloat(k) ? ' Afloat.' : ' Drawn up on the shore.') : '';
       const hull = def.medium === 'water' ? (k.dmg >= 100 ? ' Swamped: patch it to use it again.' : k.dmg >= 40 ? ` Leaking (${Math.round(k.dmg)}% worn).` : k.dmg > 0.5 ? ` A little worn (${Math.round(k.dmg)}%).` : ' Sound.') : '';
-      c.g.msg(`${def.name}, QL ${k.ql.toFixed(1)}: ${w.toFixed(0)} / ${CART_CAPACITY[k.type]} kg loaded.${k.hitched !== undefined ? ' Hitched to your ox.' : ''}${where}${hull}`, 'info');
+      c.g.msg(`${def.name}, QL ${k.ql.toFixed(1)}: ${w.toFixed(0)} / ${vesselOf(k).capacity} kg loaded.${k.hitched !== undefined ? ' Hitched to your ox.' : ''}${where}${hull}`, 'info');
     },
   },
 

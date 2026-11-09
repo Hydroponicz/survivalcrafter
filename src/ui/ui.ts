@@ -10,7 +10,8 @@ import { drawIcons, itemIcon, onIconsReady, pieceIcon } from './itemIcons';
 import { pieceBounds } from '../world/pieceFill';
 import { CharacterPreview } from './preview';
 import { BUILDABLE, STRUCTURES, totalMaterials } from '../data/structures';
-import { VESSELS } from '../data/vessels';
+import { vesselOf } from '../data/vessels';
+import { nextStep, SHIP_PRESETS, shipLength, shipMaterials, shipStats, totalSteps, type ShipDesign } from '../data/ships';
 import { ACTION_MAP, craftProblem, forageName, type ActionDef, type Ctx, type Target } from '../game/actions';
 import { DEV_FLAGS, devCommands, type DevFlag } from '../game/dev';
 import { BIOME_NAMES, IDENTIFY } from '../data/forage';
@@ -19,7 +20,7 @@ import { BIOMES, biomeAt } from '../game/forage';
 import { QUICK_MARGIN, type Game, type MsgKind } from '../game/game';
 import { minigameVerb, RECIPE_MINIGAMES } from '../game/minigames';
 import { MAT_NAMES } from '../world/terrain';
-import { ANIMALS, CART_CAPACITY, cropKey, type CartObj, type PileObj, type StructureObj } from '../world/world';
+import { ANIMALS, cropKey, type CartObj, type PileObj, type StructureObj } from '../world/world';
 import { GOODS } from '../game/economy';
 import type { HouseRole } from '../world/villages';
 
@@ -32,7 +33,7 @@ const JOB_WORDS: Record<HouseRole, string> = {
 };
 const fmtCoins = (n: number) => (Number.isInteger(n) ? `${n}` : n.toFixed(1));
 
-type WindowName = 'inventory' | 'character' | 'crafting' | 'skills' | 'build' | 'help' | 'container' | 'dev' | 'journal' | 'quests' | 'map' | 'store';
+type WindowName = 'inventory' | 'character' | 'crafting' | 'skills' | 'build' | 'help' | 'container' | 'dev' | 'journal' | 'quests' | 'map' | 'store' | 'shipyard';
 
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, html?: string) => {
   const e = document.createElement(tag);
@@ -77,6 +78,9 @@ export class UI {
   private container: StructureObj | PileObj | CartObj | null = null;
   /** The village storehouse being traded at. */
   private storeObj: StructureObj | null = null;
+  /** The slipway the shipyard window is for, and the design being drawn up there. */
+  private slipObj: StructureObj | null = null;
+  private shipDraft: ShipDesign = { ...SHIP_PRESETS[0].design };
   private craftCategory = 'Primitive';
   private expanded = new Set<string>();
   private refreshTimer = 0;
@@ -140,7 +144,7 @@ export class UI {
       this.bars[k] = b.querySelector('.bar-fill')!;
     }
 
-    for (const name of ['inventory', 'character', 'crafting', 'skills', 'build', 'help', 'container', 'dev', 'journal', 'quests', 'map', 'store'] as WindowName[]) {
+    for (const name of ['inventory', 'character', 'crafting', 'skills', 'build', 'help', 'container', 'dev', 'journal', 'quests', 'map', 'store', 'shipyard'] as WindowName[]) {
       const w = el('div', `window window-${name}`);
       w.style.display = 'none';
       w.addEventListener('mousedown', (e) => {
@@ -386,6 +390,12 @@ export class UI {
     }
   }
 
+  /** The shipyard at a slipway: draw up a ship and lay her down, or see how the one on the slip is coming on. */
+  openShipyard(o: StructureObj) {
+    this.slipObj = o;
+    this.show('shipyard');
+  }
+
   openStore(o: StructureObj) {
     this.storeObj = o;
     this.show('store');
@@ -468,7 +478,7 @@ export class UI {
       case 'water': return 'Water';
       case 'animal': return ANIMALS[t.animal.species].name;
       case 'rock': return t.rock.sc < 0.6 ? 'Small boulder' : t.rock.sc < 1.1 ? 'Boulder' : 'Large boulder';
-      case 'cart': return VESSELS[t.cart.type].name;
+      case 'cart': return vesselOf(t.cart).name;
       case 'villager': return t.villager.lying ? `${t.villager.name} (asleep)` : `${t.villager.name}, ${t.villager.roleName}`;
       case 'trader': return `${t.trader.name}, travelling trader`;
       case 'stump': return `${t.stump.species[0].toUpperCase()}${t.stump.species.slice(1)} stump`;
@@ -651,6 +661,11 @@ export class UI {
         if (Math.hypot(s.x - p.pos.x, s.z - p.pos.z) > 6 || !g.world.objects.has(s.id)) this.close('store');
         else this.render('store');
       }
+      if (this.open.has('shipyard') && this.slipObj) {
+        const s = this.slipObj;
+        if (Math.hypot(s.x - p.pos.x, s.z - p.pos.z) > 30 || !g.world.objects.has(s.id)) this.close('shipyard');
+        else this.render('shipyard');
+      }
       if (this.open.has('container') && this.container) {
         const c = this.container;
         if (Math.hypot(c.x - p.pos.x, c.z - p.pos.z) > 5 || (c.kind === 'cart' ? !g.world.carts.includes(c) : !g.world.objects.has(c.id))) this.close('container');
@@ -762,6 +777,7 @@ export class UI {
       case 'help': return this.renderHelp();
       case 'container': return this.renderContainer();
       case 'store': return this.renderStore();
+      case 'shipyard': return this.renderShipyard();
       case 'dev': return this.renderDev();
       case 'journal': return this.renderJournal();
       case 'quests': return this.renderQuests();
@@ -961,7 +977,7 @@ export class UI {
     if (!c) return;
     const items = c.kind === 'pile' ? c.items : (c.items ??= []);
     const body = el('div');
-    const cap = c.kind === 'structure' ? STRUCTURES[c.type].container : c.kind === 'cart' ? CART_CAPACITY[c.type] : undefined;
+    const cap = c.kind === 'structure' ? STRUCTURES[c.type].container : c.kind === 'cart' ? vesselOf(c).capacity : undefined;
     const w = items.reduce((a, i) => a + itemDef(i.type).weight, 0);
     const held = el('div', 'inv-weight', `${items.length} items · ${w.toFixed(1)}${cap ? ` / ${cap}` : ''} kg`);
     held.dataset.tip = weightTip(items, cap, cap ? 'It holds no more than this.' : '');
@@ -984,8 +1000,76 @@ export class UI {
       ];
       body.appendChild(this.itemRow(list, actions));
     }
-    const title = c.kind === 'pile' ? 'Pile on the ground' : c.kind === 'cart' ? VESSELS[c.type].name : STRUCTURES[c.type].name;
+    const title = c.kind === 'pile' ? 'Pile on the ground' : c.kind === 'cart' ? vesselOf(c).name : STRUCTURES[c.type].name;
     this.frame('container', title, body);
+  }
+
+  /**
+   * The shipyard: the ship on the slip (how far on, and what the next step
+   * needs), or, with the slip free, a ship to draw up: a medieval type to
+   * start from, then its length, beam, planking, masts, rig, castles and deck,
+   * with what she'll be like and everything she'll take to build.
+   */
+  private renderShipyard() {
+    const g = this.g, slip = this.slipObj;
+    if (!slip) return;
+    const body = el('div', 'shipyard');
+    const onSlip = g.shipOn(slip);
+    if (onSlip?.ship) {
+      const s = onSlip.ship, d = s.design, total = totalSteps(d), n = nextStep(d, s.done);
+      body.appendChild(el('div', 'build-desc', `On the slip: a <b>${esc(d.type.toLowerCase())}</b>, ${shipLength(d)} m. ${s.done} of ${total} steps done.`));
+      const bar = el('div', 'ship-progress'); bar.appendChild(el('i')).setAttribute('style', `width:${(100 * s.done / total).toFixed(1)}%`); body.appendChild(bar);
+      if (n) {
+        body.appendChild(el('div', 'build-desc', `Next: <b>${esc(n.stage.name)}</b>${n.stage.steps > 1 ? ` (${n.index + 1} of ${n.stage.steps})` : ''}, with a ${esc(n.stage.tool)}. Aim at her to work.`));
+        const mats = el('div', 'build-mats');
+        for (const m of n.stage.per) { const have = g.inv.count(m.item); mats.appendChild(el('span', `mat-chip ${have >= m.count ? 'ok' : 'no'}`, `${itemIcon(m.item, 'chip-img')}<b>${m.count}</b> ${esc(itemDef(m.item).name.toLowerCase())} (${have})`)); }
+        body.appendChild(mats);
+      } else body.appendChild(el('div', 'build-desc', s.launching !== undefined ? 'She\'s going down the ways!' : 'She\'s finished. Aim at her and launch her!'));
+      this.frame('shipyard', 'Shipyard', body);
+      return;
+    }
+    const d = this.shipDraft, st = shipStats(d);
+    const pick = (label: string, opts: [string, string][], cur: string, set: (v: string) => void) => {
+      const row = el('div', 'ship-row');
+      row.appendChild(el('span', 'ship-label', label));
+      for (const [v, name] of opts) {
+        const b = el('button', `ship-opt${v === cur ? ' on' : ''}`, name);
+        b.addEventListener('click', () => { set(v); this.render('shipyard'); });
+        row.appendChild(b);
+      }
+      body.appendChild(row);
+    };
+    // Where to start: the medieval types.
+    const presets = el('div', 'ship-row');
+    presets.appendChild(el('span', 'ship-label', 'Type'));
+    for (const p of SHIP_PRESETS) {
+      const b = el('button', `ship-opt${p.design.type === d.type ? ' on' : ''}`, p.design.type);
+      b.addEventListener('click', () => { this.shipDraft = { ...p.design }; this.render('shipyard'); });
+      presets.appendChild(b);
+    }
+    body.appendChild(presets);
+    const blurb = SHIP_PRESETS.find((p) => p.design.type === d.type)?.blurb;
+    if (blurb) body.appendChild(el('div', 'build-desc', esc(blurb)));
+    pick('Length', [3, 4, 5, 6].map((b) => [`${b}`, `${b * 4 + 2} m`]), `${d.bays}`, (v) => { d.bays = +v; if (d.bays < 5 && d.masts === 2) d.masts = 1; });
+    pick('Beam', [['narrow', 'Narrow'], ['medium', 'Medium'], ['broad', 'Broad']], d.beam, (v) => { d.beam = v as ShipDesign['beam']; });
+    pick('Planking', [['clinker', 'Clinker'], ['carvel', 'Carvel']], d.build, (v) => { d.build = v as ShipDesign['build']; });
+    pick('Masts', d.bays >= 5 ? [['1', 'One'], ['2', 'Two']] : [['1', 'One']], `${d.masts}`, (v) => { d.masts = +v as 1 | 2; });
+    pick('Rig', [['square', 'Square sail'], ['lateen', 'Lateen']], d.rig, (v) => { d.rig = v as ShipDesign['rig']; });
+    pick('Castles', [['0', 'None'], ['1', 'Sterncastle'], ['2', 'Fore and aft']], `${d.castles}`, (v) => { d.castles = +v as 0 | 1 | 2; });
+    pick('Deck', [['open', 'Open hold'], ['decked', 'Decked']], d.decked ? 'decked' : 'open', (v) => { d.decked = v === 'decked'; });
+    const turning = st.turn > 0.3 ? 'nimble' : st.turn > 0.2 ? 'handy' : st.turn > 0.14 ? 'steady' : 'slow to turn';
+    body.appendChild(el('div', 'ship-stats', `<span><b>${st.L} m</b> long, <b>${st.B.toFixed(1)} m</b> beam</span><span>Draws <b>${st.draft.toFixed(1)} m</b></span><span>Cargo <b>${(st.capacity / 1000).toFixed(1)} t</b></span><span>About <b>${st.knots} knots</b>, ${turning}</span><span><b>${totalSteps(d)}</b> steps to build</span>`));
+    const mats = el('div', 'build-mats');
+    for (const [item, count] of Object.entries(shipMaterials(d))) {
+      const have = g.inv.count(item);
+      mats.appendChild(el('span', `mat-chip ${have >= count ? 'ok' : 'no'}`, `${itemIcon(item, 'chip-img')}<b>${count}</b> ${esc(itemDef(item).name.toLowerCase())}`));
+    }
+    body.appendChild(el('div', 'ship-label', 'She will take, in all (brought a stage at a time):'));
+    body.appendChild(mats);
+    const go = el('button', 'build-place', 'Lay her down');
+    go.addEventListener('click', () => { if (g.layDownShip(slip, d)) this.close('shipyard'); });
+    body.appendChild(go);
+    this.frame('shipyard', 'Shipyard', body);
   }
 
   /** The village storehouse: its treasury, its work orders, and its goods to buy and sell. */

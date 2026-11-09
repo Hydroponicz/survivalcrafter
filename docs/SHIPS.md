@@ -94,33 +94,77 @@ What came with them:
   Patch it ashore with its own material: fiber for reeds, hide for
   hide-covered boats, a log for a dugout, a refined plank for a planked boat.
 
-**3. The shipyard and its slipway**
-- **The slip:** a structure on a riverbank or shore that defines a building
-  berth: a cradle of blocks on a slope into the water. Its length and width
-  set the largest ship it can hold.
-- **The hull:** a ship is laid down on the slip and built from **modular
-  pieces** that snap to the berth's grid, much like house pieces snap to each
-  other:
-  - **Keel** (sets the length), **stem** and **sternpost**
-  - **Frames** (ribs) and **strakes** (planking: clinker for northern
-    ships, carvel later)
-  - **Decks**, **castles** (fore and aft), **hold** sections
-  - **Mast steps** and **masts**, **yards** and **sails**, a **rudder** (a
-    steering oar early, a sternpost rudder later), and **oar ports**
-- **What the ship can do comes from its parts:**
-  - length, beam and depth give capacity and draft
-  - sail area against displacement gives speed
-  - rudder and hull shape give turning
-  - oar ports and benches set crew needs
-  - quality comes from the parts' quality
+**3. The shipyard and its slipway (done)**
 
-  So a ship is a vessel whose row is **worked out** from its parts, not
-  written by hand. A `ship` vessel holds its part list, and the table entry is
-  computed.
-- **Launching:** knock out the wedges and it slides down the slip into the
-  water (a moment worth an animation and a sound).
-- **Repairs:** careen it on a beach (hull damage and wear), or, late and
-  expensive, build a **dry dock** next to the slip.
+**The slipway** (Build menu, Boats: 10 logs and 10 planks, with a hatchet) is
+a 28 m bed of timbers on piles. It runs down the shore into water at least
+1.6 m deep at its far end, and turns itself toward the deepest water while you
+place it. Aim at it to open the **shipyard**.
+
+**The shipyard window** is where you draw up a ship:
+- **Type** to start from:
+  - Longship
+  - Knarr
+  - Cog
+  - Hulk
+  - Caravel
+- **What you can change:**
+  - length (14 to 26 m)
+  - beam (narrow, medium or broad)
+  - planking (clinker or carvel)
+  - masts (one or two)
+  - rig (square or lateen)
+  - castles (none, sterncastle, or fore and aft)
+  - deck (open hold or decked)
+- **What it shows:** she's worked out as you choose. Length and beam, draft,
+  cargo in tonnes, speed in knots and handiness, steps to build, and every
+  material she'll take.
+
+**Laying her down** sets up the keel blocks. Aim at her and work through the
+stages in order:
+
+| Stage | Tool | Done by |
+|---|---|---|
+| Keel | hatchet | hewing |
+| Stem and sternpost | hatchet | hewing |
+| A frame for each bay | saw | sawing |
+| Planking for each bay | hammer | riveting or nailing, with fiber caulking |
+| Deck (if decked) | hammer | nailing |
+| Castles | hammer | nailing |
+| Masts | hatchet | hewing |
+| Sails | knife | sewing wool |
+| Rudder | hammer | fitting |
+
+Each step takes its materials, and the ship grows on the slip as you go:
+- the keel and posts
+- ribs on the open frame
+- the planked hull, bay by bay, then its strakes and wale
+- the deck, castles, masts with shrouds, square or lateen sails, and a
+  steering oar or sternpost rudder
+
+**Launching:** she slides down the ways, gathering speed, and settles to her
+waterline beyond the slip's end.
+
+**Sailing:** take the helm, up on the sterncastle if she has one.
+- **W** makes more sail and **S** shortens it (and backs her off).
+- She gathers way and loses it slowly.
+- **A/D** work the rudder.
+
+What came out in testing:
+
+| Ship | Speed | Cargo | Turning |
+|---|---|---|---|
+| Cog | about 3.9 knots | 43 t | steady (63° in 6 s) |
+| Caravel | about 6.4 knots | 26 t | nimble (97° in 6 s) |
+| Longship | about 7.2 knots | 14 t | handy (70° in 6 s) |
+
+The longship draws only 0.6 m, so she can be run up on a beach.
+
+**Repairs:** a ship's bottom can only be reached when she's careened (run
+aground on a beach) or on a slip. Patch it with refined planks.
+
+**Not yet:** wind, crews, walking on deck, oars on big ships, and the dry
+dock. Those are phase 4.
 
 **4. Sailing and crews**
 - **Wind:** one prevailing wind direction and strength already drives the

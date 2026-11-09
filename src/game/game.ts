@@ -3,7 +3,8 @@ import { getNextUid, isIdentified, itemDef, itemName, learnSpecies, makeItem, se
 import type { Recipe, StationKind } from '../data/recipes';
 import { SKILLS, Skills, type SkillId } from '../data/skills';
 import { pieceBoxes, STRUCTURES, type StructureDef, type V3 } from '../data/structures';
-import { VESSELS } from '../data/vessels';
+import { VESSELS, vesselOf } from '../data/vessels';
+import { SLIP_LENGTH, shipLength, type ShipDesign } from '../data/ships';
 import { anvilGrade } from './smithy';
 import { isRock, Mat, WATER_LEVEL, type Volumes } from '../world/terrain';
 import { forageHeight, forageScale } from '../world/forageProps';
@@ -23,7 +24,7 @@ import { perf } from './perf';
 import { telemetry } from './telemetry';
 import { TILE, tileOf, WorldGen } from '../world/worldgen';
 import {
-  ANIMALS, CART_CAPACITY, DAY_LENGTH, pointInPiece, type CartObj, toLocal, toWorld, World, type AnimalObj, type ForageObj, type PileObj, type StructureObj, type TreeObj, type WorldObj,
+  ANIMALS, DAY_LENGTH, pointInPiece, type CartObj, toLocal, toWorld, World, type AnimalObj, type ForageObj, type PileObj, type StructureObj, type TreeObj, type WorldObj,
 } from '../world/world';
 import {
   ACTION_MAP, ACTIONS, COMFORT_REGEN, craftProblem, DIG_RADIUS, EARTH_PER_ITEM, LEVEL_RADIUS, type ActionDef, type Ctx, type Target,
@@ -159,6 +160,8 @@ export class Game {
   /** Set by a levelling step that should continue. */
   levelling = false;
   placeYaw = 0;
+  /** Turned by hand while placing (else a piece that runs into the water turns itself toward it). */
+  private placeYawSet = false;
 
   private brush: THREE.LineLoop;
   private brushOuter: THREE.LineLoop;
@@ -604,13 +607,13 @@ export class Game {
   }
 
   putIntoContainer(s: StructureObj | CartObj, uids: number[]) {
-    const cap = s.kind === 'cart' ? CART_CAPACITY[s.type] : STRUCTURES[s.type].container ?? 0;
+    const cap = s.kind === 'cart' ? vesselOf(s).capacity : STRUCTURES[s.type].container ?? 0;
     s.items ??= [];
     let w = s.items.reduce((a, i) => a + itemDef(i.type).weight, 0);
     for (const u of uids) {
       const it = this.inv.find(u);
       if (!it) continue;
-      if (w + itemDef(it.type).weight > cap) { this.msg(s.kind === 'cart' ? `The ${VESSELS[s.type].name.toLowerCase()} is full.` : 'The chest is full.', 'fail'); break; }
+      if (w + itemDef(it.type).weight > cap) { this.msg(s.kind === 'cart' ? `The ${vesselOf(s).name.toLowerCase()} is full.` : 'The chest is full.', 'fail'); break; }
       this.inv.remove(u);
       delete it.hot;
       s.items.push(it);
@@ -1259,7 +1262,7 @@ export class Game {
 
   /** Get into a boat (it must be afloat and not swamped): you take the steerer's place and drive it. */
   board(k: CartObj) {
-    const def = VESSELS[k.type], drive = def.move.water;
+    const def = vesselOf(k), drive = def.move.water;
     if (this.boat || this.riding || !drive) return;
     if (!this.world.afloat(k)) return this.msg('It\'s aground: drag it into deeper water first (grab it and walk it in).', 'fail');
     if (k.dmg >= 100) return this.msg(`It's swamped: patch the hull first (${itemDef(def.repair!.item).name.toLowerCase()}).`, 'fail');
@@ -1269,7 +1272,12 @@ export class Game {
     this.player.boat = { stand: !!def.stand, step: (dt, th, tu, hard) => this.stepBoat(k, st, dt, th, tu, hard) };
     this.player.vel.set(0, 0, 0);
     telemetry.event('boats', `Boarded a ${def.name.toLowerCase()}`, { id: k.id });
-    const [gear, n] = drive.needs, has = this.inv.count(gear) >= n, gearName = itemDef(gear).name.toLowerCase();
+    if (drive.by === 'sail') {
+      this.msg(`You take the helm of the ${def.name.toLowerCase()}. W to make sail (more), S to shorten sail and back her off, A/D for the rudder; X to go ashore.`, 'good');
+      if (k.dmg >= 40) this.msg(`She's leaking (${Math.round(k.dmg)}% worn): careen her on a beach and patch the hull.`, 'info');
+      return;
+    }
+    const [gear, n] = drive.needs ?? ['paddle', 1], has = this.inv.count(gear) >= n, gearName = itemDef(gear).name.toLowerCase();
     const how = drive.by === 'pole' ? 'pole' : drive.by === 'oars' ? 'row' : 'paddle';
     const keys = `W/S to ${how} ahead or back, A/D to steer, Shift to dig in; X to step out.`;
     this.msg(has
@@ -1286,9 +1294,9 @@ export class Game {
    * for its draft (bumping back off, and wearing a fragile hull). Returns
    * where you are in it.
    */
-  private stepBoat(k: CartObj, st: { speed: number; deep: boolean }, dt: number, th: number, tu: number, hard: boolean) {
-    const def = VESSELS[k.type], drive = def.move.water!, w = this.world, draft = def.draft ?? 0.2;
-    let by = this.inv.count(drive.needs[0]) >= drive.needs[1] ? 1 : 0.35;
+  private stepBoat(k: CartObj, st: { speed: number; deep: boolean; sail?: number }, dt: number, th: number, tu: number, hard: boolean) {
+    const def = vesselOf(k), drive = def.move.water!, w = this.world, draft = def.draft ?? 0.2;
+    let by = !drive.needs || this.inv.count(drive.needs[0]) >= drive.needs[1] ? 1 : 0.35;
     // A pole has to reach the bottom.
     if (drive.by === 'pole' && by === 1) {
       const deep = w.depthAt(k.x, k.z) > (drive.maxDepth ?? 2.5);
@@ -1298,9 +1306,16 @@ export class Game {
     }
     // A worn hull is waterlogged and slow.
     const leak = 1 - Math.min(0.6, k.dmg / 160);
-    const target = th * drive.speed * by * leak * (hard ? 1.45 : 1) * (th < 0 ? 0.5 : 1);
-    st.speed += (target - st.speed) * Math.min(1, dt * (th ? 0.9 : 0.35));
-    if (Math.abs(st.speed) < 0.02 && !th) st.speed = 0;
+    if (drive.by === 'sail') {
+      // Under sail: W makes more sail, S shortens it (and backs her off); she gathers way and loses it slowly.
+      st.sail = Math.max(-0.25, Math.min(1, (st.sail ?? 0) + th * dt * 0.4));
+      const target = st.sail * drive.speed * leak;
+      st.speed += (target - st.speed) * Math.min(1, dt * 0.25);
+    } else {
+      const target = th * drive.speed * by * leak * (hard ? 1.45 : 1) * (th < 0 ? 0.5 : 1);
+      st.speed += (target - st.speed) * Math.min(1, dt * (th ? 0.9 : 0.35));
+    }
+    if (Math.abs(st.speed) < 0.02 && !th && !st.sail) st.speed = 0;
     // Steering bites with way on (a little even at rest: you can turn on the spot with a sweep stroke).
     k.rot += tu * drive.turn * dt * (0.35 + 0.65 * Math.min(1, Math.abs(st.speed) / drive.speed));
     const fx = Math.sin(k.rot), fz = Math.cos(k.rot);
@@ -1321,7 +1336,7 @@ export class Game {
     }
     // You, in the steerer's place (standing on a raft's deck).
     const seat = def.seats?.[0] ?? 0;
-    return { x: k.x + fx * seat, y: w.vesselY(k) + (def.stand ? (draft + 0.24) : 0.18), z: k.z + fz * seat, rot: k.rot, speed: st.speed };
+    return { x: k.x + fx * seat, y: w.vesselY(k) + (def.stand ? (def.deck ?? draft + 0.24) : 0.18), z: k.z + fz * seat, rot: k.rot, speed: st.speed };
   }
 
   /** Step out of the boat: onto the nearest bit of shore within reach, or else over the side into the water. */
@@ -1332,9 +1347,10 @@ export class Game {
     this.player.boat = null;
     const t = this.world.terrain, p = this.player;
     let best: { x: number; z: number; d: number } | null = null;
-    for (let r = 1.2; r <= 4.5 && !best; r += 0.6) {
+    const far = Math.max(4.5, vesselOf(k).hit.hx + 4);
+    for (let r = 1.2; r <= far && !best; r += 0.6) {
       for (let a = 0; a < 16; a++) {
-        const ang = (a / 16) * Math.PI * 2, x = k.x + Math.sin(ang) * r * 0.6 + Math.sin(k.rot) * Math.cos(ang) * r, z = k.z + Math.cos(ang) * r * 0.6 + Math.cos(k.rot) * Math.cos(ang) * r;
+        const ang = (a / 16) * Math.PI * 2, x = p.pos.x + Math.sin(ang) * r, z = p.pos.z + Math.cos(ang) * r;
         if (this.world.depthAt(x, z) > 0.05) continue;
         const d = Math.hypot(x - p.pos.x, z - p.pos.z);
         if (!best || d < best.d) best = { x, z, d };
@@ -1385,7 +1401,7 @@ export class Game {
         while (d > Math.PI) d -= Math.PI * 2;
         while (d < -Math.PI) d += Math.PI * 2;
         k.rot += d * Math.min(1, dt * 5);
-        const reach = VESSELS[k.type].hit.hz + 0.75;
+        const reach = vesselOf(k).hit.hz + 0.75;
         k.x = p.pos.x + Math.sin(k.rot) * reach;
         k.z = p.pos.z + Math.cos(k.rot) * reach;
       }
@@ -1402,7 +1418,7 @@ export class Game {
       c.x = ox.x - Math.sin(c.rot) * 2.6;
       c.z = ox.z - Math.cos(c.rot) * 2.6;
     }
-    this.player.speedMul = this.pushing ? VESSELS[this.pushing.type].move.push ?? 0.8 : 1;
+    this.player.speedMul = this.pushing ? vesselOf(this.pushing).move.push ?? 0.8 : 1;
   }
 
   /** Climb onto a tamed horse. */
@@ -1622,7 +1638,7 @@ export class Game {
       if (!tooFar) {
         for (const k of carts) {
           // In the cart's own frame: its bed (and the handles or shafts).
-          const hb = VESSELS[k.type].hit, dx = p.x - k.x, dz = p.z - k.z, s = Math.sin(k.rot), c = Math.cos(k.rot);
+          const hb = vesselOf(k).hit, dx = p.x - k.x, dz = p.z - k.z, s = Math.sin(k.rot), c = Math.cos(k.rot);
           const lx = dx * c - dz * s, lz = dx * s + dz * c, h = p.y - this.world.vesselY(k);
           if (Math.abs(lx) < hb.hx && Math.abs(lz) < hb.hz && h > -0.1 && h < hb.h) return { kind: 'cart', cart: k, point: p.clone() };
         }
@@ -1723,6 +1739,7 @@ export class Game {
   // ---------- building placement (Valheim-style planning)
   startPlacing(def: StructureDef) {
     this.placing = def;
+    this.placeYawSet = false;
     this.placingItem = null;
     this.player.wheelCaptured = true;
     this.msg(`Placing ${def.name.toLowerCase()}: left-click to place, mouse wheel or Q/E to rotate, right-click to cancel.`, 'info');
@@ -1764,9 +1781,9 @@ export class Game {
     const inp = this.input;
     if (inp.locked) {
       const step = Math.PI / 8;
-      if (inp.wheel) this.placeYaw += Math.sign(inp.wheel) * step;
-      if (inp.hit('KeyQ')) this.placeYaw += step;
-      if (inp.hit('KeyE')) this.placeYaw -= step;
+      if (inp.wheel) { this.placeYaw += Math.sign(inp.wheel) * step; this.placeYawSet = true; }
+      if (inp.hit('KeyQ')) { this.placeYaw += step; this.placeYawSet = true; }
+      if (inp.hit('KeyE')) { this.placeYaw -= step; this.placeYawSet = true; }
     }
     const hit = this.raycast(BUILD_REACH);
     if (!hit || hit.kind === 'none' || hit.kind === 'animal') {
@@ -1775,6 +1792,14 @@ export class Game {
       return;
     }
     const pt = hit.point;
+    // A slipway turns itself to run down into the deepest water near where you aim (until you turn it yourself).
+    if (def.reachesWater && !this.placeYawSet) {
+      let best = -Infinity;
+      for (let i = 0; i < 16; i++) {
+        const a = (i / 16) * Math.PI * 2, d = this.world.depthAt(pt.x + Math.sin(a) * def.reachesWater.z, pt.z + Math.cos(a) * def.reachesWater.z);
+        if (d > best) { best = d; this.placeYaw = a; }
+      }
+    }
     let x = pt.x, y = pt.y, z = pt.z, yaw = this.placeYaw, snapped = false;
     let valid = true, reason = '';
 
@@ -1806,6 +1831,11 @@ export class Game {
       if (o.kind === 'structure' && o.type === def.id && Math.hypot(o.x - x, o.y - y, o.z - z) < 0.15) { valid = false; reason = 'There is already one there.'; }
     }
     if (!def.snap && y < this.world.terrain.waterAt(x, z) - 0.3) { valid = false; reason = 'That spot is under water.'; }
+    // A slipway runs down into the water: its far end out over deep enough water.
+    if (valid && def.reachesWater) {
+      const [wx, , wz] = toWorld({ x, y, z, yaw }, [0, 0, def.reachesWater.z]);
+      if (this.world.depthAt(wx, wz) < def.reachesWater.depth) { valid = false; reason = `It has to run down into the water: turn it so its far end is out over water at least ${def.reachesWater.depth} m deep.`; }
+    }
 
     const g = this.ghost!;
     g.visible = true;
@@ -1898,6 +1928,52 @@ export class Game {
     this.world.changed(s);
     this.msg(`[dev] ${def.name} built instantly.`, 'info');
     if (def.becomes) this.vesselFromPiece(s);
+  }
+
+  /** The ship on a slipway, if one's being built there (or waiting to be launched). */
+  shipOn(slip: StructureObj): CartObj | undefined {
+    return this.world.carts.find((c) => c.ship?.slip === slip.id && c.ship.slipY !== undefined);
+  }
+
+  /** Lay a ship down on a slipway: her keel blocks set up on the cradle, ready for the keel itself. */
+  layDownShip(slip: StructureObj, design: ShipDesign) {
+    if (!slip.built) return this.msg('Finish building the slipway first.', 'fail');
+    if (this.shipOn(slip)) return this.msg('There\'s already a ship on this slip.', 'fail');
+    if (shipLength(design) > SLIP_LENGTH) return this.msg(`This slip takes ships up to ${SLIP_LENGTH} m long.`, 'fail');
+    const L = shipLength(design);
+    // Her stern at the head of the slip, her bow toward the water.
+    const [x, , z] = toWorld(slip, [0, 0, -5 + L / 2]);
+    const k = this.world.addCart('ship', x, z, slip.yaw, 0);
+    k.ship = { design: { ...design }, done: 0, slip: slip.id, slipY: slip.y + 0.55 };
+    telemetry.event('ships', `Laid down a ${design.type.toLowerCase()} (${L} m)`, { id: k.id });
+    this.msg(`You set up the keel blocks for a ${design.type.toLowerCase()}, ${L} m long. Aim at her to work on her: first, lay the keel.`, 'good');
+    return k;
+  }
+
+  /** Ships sliding down their slips: gathering speed down the ways, then afloat beyond the end. */
+  private updateLaunches(dt: number) {
+    for (const k of this.world.carts) {
+      const s = k.ship;
+      if (!s || s.launching === undefined || !s.from) continue;
+      s.launching += dt;
+      const def = vesselOf(k), dur = 7;
+      const t = Math.min(1, s.launching / dur), e = t * t;
+      // From the cradle to clear of the slip's end, settling down to her waterline.
+      const slip = s.slip !== undefined ? this.world.objects.get(s.slip) : undefined;
+      const run = slip ? Math.max(4, 22 - ((s.from[0] - slip.x) * Math.sin(k.rot) + (s.from[1] - slip.z) * Math.cos(k.rot)) + def.hit.hz * 0.6) : def.hit.hz * 2;
+      k.x = s.from[0] + Math.sin(k.rot) * run * e;
+      k.z = s.from[1] + Math.cos(k.rot) * run * e;
+      const float = this.world.terrain.waterAt(k.x, k.z) - (def.draft ?? 1);
+      s.slipY = s.from[2] + (Math.max(float, Math.min(s.from[2], this.world.terrain.heightAt(k.x, k.z))) - s.from[2]) * Math.min(1, Math.max(0, (t - 0.3) / 0.7));
+      if (t >= 1) {
+        delete s.launching; delete s.slipY; delete s.from;
+        s.slip = undefined;
+        this.sound.crash(0.6);
+        this.msg(this.world.afloat(k) ? `She slides down the ways and into the water with a great splash: the ${def.name.toLowerCase()} is afloat! Aim at her to take the helm.`
+          : 'She slides down the ways... and sticks in the shallows. The water here is too shallow for her draft: build the slip out over deeper water.', this.world.afloat(k) ? 'good' : 'fail');
+        telemetry.event('ships', `Launched a ${def.name.toLowerCase()}`, { id: k.id, afloat: this.world.afloat(k) });
+      }
+    }
   }
 
   /** A finished hull (a piece worked in place) becomes the vessel it is: same place, heading and quality. */
@@ -2381,7 +2457,7 @@ export class Game {
     if (!this.quests && !this.tour) this.quests = new QuestLog(this.markerTex);
     if (this.quests && !this.quests.onChange) this.quests.onChange = () => this.ui.refresh();
     this.quests?.update(this, dt);
-    perf.time('animals', () => { this.updateAnimals(dt); this.updateCarts(dt); });
+    perf.time('animals', () => { this.updateAnimals(dt); this.updateCarts(dt); this.updateLaunches(dt); });
     perf.time('villagers', () => { this.life.update(dt); this.traders.update(dt); });
     perf.time('map', () => this.map.update(dt, p.pos.x, p.pos.z, this.ui.isOpen('map')));
     perf.time('terrain', () => this.world.terrain.update(p.pos.x, p.pos.y, p.pos.z, 6));
