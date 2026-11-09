@@ -1,5 +1,6 @@
 import { type Item } from '../data/items';
 import { pieceBoxes, STRUCTURES, type V3 } from '../data/structures';
+import { VESSELS, type VesselId } from '../data/vessels';
 import { mulberry32 } from './noise';
 import { Mat, Terrain } from './terrain';
 import { TreeCover, VEGETATION, type Species } from './trees';
@@ -78,17 +79,17 @@ export interface AnimalObj {
   wool?: number;
 }
 
-/** A cart standing in the world (or hitched to an ox): it holds things, and you can move it. */
+/** A vessel in the world (a cart, a boat: see data/vessels): it holds things, and you can move it. */
 export interface CartObj {
-  kind: 'cart'; id: number; type: 'hand_cart' | 'ox_cart';
+  kind: 'cart'; id: number; type: VesselId;
   x: number; z: number; rot: number;
   items: Item[]; ql: number; dmg: number;
   /** The ox it's hitched to (an animal id), if any. */
   hitched?: number;
 }
 
-/** How much each cart holds (kg). */
-export const CART_CAPACITY: Record<CartObj['type'], number> = { hand_cart: 120, ox_cart: 400 };
+/** How much each vessel holds (kg). */
+export const CART_CAPACITY = Object.fromEntries(Object.values(VESSELS).map((v) => [v.id, v.capacity])) as Record<VesselId, number>;
 
 /** Crops grow on 1 m cells of tilled ground. */
 export interface Crop { planted: number; ql: number; tended: number }
@@ -556,6 +557,24 @@ export class World {
       if (open && r2 < 0.4) { for (let k = 0, n = 1 + Math.floor(Math.random() * 3); k < n; k++) this.spawnAnimal('horse', x + (Math.random() - 0.5) * 8, z + (Math.random() - 0.5) * 8); continue; }
       this.spawnAnimal(r2 < 0.65 ? 'deer' : 'boar', x, z);
     }
+  }
+
+  /** How deep the water is at a point (≤ 0 on dry land). */
+  depthAt(x: number, z: number): number {
+    return this.terrain.waterAt(x, z) - this.terrain.heightAt(x, z);
+  }
+
+  /** Where a vessel's keel is: on the ground, or (a boat with water enough under it) floating at its draft. */
+  vesselY(c: CartObj): number {
+    const def = VESSELS[c.type], ground = this.terrain.heightAt(c.x, c.z);
+    if (def.medium !== 'water') return ground;
+    return Math.max(ground, this.terrain.waterAt(c.x, c.z) - (def.draft ?? 0.2));
+  }
+
+  /** Whether a boat has water enough under it to float. */
+  afloat(c: CartObj): boolean {
+    const def = VESSELS[c.type];
+    return def.medium === 'water' && this.depthAt(c.x, c.z) > (def.draft ?? 0.2);
   }
 
   /** Set a cart down in the world. */

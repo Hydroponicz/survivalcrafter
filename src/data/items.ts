@@ -105,6 +105,7 @@ const defs: ItemDef[] = [
     desc: 'A two-wheeled barrow of planks. Set it down from your pack, grab the handles to push it, and load it up: it holds 120 kg.' },
   { id: 'ox_cart', name: 'Ox cart', icon: '🛞', weight: 30, cart: 'ox',
     desc: 'A big wagon on two solid wheels, with shafts for an ox. Hitch it to your tamed ox (aim at the ox → Hitch ox cart) and lead the ox: it holds 400 kg.' },
+  { id: 'paddle', name: 'Paddle', icon: '🏏', weight: 1.2, desc: 'A broad-bladed paddle carved from a plank. With one in your pack you paddle a canoe at full speed (without, you paddle with your hands).' },
   { id: 'hide_boots', name: 'Hide boots', icon: '🥾', weight: 0.6, wear: { slot: 'feet', armor: 0.04, colour: 0x4a3220 }, desc: 'Soft hide boots, bound at the ankle.' },
 
   // --- tools

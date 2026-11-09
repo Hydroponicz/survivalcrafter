@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { isIdentified, itemDef, itemName, learnSpecies, makeItem, TOOL_NAMES, TORCH_BURN, typeDesc, typeName, type Item, type ToolKind } from '../data/items';
 import { RECIPES, STATION_NAMES, type Recipe } from '../data/recipes';
 import { STRUCTURES, totalMaterials, type StructureDef } from '../data/structures';
+import { VESSELS } from '../data/vessels';
 import type { SkillId } from '../data/skills';
 import { isRock, isSoft, Mat, MAT_NAMES, Y_MIN } from '../world/terrain';
 import { telemetry } from './telemetry';
@@ -872,7 +873,8 @@ export const ACTIONS: ActionDef[] = [
       s.ql = (s.ql * (done - 1) + (o.ql + m.ql) / 2) / done;
       if (done >= total) {
         s.built = true;
-        c.g.msg(`You finish the ${def.name.toLowerCase()} (QL ${s.ql.toFixed(1)}).`, 'good');
+        c.g.msg(`You finish the ${def.name.toLowerCase()} (QL ${s.ql.toFixed(1)}).${def.becomes ? ' Grab it to drag it down to the water.' : ''}`, 'good');
+        if (def.becomes) { c.g.vesselFromPiece(s); return; }
       } else {
         c.g.msg(`You add a ${itemName(m).toLowerCase()}. (${done}/${total})`, 'info');
       }
@@ -1140,22 +1142,36 @@ export const ACTIONS: ActionDef[] = [
     },
   },
 
-  // ===== carts
+  // ===== vessels (carts and boats: see data/vessels)
   {
-    id: 'open_cart', label: (c) => `Open ${c.t.kind === 'cart' && c.t.cart.type === 'ox_cart' ? 'ox cart' : 'hand cart'}`,
+    id: 'board_boat', label: (c) => `Get in the ${c.t.kind === 'cart' ? VESSELS[c.t.cart.type].name.toLowerCase() : 'boat'}`,
+    show: (c) => c.t.kind === 'cart' && !!VESSELS[c.t.cart.type].move.paddle && !c.g.boat && !c.g.riding,
+    check: (c) => (c.t.kind === 'cart' && !c.g.world.afloat(c.t.cart) ? 'It\'s aground: drag it into deeper water first (grab it and walk it in).' : null),
+    time: 0.8, fixedTime: true,
+    run: (c) => { if (c.t.kind === 'cart') c.g.board(c.t.cart); },
+  },
+  {
+    id: 'open_cart', label: (c) => `Open ${c.t.kind === 'cart' ? VESSELS[c.t.cart.type].name.toLowerCase() : 'cart'}`,
     show: (c) => c.t.kind === 'cart', time: 0,
     run: (c) => { if (c.t.kind === 'cart') c.g.ui.openContainer(c.t.cart); },
   },
   {
-    id: 'grab_cart', label: 'Grab the handles',
-    show: (c) => c.t.kind === 'cart' && c.t.cart.type === 'hand_cart' && c.g.pushing !== c.t.cart && !c.g.riding,
+    id: 'grab_cart', label: (c) => (c.t.kind === 'cart' && VESSELS[c.t.cart.type].medium === 'water' ? 'Drag it' : 'Grab the handles'),
+    show: (c) => c.t.kind === 'cart' && !!VESSELS[c.t.cart.type].move.push && c.g.pushing !== c.t.cart && !c.g.riding && !c.g.boat,
+    check: (c) => (c.t.kind === 'cart' && VESSELS[c.t.cart.type].medium === 'water' && c.t.cart.items.length ? 'Unload it first: it\'s too heavy to drag loaded.' : null),
     time: 0.4, fixedTime: true,
-    run: (c) => { if (c.t.kind === 'cart') { c.g.pushing = c.t.cart; c.g.msg('You take the handles. Walk to push the cart; press X (or aim at it) to let go.', 'info'); } },
+    run: (c) => {
+      if (c.t.kind !== 'cart') return;
+      c.g.pushing = c.t.cart;
+      c.g.msg(VESSELS[c.t.cart.type].medium === 'water'
+        ? 'You take hold of the bow and heave. Walk it down into the water (slowly: it\'s heavy); press X to let go, then get in once it floats.'
+        : 'You take the handles. Walk to push the cart; press X (or aim at it) to let go.', 'info');
+    },
   },
   {
     id: 'let_go_cart', label: 'Let go',
     show: (c) => c.t.kind === 'cart' && c.g.pushing === c.t.cart, time: 0,
-    run: (c) => { c.g.pushing = null; c.g.msg('You set the cart down.', 'info'); },
+    run: (c) => { c.g.pushing = null; c.g.msg(c.t.kind === 'cart' && VESSELS[c.t.cart.type].medium === 'water' ? 'You let go of it.' : 'You set the cart down.', 'info'); },
   },
   {
     id: 'hitch_world_cart', label: 'Hitch to your ox',
@@ -1175,7 +1191,7 @@ export const ACTIONS: ActionDef[] = [
   },
   {
     id: 'pick_up_cart', label: 'Pick up the cart',
-    show: (c) => c.t.kind === 'cart' && c.t.cart.hitched === undefined && c.g.pushing !== c.t.cart,
+    show: (c) => c.t.kind === 'cart' && !!VESSELS[c.t.cart.type].item && c.t.cart.hitched === undefined && c.g.pushing !== c.t.cart,
     check: (c) => (c.t.kind === 'cart' && c.t.cart.items.length ? 'Empty it first.' : null),
     time: 2,
     run: (c) => {
@@ -1186,7 +1202,7 @@ export const ACTIONS: ActionDef[] = [
       it.dmg = cart.dmg;
       g.inv.add(it);
       g.inventoryChanged();
-      g.msg(`You lift the ${cart.type === 'ox_cart' ? 'ox cart' : 'hand cart'} into your pack.`, 'info');
+      g.msg(`You lift the ${VESSELS[cart.type].name.toLowerCase()} into your pack.`, 'info');
     },
   },
   {
@@ -1194,7 +1210,9 @@ export const ACTIONS: ActionDef[] = [
     run: (c) => {
       if (c.t.kind !== 'cart') return;
       const k = c.t.cart, w = k.items.reduce((a, i) => a + itemDef(i.type).weight, 0);
-      c.g.msg(`${k.type === 'ox_cart' ? 'An ox cart' : 'A hand cart'}, QL ${k.ql.toFixed(1)}: ${w.toFixed(0)} / ${CART_CAPACITY[k.type]} kg loaded.${k.hitched !== undefined ? ' Hitched to your ox.' : ''}`, 'info');
+      const def = VESSELS[k.type];
+      const where = def.medium === 'water' ? (c.g.world.afloat(k) ? ' Afloat.' : ' Drawn up on the shore.') : '';
+      c.g.msg(`${def.name}, QL ${k.ql.toFixed(1)}: ${w.toFixed(0)} / ${CART_CAPACITY[k.type]} kg loaded.${k.hitched !== undefined ? ' Hitched to your ox.' : ''}${where}`, 'info');
     },
   },
 

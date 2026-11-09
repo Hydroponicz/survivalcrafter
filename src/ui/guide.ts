@@ -10,7 +10,7 @@ export const GUIDE_HTML = `
         <tr><td>Left click / E</td><td>Interact with what you're looking at</td></tr>
         <tr><td>Right click / F</td><td>Open the action menu (choose with the mouse or 1-9)</td></tr>
         <tr><td>1-9 · 0 · wheel</td><td>Equip a hotbar item · empty hands · scroll through the hotbar</td></tr>
-        <tr><td>R · X</td><td>Repeat last action · stop current action (or get off your horse)</td></tr>
+        <tr><td>R · X</td><td>Repeat last action · stop current action (or get off your horse, or step out of a boat)</td></tr>
         <tr><td>I / Tab · C · B · K</td><td>Inventory · Crafting · Build · Skills</td></tr>
         <tr><td>Hold Left Alt</td><td>Show the cursor: hover over things for tooltips, or drag windows and the quest panel around</td></tr>
         <tr><td>H · Esc</td><td>This guide · free the mouse / close windows</td></tr>
@@ -41,6 +41,7 @@ export const GUIDE_HTML = `
         <li>Set up a <b>smithy</b>: dig <b>clay</b> by the water and build a <b>forge</b> (B). Craft its gear (Crafting → Smithy) and place it from your pack: <b>bellows</b> against the forge (it can't get hot enough without them), a <b>stone anvil</b> nearby, and a <b>quench trough</b> filled with water. You'll also need a fired <b>crucible</b> and <b>tongs</b>. Mine <b>iron ore</b>, smelt it, forge iron tools and dip them in the trough while they're still glowing to harden them. Later, cast an <b>iron anvil</b>. Better gear makes the work easier and allows higher quality.</li>
         <li><b>Farm:</b> till fields with a hoe, sow wheat seeds, tend and harvest them, grind flour at a <b>quern</b> and bake <b>bread</b>.</li>
         <li><b>Hunt</b> deer and boar with a <b>stone spear</b> or a <b>bow</b> and <b>arrows</b> (arrows need <b>flint</b> from shores or broken boulders, and <b>feathers</b> from nests in trees you chop down). Combat is real-time: attack what's in front of you. When a boar <b>lowers its head and shakes</b>, it's about to charge: dodge! <b>Butcher</b> animals with a knife for meat and hides, and build a <b>bed</b> to set your respawn point.</li>
+        <li><b>Carve a dugout canoe.</b> Build menu (B) → Boats: place it near the water and work it with a <b>hatchet</b>, using 3 logs and 4 kindling (the fire chars out the wood you scoop away). Grab it to <b>drag it</b> down into the water, then <b>get in</b>. Carve a <b>paddle</b> from a plank and a shaft (with a knife) to paddle at full speed. <b>W/S</b> paddle, <b>A/D</b> steer, <b>Shift</b> digs in; <b>X</b> steps ashore. It holds 160 kg: open it like a cart.</li>
         <li><b>Tame a horse.</b> <b>Apple trees</b> grow in meadows: pick apples from the tree, or find them lying underneath. Wild horses roam open grassland in small herds. They're calm: walk up to one (they bolt if you hurt them or keep sprinting around them). Feed one apples: each has a chance to tame it, which grows with your <b>Taming</b> skill. A tamed horse wears a saddle and waits where you leave it. Aim at it and choose <b>Ride</b>: hold Shift to gallop, and press <b>X</b> to get off.</li>
         <li>Hurt? A <b>bandage</b> (4 plant fiber) heals 25 health over time. It takes a few seconds to apply, so get away from danger first.</li>
       </ol>

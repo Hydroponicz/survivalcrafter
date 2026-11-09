@@ -13,6 +13,7 @@ import { cylinderUV, surfaceMat, worldUV, type Surface } from './surfaces';
 import { builtShare, fillPlanes } from './pieceFill';
 import { furnitureMesh } from './furnitureMesh';
 import { STRUCTURES } from '../data/structures';
+import type { VesselId } from '../data/vessels';
 import {
   APPLE_AGE, APPLES, CROP_STAGES, corpseSpecies, cropPos, type AnimalObj, type AnimalSpecies, type BushObj, type ForageObj, type PileObj, type Species, type StructureObj,
   type TreeObj, type World, type WorldListener, type WorldObj,
@@ -709,7 +710,7 @@ export class WorldView implements WorldListener {
   }
 
   // ---------- animals
-  /** Carts: one model each, on the ground where they stand, showing a load when there's something in them. */
+  /** Vessels (carts, boats): one model each, on the ground or afloat, showing a load when there's something in them. */
   private cartMeshes = new Map<number, THREE.Group>();
   syncCarts() {
     const live = new Set<number>();
@@ -719,12 +720,19 @@ export class WorldView implements WorldListener {
       let m = this.cartMeshes.get(c.id);
       if (m && m.userData.loaded !== loaded) { this.group.remove(m); disposeObject(m); this.cartMeshes.delete(c.id); m = undefined; }
       if (!m) {
-        m = cartModel(c.type, loaded);
+        m = vesselModel(c.type, loaded);
         this.cartMeshes.set(c.id, m);
         this.group.add(m);
       }
-      m.position.set(c.x, this.world.terrain.heightAt(c.x, c.z), c.z);
+      m.position.set(c.x, this.world.vesselY(c), c.z);
       m.rotation.y = c.rot;
+      // Afloat, a boat rocks a little on the water.
+      if (this.world.afloat(c)) {
+        const t = performance.now() / 1000;
+        m.position.y += Math.sin(t * 1.3 + c.id) * 0.025;
+        m.rotation.z = Math.sin(t * 0.9 + c.id * 2) * 0.03;
+        m.rotation.x = Math.sin(t * 0.7 + c.id) * 0.012;
+      } else { m.rotation.z = 0; m.rotation.x = 0; }
       // The wheels turn as it rolls.
       const moved = Math.hypot(c.x - (m.userData.lx ?? c.x), c.z - (m.userData.lz ?? c.z));
       m.userData.lx = c.x; m.userData.lz = c.z;
@@ -888,11 +896,56 @@ export function animalModel(species: AnimalSpecies, seed = 0, tamed = false): TH
   return g;
 }
 
+/** A vessel's model, in its own frame (its bow, or the way it rolls, along +z). */
+export function vesselModel(type: VesselId, loaded: boolean): THREE.Group {
+  if (type === 'dugout') return dugoutModel(loaded);
+  return cartModel(type, loaded);
+}
+
+/**
+ * A dugout canoe: one log, hollowed out, pointed at both ends, a little sheer
+ * at bow and stern, two thwarts to sit on (and a bundle of goods if loaded).
+ * Its keel is at y = 0; it is 4.8 m long and 0.9 m across.
+ */
+function dugoutModel(loaded: boolean): THREE.Group {
+  const g = new THREE.Group();
+  const L = 2.4, B = 0.45, D = 0.42, rim = 0.5;
+  const half = (r: number) => new THREE.SphereGeometry(1, 20, 8, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2).scale(B * r, D * r, L * r);
+  // The outside of the log (its bark mostly hewn off), and the hollow inside, charred dark.
+  const hull = new THREE.Mesh(worldUV(half(1), 'rough_wood'), surfaceMat('rough_wood'));
+  hull.position.y = rim; hull.castShadow = true; hull.receiveShadow = true;
+  g.add(hull);
+  const inner = new THREE.Mesh(half(0.86), mat(0x3a2a1e, { side: THREE.BackSide, roughness: 1 }));
+  inner.position.y = rim + 0.01;
+  g.add(inner);
+  // The gunwale: the rim of the log, left thick.
+  const gun = new THREE.Mesh(new THREE.TorusGeometry(1, 0.06, 5, 32).rotateX(Math.PI / 2).scale(B * 0.93, 1, L * 0.93), surfaceMat('rough_wood'));
+  gun.position.y = rim;
+  gun.castShadow = true;
+  g.add(gun);
+  // Two thwarts left standing in the hollow, to sit on.
+  for (const z of [-1.1, 0.9]) {
+    const th = new THREE.Mesh(worldUV(new THREE.BoxGeometry(B * 1.6, 0.06, 0.22), 'rough_wood'), surfaceMat('rough_wood'));
+    th.position.set(0, rim - 0.12, z);
+    g.add(th);
+  }
+  if (loaded) {
+    const load = new THREE.Mesh(new THREE.SphereGeometry(0.5, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2).scale(0.6, 0.5, 1.0), mat(0x7a5a3a, { roughness: 1 }));
+    load.position.set(0, rim - 0.18, -0.1);
+    load.castShadow = true;
+    g.add(load);
+  }
+  g.userData.wheels = [];
+  g.userData.r = 1;
+  g.userData.loaded = loaded;
+  return g;
+}
+
 /**
  * A cart, in its own frame: it rolls along +z. A hand cart's handles reach
  * back (−z) to you; an ox cart's shafts reach forward (+z) to the ox.
  */
-export function cartModel(type: 'hand_cart' | 'ox_cart', loaded: boolean): THREE.Group {
+export function cartModel(type: VesselId, loaded: boolean): THREE.Group {
   const g = new THREE.Group();
   const ox = type === 'ox_cart';
   const k = ox ? 1.6 : 1;
@@ -1402,6 +1455,11 @@ export function buildPieceMesh(type: string, state: { lit?: boolean; open?: bool
       tex(new THREE.BoxGeometry(1.0, 0.35, 1.9), 'dark_planks', 0, 0.18, 0, { turn: true });
       add(new THREE.BoxGeometry(0.9, 0.12, 1.8), 0x9b7552, 0, 0.42, 0);
       break;
+    case 'dugout': {
+      // A hull being carved: the finished canoe's shape (the ghost and the work in progress).
+      g.add(dugoutModel(false));
+      break;
+    }
     case 'market_hall': {
       // Six posts, tie-beams, a thatched roof (ridge along its length), a flagged floor.
       for (const x of [-6, 0, 6]) for (const z of [-4, 4]) tex(new THREE.BoxGeometry(0.3, 4, 0.3), 'rough_wood', x, 2, z);

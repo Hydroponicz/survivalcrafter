@@ -72,6 +72,14 @@ export class Player {
   crouching = false;
   /** On horseback: faster, higher up, no crouching or jumping. */
   riding = false;
+  /**
+   * Afloat in a boat: its handling (set by the game). Each frame it's handed
+   * the paddling (forward/back), the steering (left/right) and whether you dig
+   * in hard, and says where the boat (and you in it) now are.
+   */
+  boat: { step(dt: number, throttle: number, turn: number, hard: boolean): { x: number; y: number; z: number; rot: number; speed: number } } | null = null;
+  /** The boat's heading (you face the way it points). */
+  private boatRot = 0;
   /** Slowed by what you're doing (pushing a cart). */
   speedMul = 1;
   /** Seconds since leaving the ground (jumping or falling), since landing, and since being hurt. */
@@ -248,7 +256,7 @@ export class Player {
   }
 
   get eye(): THREE.Vector3 {
-    return new THREE.Vector3(this.pos.x, this.pos.y + (this.swimming ? 1.2 : this.riding ? EYE + 0.95 : this.crouching ? CROUCH_EYE : EYE), this.pos.z);
+    return new THREE.Vector3(this.pos.x, this.pos.y + (this.boat ? 1.0 : this.swimming ? 1.2 : this.riding ? EYE + 0.95 : this.crouching ? CROUCH_EYE : EYE), this.pos.z);
   }
 
   forward(): THREE.Vector3 {
@@ -369,6 +377,7 @@ export class Player {
 
     const k = input.keys;
     if (fly) return this.flyUpdate(dt, k, world, allowMove);
+    if (this.boat) return this.boatUpdate(dt, k, allowMove);
     let mx = 0, mz = 0;
     if (allowMove) {
       if (k.has('KeyW')) mz -= 1;
@@ -518,6 +527,28 @@ export class Player {
     this.animate(dt);
   }
 
+  /** In a boat: W/S paddle ahead or back, A/D steer, Shift digs in (tiring); the boat carries you. */
+  private boatUpdate(dt: number, k: Set<string>, allowMove: boolean) {
+    let th = 0, tu = 0;
+    if (allowMove) {
+      if (k.has('KeyW')) th += 1;
+      if (k.has('KeyS')) th -= 1;
+      if (k.has('KeyA')) tu += 1;
+      if (k.has('KeyD')) tu -= 1;
+    }
+    const hard = th !== 0 && k.has('ShiftLeft') && this.stamina > 5;
+    const s = this.boat!.step(dt, th, tu, hard);
+    this.pos.set(s.x, s.y, s.z);
+    this.vel.set(Math.sin(s.rot) * s.speed, 0, Math.cos(s.rot) * s.speed);
+    this.boatRot = s.rot;
+    this.moving = th !== 0 || tu !== 0;
+    this.sprinting = false; this.swimming = false; this.wading = false; this.crouching = false;
+    this.onGround = true; this.slope = 'ok'; this.slide.set(0, 0);
+    if (th !== 0) this.stamina -= dt * (hard ? 6 : 0.6);
+    this.stamina = Math.max(0, this.stamina);
+    this.animate(dt);
+  }
+
   /** Dev fly mode: free movement, no gravity or collisions. */
   private flyUpdate(dt: number, k: Set<string>, _world: World, allowMove: boolean) {
     let mx = 0, mz = 0, my = 0;
@@ -636,7 +667,11 @@ export class Player {
     let pose: Pose;
     const w = this.work, look = { x: -Math.sin(this.yaw), z: -Math.cos(this.yaw) };
     const fwd = vx * look.x + vz * look.z, side = vx * -look.z + vz * look.x;
-    if (this.riding) {
+    if (this.boat) {
+      // Kneeling in the hull, facing the bow (dipping into a stroke as you paddle).
+      pose = this.moving ? { kind: 'loop', clip: 'interact', speed: 0.8 } : { kind: 'loop', clip: 'crouch_idle' };
+      face = this.boatRot;
+    } else if (this.riding) {
       // Sitting astride: knees bent, facing the way the horse goes.
       pose = { kind: 'loop', clip: 'crouch_idle' };
       // Facing the way the horse goes; standing still, it keeps facing where it was.
@@ -678,6 +713,8 @@ export class Player {
     this.model.position.copy(this.pos);
     // Swimming: in the water to the chest. Riding: up in the saddle.
     if (this.swimming) this.model.position.y -= 0.3;
+    // In a boat: down in the hull.
+    if (this.boat) this.model.position.y -= 0.15;
     if (this.riding) {
       // In the saddle (a little behind the middle of the horse), bobbing with its stride.
       this.model.position.y += 1.2 + Math.abs(Math.sin(this.walkPhase * 0.9)) * Math.min(1, speed / 8) * 0.08;

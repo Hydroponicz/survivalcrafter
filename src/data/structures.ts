@@ -2,6 +2,7 @@ import type { ToolKind } from './items';
 import type { StationKind } from './recipes';
 import type { SkillId } from './skills';
 import { FURNITURE } from './furniture';
+import type { VesselId } from './vessels';
 
 export type V3 = [number, number, number];
 /** Axis-aligned box in the piece's local frame (origin at bottom centre, before yaw). */
@@ -11,7 +12,7 @@ export interface StructureDef {
   id: string;
   name: string;
   icon: string;
-  category: 'Foundations' | 'Walls' | 'Roofs & stairs' | 'Doors & fences' | 'Crafting' | 'Furniture' | 'Smithy';
+  category: 'Foundations' | 'Walls' | 'Roofs & stairs' | 'Doors & fences' | 'Crafting' | 'Furniture' | 'Smithy' | 'Boats';
   /** Structural pieces snap to each other Valheim-style; stations are placed freely on the ground. */
   snap: boolean;
   boxes: Box[];
@@ -45,6 +46,8 @@ export interface StructureDef {
   water?: number;
   /** Only found in villages (not in the build menu yet). */
   village?: boolean;
+  /** Once finished it's a vessel, not a piece (a hull carved or built in place: see data/vessels). */
+  becomes?: VesselId;
   desc: string;
 }
 
@@ -219,6 +222,15 @@ defs.push({ id: 'stands', name: 'Stands', icon: '🪜', category: 'Crafting', sn
 defs.push({ id: 'gallows', name: 'Gallows', icon: '🪢', category: 'Crafting', snap: false, village: true,
   boxes: [box(0, 0.7, 0, 1.5, 0.7, 1.5), box(-1, 2.9, 0.6, 0.11, 1.45, 0.11), box(1, 2.9, 0.6, 0.11, 1.45, 0.11)], snaps: [],
   materials: [], skill: 'carpentry', difficulty: 10, stepTime: 3, desc: 'The town\'s gallows.' });
+
+// Boats are made where they'll be launched from: the hull is worked in place like any piece, and once
+// it's done it's a vessel (data/vessels) you can drag, load and paddle.
+// A dugout: a big log (three logs' worth, from one good tree) hollowed out with fire and axe:
+// burn a bed of embers along the top, chop out the charred wood, burn again (the kindling).
+defs.push({ id: 'dugout', name: 'Dugout canoe', icon: '🛶', category: 'Boats', snap: false, becomes: 'dugout',
+  boxes: [box(0, 0.35, 0, 0.45, 0.35, 2.4)], snaps: [],
+  materials: [{ item: 'log', count: 3 }, { item: 'kindling', count: 4 }], tool: 'hatchet', skill: 'carpentry', difficulty: 14, stepTime: 6,
+  desc: 'A canoe hollowed out of one great log with fire and axe. Build it near the water: it is heavy to drag. Paddle it with a paddle; it carries two and 160 kg.' });
 
 // A torch planted in the ground: it burns (its fuel is the burn left) and lights the spot.
 defs.push({ id: 'standing_torch', name: 'Torch', icon: '🔥', category: 'Crafting', snap: false, item: 'torch',

@@ -74,6 +74,8 @@ export const RECIPES: Recipe[] = [
     tool: 'hammer', inputs: [{ item: 'plank', count: 5 }, { item: 'shaft', count: 2 }, { item: 'log', count: 1 }], output: { item: 'hand_cart', count: 1 } },
   { id: 'ox_cart', name: 'Ox cart (needs a tamed ox)', category: 'Woodworking', skill: 'carpentry', difficulty: 16, time: 26,
     tool: 'hammer', inputs: [{ item: 'plank', count: 10 }, { item: 'shaft', count: 4 }, { item: 'log', count: 2 }, { item: 'cordage', count: 3 }], output: { item: 'ox_cart', count: 1 } },
+  { id: 'paddle', name: 'Paddle', category: 'Woodworking', skill: 'carpentry', difficulty: 6, time: 10,
+    tool: 'knife', inputs: [{ item: 'plank', count: 1 }, { item: 'shaft', count: 1 }], output: { item: 'paddle', count: 1 } },
   { id: 'saw_planks', name: 'Saw log into refined planks', category: 'Woodworking', skill: 'carpentry', difficulty: 10, time: 10,
     tool: 'saw', inputs: [{ item: 'log', count: 1 }], output: { item: 'refined_plank', count: 5 } },
   { id: 'wooden_shovel', name: 'Wooden shovel', category: 'Woodworking', skill: 'carpentry', difficulty: 8, time: 12,

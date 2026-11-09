@@ -3,6 +3,7 @@ import { getNextUid, isIdentified, itemDef, itemName, learnSpecies, makeItem, se
 import type { Recipe, StationKind } from '../data/recipes';
 import { SKILLS, Skills, type SkillId } from '../data/skills';
 import { pieceBoxes, STRUCTURES, type StructureDef, type V3 } from '../data/structures';
+import { VESSELS } from '../data/vessels';
 import { anvilGrade } from './smithy';
 import { isRock, Mat, WATER_LEVEL, type Volumes } from '../world/terrain';
 import { forageHeight, forageScale } from '../world/forageProps';
@@ -609,7 +610,7 @@ export class Game {
     for (const u of uids) {
       const it = this.inv.find(u);
       if (!it) continue;
-      if (w + itemDef(it.type).weight > cap) { this.msg(s.kind === 'cart' ? 'The cart is full.' : 'The chest is full.', 'fail'); break; }
+      if (w + itemDef(it.type).weight > cap) { this.msg(s.kind === 'cart' ? `The ${VESSELS[s.type].name.toLowerCase()} is full.` : 'The chest is full.', 'fail'); break; }
       this.inv.remove(u);
       delete it.hot;
       s.items.push(it);
@@ -1251,8 +1252,85 @@ export class Game {
 
   /** The horse you're riding, if any. */
   riding: AnimalObj | null = null;
-  /** The hand cart you're pushing, if any. */
+  /** The hand cart you're pushing (or boat you're dragging), if any. */
   pushing: CartObj | null = null;
+  /** The boat you're in, if any. */
+  boat: CartObj | null = null;
+
+  /** Get into a boat (it must be afloat): you take the steerer's seat and paddle it. */
+  board(k: CartObj) {
+    const def = VESSELS[k.type];
+    if (this.boat || this.riding || !def.move.paddle) return;
+    if (!this.world.afloat(k)) return this.msg('It\'s aground: drag it into deeper water first (grab it and walk it in).', 'fail');
+    this.pushing = null;
+    this.boat = k;
+    const st = { speed: 0 };
+    this.player.boat = { step: (dt, th, tu, hard) => this.stepBoat(k, st, dt, th, tu, hard) };
+    this.player.vel.set(0, 0, 0);
+    telemetry.event('boats', `Boarded a ${def.name.toLowerCase()}`, { id: k.id });
+    this.msg(this.inv.count('paddle') > 0
+      ? 'You climb in and take up the paddle. W/S to paddle ahead or back, A/D to steer, Shift to dig in; X to step out.'
+      : 'You climb in. With no paddle you can only scoop at the water with your hands (carve one from a plank and a shaft). W/S, A/D to steer; X to step out.', 'good');
+  }
+
+  /**
+   * A boat's handling, a frame at a time: paddling builds speed (a paddle, or
+   * slowly by hand; harder with Shift, slower astern), it coasts to a stop,
+   * turns faster with way on, and runs aground where the water's too shallow
+   * for its draft (bumping back off). Returns where you sit in it.
+   */
+  private stepBoat(k: CartObj, st: { speed: number }, dt: number, th: number, tu: number, hard: boolean) {
+    const def = VESSELS[k.type], pad = def.move.paddle!, w = this.world, draft = def.draft ?? 0.2;
+    const by = this.inv.count('paddle') > 0 ? 1 : 0.35;
+    const target = th * pad.speed * by * (hard ? 1.45 : 1) * (th < 0 ? 0.5 : 1);
+    st.speed += (target - st.speed) * Math.min(1, dt * (th ? 0.9 : 0.35));
+    if (Math.abs(st.speed) < 0.02 && !th) st.speed = 0;
+    // Steering bites with way on (a little even at rest: you can turn on the spot with a sweep stroke).
+    k.rot += tu * pad.turn * dt * (0.35 + 0.65 * Math.min(1, Math.abs(st.speed) / pad.speed));
+    const fx = Math.sin(k.rot), fz = Math.cos(k.rot);
+    const nx = k.x + fx * st.speed * dt, nz = k.z + fz * st.speed * dt;
+    const lead = Math.sign(st.speed || 1) * def.hit.hz * 0.85;
+    if (st.speed !== 0) {
+      if (w.depthAt(nx + fx * lead, nz + fz * lead) > draft && w.depthAt(nx, nz) > draft) { k.x = nx; k.z = nz; }
+      else {
+        if (Math.abs(st.speed) > 1.2) this.msg('The hull grinds on the bottom: too shallow here.', 'fail');
+        st.speed *= -0.15;
+      }
+    }
+    // You, in the steerer's seat.
+    const seat = def.seats?.[0] ?? 0;
+    return { x: k.x + fx * seat, y: w.vesselY(k) + 0.18, z: k.z + fz * seat, rot: k.rot, speed: st.speed };
+  }
+
+  /** Step out of the boat: onto the nearest bit of shore within reach, or else over the side into the water. */
+  disembark(quiet = false) {
+    const k = this.boat;
+    if (!k) return;
+    this.boat = null;
+    this.player.boat = null;
+    const t = this.world.terrain, p = this.player;
+    let best: { x: number; z: number; d: number } | null = null;
+    for (let r = 1.2; r <= 4.5 && !best; r += 0.6) {
+      for (let a = 0; a < 16; a++) {
+        const ang = (a / 16) * Math.PI * 2, x = k.x + Math.sin(ang) * r * 0.6 + Math.sin(k.rot) * Math.cos(ang) * r, z = k.z + Math.cos(ang) * r * 0.6 + Math.cos(k.rot) * Math.cos(ang) * r;
+        if (this.world.depthAt(x, z) > 0.05) continue;
+        const d = Math.hypot(x - p.pos.x, z - p.pos.z);
+        if (!best || d < best.d) best = { x, z, d };
+      }
+    }
+    if (best) {
+      const y = p.groundAt(this.world, best.x, t.heightAt(best.x, best.z) + 1, best.z).y;
+      p.pos.set(best.x, Number.isFinite(y) ? y + 0.02 : t.heightAt(best.x, best.z) + 0.02, best.z);
+      if (!quiet) this.msg('You step out onto the shore. The boat stays where you left it.', 'info');
+    } else {
+      // Over the side.
+      const sx = Math.cos(k.rot), sz = -Math.sin(k.rot);
+      p.pos.set(k.x + sx * 1.0, t.waterAt(k.x, k.z) - 1.25, k.z + sz * 1.0);
+      if (!quiet) this.msg('No shore in reach: you slip over the side into the water.', 'info');
+    }
+    p.vel.set(0, 0, 0);
+    telemetry.event('boats', 'Disembarked', { at: [Math.round(k.x), Math.round(k.z)], ashore: !!best });
+  }
 
   /** Set a cart down from your pack, just in front of you. */
   setDownCart(it: Item) {
@@ -1273,7 +1351,7 @@ export class Game {
     const p = this.player;
     const k = this.pushing;
     if (k) {
-      if (!this.world.carts.includes(k) || this.riding || p.swimming) this.pushing = null;
+      if (!this.world.carts.includes(k) || this.riding || this.boat || p.swimming) this.pushing = null;
       else {
         // Out in front of you, rolling the way you go.
         const v = p.vel, sp = Math.hypot(v.x, v.z);
@@ -1282,8 +1360,9 @@ export class Game {
         while (d > Math.PI) d -= Math.PI * 2;
         while (d < -Math.PI) d += Math.PI * 2;
         k.rot += d * Math.min(1, dt * 5);
-        k.x = p.pos.x + Math.sin(k.rot) * 1.45;
-        k.z = p.pos.z + Math.cos(k.rot) * 1.45;
+        const reach = VESSELS[k.type].hit.hz + 0.75;
+        k.x = p.pos.x + Math.sin(k.rot) * reach;
+        k.z = p.pos.z + Math.cos(k.rot) * reach;
       }
     }
     for (const c of this.world.carts) {
@@ -1298,7 +1377,7 @@ export class Game {
       c.x = ox.x - Math.sin(c.rot) * 2.6;
       c.z = ox.z - Math.cos(c.rot) * 2.6;
     }
-    this.player.speedMul = this.pushing ? 0.8 : 1;
+    this.player.speedMul = this.pushing ? VESSELS[this.pushing.type].move.push ?? 0.8 : 1;
   }
 
   /** Climb onto a tamed horse. */
@@ -1507,7 +1586,7 @@ export class Game {
       return off < reachOf(o) + 0.3;
     });
     const animals = this.world.animals.filter((a) => a !== this.riding && Math.hypot(a.x - origin.x, a.z - origin.z) < maxD + 2);
-    const carts = this.world.carts.filter((k) => Math.hypot(k.x - origin.x, k.z - origin.z) < maxD + 3);
+    const carts = this.world.carts.filter((k) => k !== this.boat && Math.hypot(k.x - origin.x, k.z - origin.z) < maxD + 6);
     const rocks = this.groundCover.bouldersNear(origin.x, origin.z, maxD + 1);
     const stumps = this.world.stumpsNear(origin.x, origin.z, maxD + 1);
     const p = new THREE.Vector3();
@@ -1518,9 +1597,9 @@ export class Game {
       if (!tooFar) {
         for (const k of carts) {
           // In the cart's own frame: its bed (and the handles or shafts).
-          const ox = k.type === 'ox_cart', dx = p.x - k.x, dz = p.z - k.z, s = Math.sin(k.rot), c = Math.cos(k.rot);
-          const lx = dx * c - dz * s, lz = dx * s + dz * c, h = p.y - t.heightAt(k.x, k.z);
-          if (Math.abs(lx) < (ox ? 0.85 : 0.55) && Math.abs(lz) < (ox ? 1.1 : 0.7) && h > 0 && h < (ox ? 1.4 : 1.0)) return { kind: 'cart', cart: k, point: p.clone() };
+          const hb = VESSELS[k.type].hit, dx = p.x - k.x, dz = p.z - k.z, s = Math.sin(k.rot), c = Math.cos(k.rot);
+          const lx = dx * c - dz * s, lz = dx * s + dz * c, h = p.y - this.world.vesselY(k);
+          if (Math.abs(lx) < hb.hx && Math.abs(lz) < hb.hz && h > -0.1 && h < hb.h) return { kind: 'cart', cart: k, point: p.clone() };
         }
         for (const a of animals) {
           const g = t.heightAt(a.x, a.z);
@@ -1793,6 +1872,17 @@ export class Game {
     s.ql = Math.max(s.ql, 50);
     this.world.changed(s);
     this.msg(`[dev] ${def.name} built instantly.`, 'info');
+    if (def.becomes) this.vesselFromPiece(s);
+  }
+
+  /** A finished hull (a piece worked in place) becomes the vessel it is: same place, heading and quality. */
+  vesselFromPiece(s: StructureObj) {
+    const id = STRUCTURES[s.type].becomes;
+    if (!id) return;
+    this.world.remove(s);
+    const k = this.world.addCart(id, s.x, s.z, s.yaw, s.ql);
+    telemetry.event('boats', `Finished a ${VESSELS[id].name.toLowerCase()}`, { id: k.id, ql: Math.round(s.ql) });
+    return k;
   }
 
   /** Clear the finds lying where a piece goes (stones, mushrooms, branches...): they'd poke up through it. */
@@ -1968,7 +2058,7 @@ export class Game {
       }
       // Fallen through the ground, or stuck inside it.
       const ground = t.heightAt(p.pos.x, p.pos.z);
-      if (!this.dev.on('fly') && (p.pos.y < ground - 6 || (p.penetration(this.world, p.pos.x, p.pos.y, p.pos.z, false) > 0.35 && !p.swimming))) {
+      if (!this.dev.on('fly') && (p.pos.y < ground - 6 || (p.penetration(this.world, p.pos.x, p.pos.y, p.pos.z, false) > 0.35 && !p.swimming && !this.boat))) {
         fix('player', 'Fell through or got stuck in the ground; freed.', { y: p.pos.y, ground });
         this.unstuck();
       }
@@ -1979,6 +2069,8 @@ export class Game {
       // Riding a horse that's gone, or riding flag without a horse.
       if (this.riding && !this.world.animals.includes(this.riding)) { fix('riding', 'The ridden horse no longer exists; dismounted.'); this.riding = null; p.riding = false; }
       if (!this.riding && p.riding) { fix('riding', 'Rider flag set without a horse; cleared.'); p.riding = false; }
+      if (this.boat && !this.world.carts.includes(this.boat)) { fix('boats', 'The boat you were in no longer exists; out of it.'); this.boat = null; p.boat = null; }
+      if (!this.boat && p.boat) { fix('boats', 'Boat handling set without a boat; cleared.'); p.boat = null; }
       // Holding something you no longer have.
       if (this.activeUid !== null && !this.inv.find(this.activeUid)) { fix('inventory', 'The active item was no longer in the pack; put away.', { uid: this.activeUid }); this.setActive(null); }
       // Items with broken numbers.
@@ -2055,7 +2147,7 @@ export class Game {
     if (inp.hit('KeyM')) this.ui.toggle('map');
     if (inp.hit('KeyG') && !this.placing) this.request(ACTION_MAP.survey, { g: this, t: { kind: 'none' } });
     if (inp.hit('KeyR')) this.repeatLast();
-    if (inp.hit('KeyX')) { if (this.action) this.cancelAction('You stop what you are doing.'); else if (this.riding) this.dismount(); else if (this.pushing) { this.pushing = null; this.msg('You set the cart down.', 'info'); } }
+    if (inp.hit('KeyX')) { if (this.action) this.cancelAction('You stop what you are doing.'); else if (this.riding) this.dismount(); else if (this.boat) this.disembark(); else if (this.pushing) { this.pushing = null; this.msg('You set the cart down.', 'info'); } }
     if (inp.hit('Escape')) this.stopPlacing();
     if (inp.hit('Backquote') || inp.hit('F2')) this.ui.toggle('dev');
     if (inp.hit('Digit0')) this.setActive(null);

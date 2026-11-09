@@ -10,6 +10,7 @@ import { drawIcons, itemIcon, onIconsReady, pieceIcon } from './itemIcons';
 import { pieceBounds } from '../world/pieceFill';
 import { CharacterPreview } from './preview';
 import { BUILDABLE, STRUCTURES, totalMaterials } from '../data/structures';
+import { VESSELS } from '../data/vessels';
 import { ACTION_MAP, craftProblem, forageName, type ActionDef, type Ctx, type Target } from '../game/actions';
 import { DEV_FLAGS, devCommands, type DevFlag } from '../game/dev';
 import { BIOME_NAMES, IDENTIFY } from '../data/forage';
@@ -467,7 +468,7 @@ export class UI {
       case 'water': return 'Water';
       case 'animal': return ANIMALS[t.animal.species].name;
       case 'rock': return t.rock.sc < 0.6 ? 'Small boulder' : t.rock.sc < 1.1 ? 'Boulder' : 'Large boulder';
-      case 'cart': return t.cart.type === 'ox_cart' ? 'Ox cart' : 'Hand cart';
+      case 'cart': return VESSELS[t.cart.type].name;
       case 'villager': return t.villager.lying ? `${t.villager.name} (asleep)` : `${t.villager.name}, ${t.villager.roleName}`;
       case 'trader': return `${t.trader.name}, travelling trader`;
       case 'stump': return `${t.stump.species[0].toUpperCase()}${t.stump.species.slice(1)} stump`;
@@ -983,7 +984,7 @@ export class UI {
       ];
       body.appendChild(this.itemRow(list, actions));
     }
-    const title = c.kind === 'pile' ? 'Pile on the ground' : c.kind === 'cart' ? (c.type === 'ox_cart' ? 'Ox cart' : 'Hand cart') : STRUCTURES[c.type].name;
+    const title = c.kind === 'pile' ? 'Pile on the ground' : c.kind === 'cart' ? VESSELS[c.type].name : STRUCTURES[c.type].name;
     this.frame('container', title, body);
   }
 

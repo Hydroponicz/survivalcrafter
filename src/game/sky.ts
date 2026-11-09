@@ -205,7 +205,9 @@ export class Sky {
     // The sea reaches past the view distance and follows you (its ripples are
     // fixed to the world, so they stay put as it moves).
     const seaSize = 16000;
-    const seaGeo = new THREE.PlaneGeometry(seaSize, seaSize);
+    // (Cut into a grid, not one great square: across two triangles 16 km wide the depth comes out
+    // too coarse close to you, and the sea would be drawn over a boat's hull or a swimmer just above it.)
+    const seaGeo = new THREE.PlaneGeometry(seaSize, seaSize, 128, 128);
     this.water = new THREE.Mesh(seaGeo, wm);
     this.water.rotation.x = -Math.PI / 2;
     this.water.position.set(0, WATER_LEVEL - 0.05, 0);
