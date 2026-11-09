@@ -50,6 +50,8 @@ export interface StructureDef {
   becomes?: VesselId;
   /** Has to reach out into the water: at this point along it (its local z), water at least this deep. */
   reachesWater?: { z: number; depth: number };
+  /** A slipway: the longest ship it takes (m). */
+  slip?: number;
   desc: string;
 }
 
@@ -237,10 +239,15 @@ defs.push({ id: 'dugout', name: 'Dugout canoe', icon: '🛶', category: 'Boats',
 // A slipway: a long bed of timbers running down the shore into the water, ships built on a cradle on it
 // (see data/ships) and slid down it at launch. Its landward end (local -z) on the shore, the seaward end
 // (+z) out over water deep enough to float a ship off it.
-defs.push({ id: 'slipway', name: 'Slipway', icon: '⚓', category: 'Boats', snap: false, reachesWater: { z: 22, depth: 1.6 },
+defs.push({ id: 'slipway', name: 'Slipway', icon: '⚓', category: 'Boats', snap: false, reachesWater: { z: 22, depth: 1.6 }, slip: 26,
   boxes: [box(-1.4, 0.2, 8, 0.25, 0.2, 14), box(1.4, 0.2, 8, 0.25, 0.2, 14)], snaps: [],
   materials: [{ item: 'log', count: 10 }, { item: 'plank', count: 10 }], tool: 'hatchet', skill: 'carpentry', difficulty: 12, stepTime: 5,
   desc: 'A shipyard\'s slip: a timber bed running down into the water, where ships up to 26 m long are built (aim at it to lay one down) and launched. Its far end must reach water at least 1.6 m deep.' });
+// A great slipway: longer and heavier, its ways on stone footings, for the biggest ships (a carrack, a great galley).
+defs.push({ id: 'great_slipway', name: 'Great slipway', icon: '⚓', category: 'Boats', snap: false, reachesWater: { z: 30, depth: 2.2 }, slip: 34,
+  boxes: [box(-1.8, 0.25, 12, 0.3, 0.25, 18), box(1.8, 0.25, 12, 0.3, 0.25, 18)], snaps: [],
+  materials: [{ item: 'log', count: 16 }, { item: 'refined_plank', count: 12 }, { item: 'rock_shard', count: 20 }, { item: 'mortar', count: 6 }], tool: 'hatchet', skill: 'carpentry', difficulty: 18, stepTime: 6,
+  desc: 'A great shipyard slip on stone footings, 36 m long, for ships up to 34 m: a carrack, a great galley. Its far end must reach water at least 2.2 m deep.' });
 // A raft: logs laid side by side and lashed across with cordage.
 defs.push({ id: 'log_raft', name: 'Log raft', icon: '🪵', category: 'Boats', snap: false, becomes: 'log_raft',
   boxes: [box(0, 0.2, 0, 1.3, 0.2, 1.6)], snaps: [],

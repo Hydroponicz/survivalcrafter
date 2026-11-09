@@ -11,7 +11,7 @@ import { pieceBounds } from '../world/pieceFill';
 import { CharacterPreview } from './preview';
 import { BUILDABLE, STRUCTURES, totalMaterials } from '../data/structures';
 import { vesselOf } from '../data/vessels';
-import { nextStep, SHIP_PRESETS, shipLength, shipMaterials, shipStats, totalSteps, type ShipDesign } from '../data/ships';
+import { allowed, nextStep, settle, SHIP_PRESETS, shipLength, shipMaterials, shipStats, totalSteps, type ShipDesign } from '../data/ships';
 import { ACTION_MAP, craftProblem, forageName, type ActionDef, type Ctx, type Target } from '../game/actions';
 import { DEV_FLAGS, devCommands, type DevFlag } from '../game/dev';
 import { BIOME_NAMES, IDENTIFY } from '../data/forage';
@@ -1028,7 +1028,9 @@ export class UI {
       this.frame('shipyard', 'Shipyard', body);
       return;
     }
-    const d = this.shipDraft, st = shipStats(d);
+    const d = this.shipDraft, maxL = STRUCTURES[slip.type].slip ?? 26;
+    settle(d);
+    const st = shipStats(d), ok = allowed(d);
     const pick = (label: string, opts: [string, string][], cur: string, set: (v: string) => void) => {
       const row = el('div', 'ship-row');
       row.appendChild(el('span', 'ship-label', label));
@@ -1043,22 +1045,26 @@ export class UI {
     const presets = el('div', 'ship-row');
     presets.appendChild(el('span', 'ship-label', 'Type'));
     for (const p of SHIP_PRESETS) {
-      const b = el('button', `ship-opt${p.design.type === d.type ? ' on' : ''}`, p.design.type);
+      const big = shipLength(p.design) > maxL;
+      const b = el('button', `ship-opt${p.design.type === d.type ? ' on' : ''}${big ? ' off' : ''}`, p.design.type);
+      if (big) b.title = `Too long for this slip (${shipLength(p.design)} m): build a great slipway.`;
       b.addEventListener('click', () => { this.shipDraft = { ...p.design }; this.render('shipyard'); });
       presets.appendChild(b);
     }
     body.appendChild(presets);
     const blurb = SHIP_PRESETS.find((p) => p.design.type === d.type)?.blurb;
     if (blurb) body.appendChild(el('div', 'build-desc', esc(blurb)));
-    pick('Length', [3, 4, 5, 6].map((b) => [`${b}`, `${b * 4 + 2} m`]), `${d.bays}`, (v) => { d.bays = +v; if (d.bays < 5 && d.masts === 2) d.masts = 1; });
+    pick('Length', [3, 4, 5, 6, 7, 8].filter((b) => b * 4 + 2 <= maxL).map((b) => [`${b}`, `${b * 4 + 2} m`]), `${Math.min(d.bays, Math.floor((maxL - 2) / 4))}`, (v) => { d.bays = +v; });
+    if (shipLength(d) > maxL) body.appendChild(el('div', 'build-desc warn', `At ${shipLength(d)} m she's too long for this slip (it takes up to ${maxL} m): choose a shorter length, or build her on a great slipway.`));
     pick('Beam', [['narrow', 'Narrow'], ['medium', 'Medium'], ['broad', 'Broad']], d.beam, (v) => { d.beam = v as ShipDesign['beam']; });
     pick('Planking', [['clinker', 'Clinker'], ['carvel', 'Carvel']], d.build, (v) => { d.build = v as ShipDesign['build']; });
-    pick('Masts', d.bays >= 5 ? [['1', 'One'], ['2', 'Two']] : [['1', 'One']], `${d.masts}`, (v) => { d.masts = +v as 1 | 2; });
-    pick('Rig', [['square', 'Square sail'], ['lateen', 'Lateen']], d.rig, (v) => { d.rig = v as ShipDesign['rig']; });
-    pick('Castles', [['0', 'None'], ['1', 'Sterncastle'], ['2', 'Fore and aft']], `${d.castles}`, (v) => { d.castles = +v as 0 | 1 | 2; });
+    pick('Masts', ok.masts.map((m) => [`${m}`, ['One', 'Two (main, mizzen)', 'Three (fore, main, mizzen)'][m - 1]]), `${d.masts}`, (v) => { d.masts = +v as ShipDesign['masts']; });
+    pick('Rig', ok.rigs.map((r) => [r, r === 'square' ? 'Square sails' : r === 'lateen' ? 'Lateens' : 'Mixed (square, lateen mizzen)']), d.rig, (v) => { d.rig = v as ShipDesign['rig']; });
     pick('Deck', [['open', 'Open hold'], ['decked', 'Decked']], d.decked ? 'decked' : 'open', (v) => { d.decked = v === 'decked'; });
+    pick('Castles', ok.castles.map((c) => [`${c}`, ['None', 'Sterncastle', 'Fore and aft', 'Great castles'][c]]), `${d.castles}`, (v) => { d.castles = +v as ShipDesign['castles']; });
+    pick('Oars', [['no', 'Sail only'], ['yes', 'Oars too']], d.oars ? 'yes' : 'no', (v) => { d.oars = v === 'yes'; });
     const turning = st.turn > 0.3 ? 'nimble' : st.turn > 0.2 ? 'handy' : st.turn > 0.14 ? 'steady' : 'slow to turn';
-    body.appendChild(el('div', 'ship-stats', `<span><b>${st.L} m</b> long, <b>${st.B.toFixed(1)} m</b> beam</span><span>Draws <b>${st.draft.toFixed(1)} m</b></span><span>Cargo <b>${(st.capacity / 1000).toFixed(1)} t</b></span><span>About <b>${st.knots} knots</b>, ${turning}</span><span><b>${totalSteps(d)}</b> steps to build</span>`));
+    body.appendChild(el('div', 'ship-stats', `<span><b>${st.L} m</b> long, <b>${st.B.toFixed(1)} m</b> beam</span><span>Draws <b>${st.draft.toFixed(1)} m</b></span><span>Cargo <b>${(st.capacity / 1000).toFixed(1)} t</b></span><span>About <b>${st.knots} knots</b>, ${turning}</span><span>A crew of <b>${st.crew}</b>${st.oarsmen ? ` (${st.oarsmen} at the oars)` : ''}</span><span><b>${totalSteps(d)}</b> steps to build</span>`));
     const mats = el('div', 'build-mats');
     for (const [item, count] of Object.entries(shipMaterials(d))) {
       const have = g.inv.count(item);

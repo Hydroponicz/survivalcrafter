@@ -4,7 +4,7 @@ import type { Recipe, StationKind } from '../data/recipes';
 import { SKILLS, Skills, type SkillId } from '../data/skills';
 import { pieceBoxes, STRUCTURES, type StructureDef, type V3 } from '../data/structures';
 import { VESSELS, vesselOf } from '../data/vessels';
-import { SLIP_LENGTH, shipLength, type ShipDesign } from '../data/ships';
+import { GREAT_SLIP_LENGTH, SLIP_LENGTH, shipLength, type ShipDesign } from '../data/ships';
 import { anvilGrade } from './smithy';
 import { isRock, Mat, WATER_LEVEL, type Volumes } from '../world/terrain';
 import { forageHeight, forageScale } from '../world/forageProps';
@@ -1939,7 +1939,8 @@ export class Game {
   layDownShip(slip: StructureObj, design: ShipDesign) {
     if (!slip.built) return this.msg('Finish building the slipway first.', 'fail');
     if (this.shipOn(slip)) return this.msg('There\'s already a ship on this slip.', 'fail');
-    if (shipLength(design) > SLIP_LENGTH) return this.msg(`This slip takes ships up to ${SLIP_LENGTH} m long.`, 'fail');
+    const max = STRUCTURES[slip.type].slip ?? SLIP_LENGTH;
+    if (shipLength(design) > max) return this.msg(`This slip takes ships up to ${max} m long${max < GREAT_SLIP_LENGTH ? ': build a great slipway for a bigger one' : ''}.`, 'fail');
     const L = shipLength(design);
     // Her stern at the head of the slip, her bow toward the water.
     const [x, , z] = toWorld(slip, [0, 0, -5 + L / 2]);
@@ -1960,7 +1961,8 @@ export class Game {
       const t = Math.min(1, s.launching / dur), e = t * t;
       // From the cradle to clear of the slip's end, settling down to her waterline.
       const slip = s.slip !== undefined ? this.world.objects.get(s.slip) : undefined;
-      const run = slip ? Math.max(4, 22 - ((s.from[0] - slip.x) * Math.sin(k.rot) + (s.from[1] - slip.z) * Math.cos(k.rot)) + def.hit.hz * 0.6) : def.hit.hz * 2;
+      const slipEnd = slip?.kind === 'structure' ? STRUCTURES[slip.type].reachesWater?.z ?? 22 : 22;
+      const run = slip ? Math.max(4, slipEnd - ((s.from[0] - slip.x) * Math.sin(k.rot) + (s.from[1] - slip.z) * Math.cos(k.rot)) + def.hit.hz * 0.6) : def.hit.hz * 2;
       k.x = s.from[0] + Math.sin(k.rot) * run * e;
       k.z = s.from[1] + Math.cos(k.rot) * run * e;
       const float = this.world.terrain.waterAt(k.x, k.z) - (def.draft ?? 1);

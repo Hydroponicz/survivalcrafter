@@ -557,3 +557,5 @@ button.dev-on { background: #6b5530; border-color: var(--accent); color: #fff3d6
 .shipyard .ship-stats { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 10px 0 8px; padding: 8px 10px; border-radius: 8px; background: rgba(255, 255, 255, 0.04); font-size: 13px; }
 .shipyard .ship-progress { height: 8px; border-radius: 4px; background: rgba(0, 0, 0, 0.35); overflow: hidden; margin: 6px 0 10px; }
 .shipyard .ship-progress i { display: block; height: 100%; background: linear-gradient(90deg, #b88a4a, #e8b562); }
+.shipyard .ship-opt.off { opacity: 0.45; }
+.shipyard .build-desc.warn { color: #f0b090; }

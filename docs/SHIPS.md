@@ -179,15 +179,46 @@ dock. Those are phase 4.
 - **Trade by sea:** the traders' system extended to ships between port towns.
   A ship carries tonnes where a cart carries a few hundred kg.
 
-**5. Ship types to aim for** (each one a set of parts):
-- **Viking-style longship:** clinker, oars and a square sail, shallow draft,
-  beachable
-- **Cog:** the Hanseatic trader, a high-sided clinker hull, one square sail,
-  castles fore and aft
-- **Hulk:** a round, roomy cargo ship
-- **Galley:** oars and lateen sails, Mediterranean
-- **Carrack:** the late medieval ship, three or four masts, carvel planking,
-  big castles. The top of the tree, needing the dry dock era's skills.
+**5. Ship types (done)**
+
+The shipyard starts from nine medieval types. Each one is a set of choices you
+can change.
+
+| Type | Length | Build | Rig | Character |
+|---|---|---|---|---|
+| Longship | 26 m | narrow, clinker, open | one square sail, oars | fast and shallow (beachable) |
+| Knarr | 18 m | medium, clinker, open | one square sail | the Norse trader |
+| Balinger | 18 m | medium, clinker, decked, sterncastle | square sail, oars | a quick coaster |
+| Cog | 22 m | broad, clinker, decked, fore and aft castles | square sail | the Hanseatic carrier |
+| Galley | 30 m | narrow, carvel, decked, sterncastle | two lateens, oars | fastest and handiest, little cargo |
+| Hulk | 26 m | broad, carvel, decked, sterncastle | square sail | the most cargo for her length |
+| Nef | 26 m | medium, carvel, decked, fore and aft castles | two lateens | the crusaders' round ship |
+| Caravel | 22 m | medium, carvel, decked, sterncastle | two lateens | quick and handy |
+| Carrack | 34 m | broad, carvel, decked, great castles | three masts, mixed rig | the great ship |
+
+New choices that came with them:
+- **Oars:** a bench of four oars to a bay. She's rowed as well as sailed and is
+  handier, at the cost of cargo room.
+- **Three masts:** fore, main and mizzen.
+- **Mixed rig:** square sails forward and a lateen on the mizzen.
+- **Great castles:** a two-storey sterncastle and a high forecastle.
+- **Lengths up to 34 m:** on the new **great slipway** (36 m on stone
+  footings; its far end must reach water 2.2 m deep).
+- **Crew figure:** the shipyard shows the crew each design will need. That's
+  phase 4.
+
+Some combinations aren't allowed:
+- two masts need 22 m or more, and three need 26 m
+- great castles need a deck and 26 m
+
+Oars are fitted with a saw, 3 refined planks and 4 oars a bay. Great castles
+take 18 refined planks, 6 shafts and an iron fitting each.
+
+Measured in a test:
+- **Carrack:** 34 m, 135 t of cargo, about 6.9 knots, slow to turn (47° in
+  6 s), 35 steps to build.
+- **Galley:** 30 m, 21 t, about 9.4 knots, handy (102° in 6 s), a crew of 38
+  (28 at the oars), 36 steps.
 
 ## Streamlining (how new things should be added)
 

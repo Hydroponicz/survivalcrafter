@@ -898,7 +898,7 @@ export const ACTIONS: ActionDef[] = [
   {
     id: 'demolish', label: 'Demolish',
     show: (c) => { const s = obj(c, 'structure'); return !!s && s.built && !STRUCTURES[s.type].item && !STRUCTURES[s.type].village && (toolIs(c, 'hammer') || toolIs(c, 'hatchet')); },
-    check: (c) => { const s = obj(c, 'structure'); return s?.type === 'slipway' && c.g.shipOn(s) ? 'There\'s a ship on the slip: launch her first.' : null; },
+    check: (c) => { const s = obj(c, 'structure'); return s && STRUCTURES[s.type].slip && c.g.shipOn(s) ? 'There\'s a ship on the slip: launch her first.' : null; },
     time: 12, skill: 'carpentry', difficulty: 5, stamina: 15, toolWear: 0.2,
     run: (c) => {
       const s = obj(c, 'structure')!;
@@ -1147,7 +1147,7 @@ export const ACTIONS: ActionDef[] = [
   // ===== the shipyard (see data/ships)
   {
     id: 'open_shipyard', label: (c) => { const s = obj(c, 'structure'); return s && c.g.shipOn(s) ? 'The shipyard (the ship on the slip)' : 'Lay down a ship'; },
-    show: (c) => { const s = obj(c, 'structure'); return !!s && s.type === 'slipway' && s.built; },
+    show: (c) => { const s = obj(c, 'structure'); return !!s && !!STRUCTURES[s.type].slip && s.built; },
     time: 0,
     run: (c) => { const s = obj(c, 'structure'); if (s) c.g.ui.openShipyard(s); },
   },
