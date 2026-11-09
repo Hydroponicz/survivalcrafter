@@ -14,7 +14,7 @@ import { builtShare, fillPlanes } from './pieceFill';
 import { furnitureMesh } from './furnitureMesh';
 import { STRUCTURES } from '../data/structures';
 import type { VesselId } from '../data/vessels';
-import { mastRig, shipStats, stageProgress, type ShipDesign } from '../data/ships';
+import { mastRig, shipSolids, shipStats, stageProgress, type ShipDesign } from '../data/ships';
 import {
   APPLE_AGE, APPLES, CROP_STAGES, corpseSpecies, cropPos, type AnimalObj, type AnimalSpecies, type BushObj, type ForageObj, type PileObj, type Species, type StructureObj,
   type ShipBuild, type TreeObj, type World, type WorldListener, type WorldObj,
@@ -1097,6 +1097,37 @@ function shipModel(d: ShipDesign, done: number, onSlip: boolean, loaded: boolean
       add(new THREE.Mesh(worldUV(new THREE.BoxGeometry(0.14, D + 0.4, 0.9), 'dark_planks'), dark)).position.set(0, (D + 0.4) / 2, -L / 2 - 0.35);
     }
   }
+  // Steps (up out of the hold, up to the castles) and, on the slip, the staging round her: a walkway down
+  // each side on posts, a handrail, planks across to her side, and a flight up to it at her stern.
+  for (const b of shipSolids(d, done, onSlip)) {
+    if (b.kind === 'rail') {
+      // A rail on stanchions: along her gunwale, round the staging.
+      const [cx, cy, cz] = b.c, [hx, hy, hz] = b.h;
+      add(new THREE.Mesh(new THREE.BoxGeometry(Math.max(0.07, hx * 2), 0.08, Math.max(0.07, hz * 2)), dark), false).position.set(cx, cy + hy - 0.04, cz);
+      const n = Math.max(1, Math.round(Math.max(hx, hz) * 2 / 1.2));
+      for (let k = 0; k <= n; k++) {
+        const t = -1 + (2 * k) / n;
+        add(new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, hy * 2, 5), wood), false).position.set(cx + (hx > hz ? t * hx : 0), cy, cz + (hz >= hx ? t * hz : 0));
+      }
+      continue;
+    }
+    if (b.kind !== 'step' && b.kind !== 'staging') continue;
+    const [cx, cy, cz] = b.c, [hx, hy, hz] = b.h;
+    const outside = Math.abs(cx) > B / 2 + 0.2;
+    if (b.kind === 'step' && outside) {
+      // A scaffold flight: a tread and a post under its outer edge.
+      add(new THREE.Mesh(worldUV(new THREE.BoxGeometry(hx * 2, 0.06, hz * 2), 'planks', true), planks)).position.set(cx, cy + hy - 0.03, cz);
+      for (const sx of [-1, 1]) add(new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, hy * 2, 5), wood), false).position.set(cx + sx * (hx - 0.05), cy, cz);
+    } else if (b.kind === 'step') {
+      add(new THREE.Mesh(worldUV(new THREE.BoxGeometry(hx * 2, hy * 2, hz * 2), 'dark_planks'), dark)).position.set(cx, cy, cz);
+    } else {
+      add(new THREE.Mesh(worldUV(new THREE.BoxGeometry(hx * 2, hy * 2, hz * 2), 'planks', true), planks)).position.set(cx, cy, cz);
+      if (hz > 2) {
+        // Posts down to the slip and the shore below, every 2.5 m, both edges.
+        for (const sx of [-1, 1]) for (let z = cz - hz + 0.2; z <= cz + hz; z += 2.5) add(new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.08, cy + 3.5, 6), wood), false).position.set(cx + sx * (hx - 0.06), (cy - 3.5) / 2, z);
+      }
+    }
+  }
   if (loaded && P.planking === d.bays && !d.decked) {
     for (let i = 0; i < 3; i++) add(new THREE.Mesh(worldUV(new THREE.BoxGeometry(0.8, 0.6, 0.8), 'dark_planks'), dark)).position.set((i - 1) * 0.9, bottom(0) + 0.6, 1.2 - (i % 2) * 1.0);
   }
@@ -1111,11 +1142,16 @@ function slipwayModel(tex: (geo: THREE.BufferGeometry, s: Surface, x?: number, y
   // Its length (from 6 m behind its origin), the ways' spread.
   const len = great ? 36 : 28, mid = len / 2 - 6, w = great ? 1.8 : 1.4, end = len - 6.5;
   for (const x of [-w, w]) tex(new THREE.BoxGeometry(great ? 0.6 : 0.5, great ? 0.5 : 0.4, len), 'rough_wood', x, great ? 0.25 : 0.2, mid);
+  // Sleepers across, close-laid and planked over between the ways: a deck to walk out on.
   for (let z = -5.5; z <= end; z += 1.5) tex(new THREE.BoxGeometry(w * 2 + 1.8, 0.18, 0.3), 'dark_planks', 0, -0.05, z, { turn: true });
+  for (const x of [-w - 0.6, -w * 0.45, w * 0.45, w + 0.6]) tex(new THREE.BoxGeometry(w * 0.55 + 0.1, 0.06, len - 0.4), 'planks', x, great ? 0.47 : 0.37, mid);
   // Footings of dressed stone under the great slip's landward half.
   if (great) for (let z = -5; z <= mid; z += 4) for (const x of [-w, w]) tex(new THREE.BoxGeometry(0.9, 1.2, 0.9), 'stone_wall', x, -0.7, z);
   // Piles under its seaward half, down into the water.
   for (let z = mid; z <= end; z += 3) for (const x of [-w - 0.7, w + 0.7]) tex(new THREE.CylinderGeometry(0.15, 0.17, 6, 7), 'rough_wood', x, -3, z);
+  // A rail across its seaward end, on posts.
+  tex(new THREE.BoxGeometry(w * 2 + 1.8, 0.1, 0.1), 'rough_wood', 0, great ? 1.45 : 1.35, end + 0.4, { turn: true });
+  for (let x = -w - 0.9; x <= w + 0.91; x += (w * 2 + 1.8) / 4) tex(new THREE.CylinderGeometry(0.06, 0.07, 1.0, 6), 'rough_wood', x, great ? 0.95 : 0.85, end + 0.4);
   // A bollard at the head of the slip (two for the great one).
   for (const x of great ? [-1.2, 1.2] : [0]) tex(new THREE.CylinderGeometry(0.22, 0.25, 0.9, 8), 'rough_wood', x, 0.45, -6.4);
 }

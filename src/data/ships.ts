@@ -195,3 +195,115 @@ export function shipVessel(d: ShipDesign): VesselDef {
   cache.set(d, v);
   return v;
 }
+
+// ---------- her lines, her solid parts, and the staging round her on the slip
+// (shared by the model in view.ts and by what you can stand on and bump into)
+
+/** The hull's lines, in her own frame (keel at y = 0, bow toward +z). */
+export function hullLines(d: ShipDesign) {
+  const s = shipStats(d), L = s.L, B = s.B, D = s.D - (d.decked ? 0.3 : 0);
+  const full = d.beam === 'narrow' ? 2 : d.beam === 'medium' ? 2.6 : 3.6;
+  const sheer = d.beam === 'narrow' ? 1.3 : 0.7;
+  return {
+    L, B, D, sheer,
+    /** How flat-floored she is (a cog's broad flat bottom to a longship's round one). */
+    flat: d.beam === 'broad' ? 0.55 : d.beam === 'medium' ? 0.8 : 1,
+    halfB: (z: number) => (B / 2) * Math.pow(Math.max(0, 1 - Math.pow(Math.abs(2 * z / L), full)), 0.5),
+    bottom: (z: number) => D * 0.7 * Math.pow(Math.abs(2 * z / L), 4),
+    rim: (z: number) => D + sheer * Math.pow(2 * z / L, 2),
+    /** Each bay's span along her: from the stern, the end bays running out to stem and sternpost. */
+    bay: (i: number) => { const bl = (L - 2) / d.bays; return { z0: i === 0 ? -L / 2 : -L / 2 + 1 + bl * i, z1: i === d.bays - 1 ? L / 2 : -L / 2 + 1 + bl * (i + 1) }; },
+  };
+}
+
+/** A solid part, in her frame: where it is, its half-size, and what it is (for drawing the staging). */
+export interface ShipSolid { c: [number, number, number]; h: [number, number, number]; kind: 'hull' | 'floor' | 'deck' | 'castle' | 'step' | 'staging' | 'rail' }
+
+/** Castles: where each one stands along her, how long and how high (as the model builds them). */
+export function castleSpans(d: ShipDesign): { z: number; len: number; high: number }[] {
+  const L = shipLength(d);
+  if (d.castles === 3) return [{ z: -L / 2 + L * 0.15, len: L * 0.28, high: 2.6 }, { z: -L / 2 + L * 0.1, len: L * 0.16, high: 4.8 }, { z: L / 2 - L * 0.06, len: L * 0.2, high: 3.0 }];
+  return [...(d.castles >= 1 ? [{ z: -L / 2 + L * 0.13, len: L * 0.22, high: 1.8 }] : []), ...(d.castles >= 2 ? [{ z: L / 2 - L * 0.1, len: L * 0.16, high: 1.4 }] : [])];
+}
+
+const RISE = 0.3, TREAD = 0.3;
+/** Half the gangway's width amidships, where the staging meets her side (and a gap in her rail). */
+const GANGWAY = 0.7;
+
+/**
+ * What of her you stand on and bump into, as far as she's built: the keel;
+ * each planked bay's sides and the floor of her hold; her deck as it's laid;
+ * her castles (with steps up to them); steps up out of the hold. And while
+ * she's on the slip, the staging round her: a walkway down each side at
+ * working height (a step below her gunwale), with a flight of steps up to
+ * it at her stern.
+ */
+export function shipSolids(d: ShipDesign, done: number, onSlip: boolean): ShipSolid[] {
+  const P = stageProgress(d, done), H = hullLines(d), out: ShipSolid[] = [];
+  const box = (kind: ShipSolid['kind'], cx: number, cy: number, cz: number, hx: number, hy: number, hz: number) => out.push({ c: [cx, cy, cz], h: [hx, hy, hz], kind });
+  if (P.keel) box('hull', 0, 0.17, 0, 0.15, 0.17, H.L * 0.46);
+  const floorTop = (z: number) => H.bottom(z) + H.D * 0.25, deckTop = H.D - 0.2;
+  for (let i = 0; i < P.planking; i++) {
+    const { z0, z1 } = H.bay(i), zc = (z0 + z1) / 2, hz = (z1 - z0) / 2;
+    const w = Math.min(H.halfB(z0 + hz * 0.3), H.halfB(z1 - hz * 0.3)), lo = H.bottom(zc), hi = H.rim(zc);
+    if (w < 0.25) continue;
+    // Her sides (up to the gunwale) and the floor of the hold.
+    for (const sx of [-1, 1]) box('hull', sx * (w - 0.08), (lo + hi) / 2, zc, 0.1, (hi - lo) / 2, hz);
+    box('floor', 0, floorTop(zc) - 0.06, zc, Math.max(0.2, w * 0.7), 0.06, hz);
+    // A rail along each side at the gunwale (a gangway gap amidships, where you come aboard).
+    for (const sx of [-1, 1]) {
+      const rail = (a: number, b: number) => { if (b - a > 0.1) box('rail', sx * (w - 0.05), hi + 0.5, (a + b) / 2, 0.06, 0.5, (b - a) / 2); };
+      if (z0 < -GANGWAY && z1 > GANGWAY) { rail(z0, -GANGWAY); rail(GANGWAY, z1); } else rail(z0, z1);
+    }
+    // Closed in at bow and stern.
+    if (i === 0 || i === d.bays - 1) box('hull', 0, (lo + hi) / 2, i === 0 ? z0 + 0.25 : z1 - 0.25, Math.max(0.15, H.halfB(i === 0 ? z0 + 0.6 : z1 - 0.6)), (hi - lo) / 2, 0.15);
+  }
+  for (let i = 0; i < (P.deck ?? 0); i++) {
+    const { z0, z1 } = H.bay(i);
+    box('deck', 0, deckTop - 0.06, (z0 + z1) / 2, Math.max(0.2, Math.min(H.halfB(z0), H.halfB(z1)) * 0.95), 0.06, (z1 - z0) / 2);
+  }
+  // Steps up out of the hold amidships (to the deck, or to the gunwale of an open hull), on each side.
+  if (P.planking === d.bays) {
+    const base = floorTop(0), top = d.decked && P.deck === d.bays ? deckTop : H.rim(0) - 0.3;
+    const n = Math.max(1, Math.ceil((top - base) / RISE)), w = H.halfB(0);
+    for (const sx of [-1, 1]) for (let k = 0; k < n; k++) {
+      const t = Math.min(top, base + (k + 1) * RISE);
+      box('step', sx * (w - 0.55), (base + t) / 2, -1.2 + k * TREAD, 0.35, (t - base) / 2, TREAD / 2);
+    }
+  }
+  // Castles, each solid with its top to stand on, and a flight up to it from the deck (or the hold).
+  castleSpans(d).slice(0, d.castles === 3 ? (P.castles ?? 0) >= 1 ? ((P.castles ?? 0) >= 2 ? 3 : 2) : 0 : (P.castles ?? 0)).forEach((c, k) => {
+    const w = H.halfB(c.z) * 1.9 + 0.2, y = H.rim(c.z), top = y + c.high - 0.09;
+    box('castle', 0, (H.bottom(c.z) + top) / 2, c.z, w / 2, (top - H.bottom(c.z)) / 2, c.len / 2);
+    // (The stacked upper storey of great castles stands on the lower: no separate steps to it.)
+    if (d.castles === 3 && k === 1) return;
+    const base = d.decked ? deckTop : floorTop(c.z), toward = c.z < 0 ? 1 : -1, n = Math.ceil((top - base) / RISE);
+    for (let s = 0; s < n; s++) {
+      const t = base + (s + 1) * RISE, z = c.z + toward * (c.len / 2 + (n - s - 0.5) * TREAD);
+      if (t > top + 0.01) break;
+      box('step', 0, (base + t) / 2, z, 0.45, (t - base) / 2, TREAD / 2);
+    }
+  });
+  if (onSlip) {
+    // The staging: a walkway down each side, a step below her gunwale amidships, and steps up to it at her stern.
+    const top = H.rim(0) - 0.45, x = H.B / 2 + 0.55, len = H.L / 2 - 0.5;
+    for (const sx of [-1, 1]) {
+      box('staging', sx * x, top - 0.05, 0, 0.5, 0.05, len);
+      // A handrail down its outer edge and across its far end (open at the stern, where the steps come up).
+      box('rail', sx * (x + 0.46), top + 0.5, 0, 0.04, 0.5, len);
+      box('rail', sx * x, top + 0.5, len - 0.04, 0.5, 0.5, 0.04);
+      // And down its inner edge too (the hull falls away from it toward her ends), but for the gangway.
+      box('rail', sx * (x - 0.46), top + 0.5, (-len - GANGWAY) / 2, 0.04, 0.5, (len - GANGWAY) / 2);
+      box('rail', sx * (x - 0.46), top + 0.5, (len + GANGWAY) / 2, 0.04, 0.5, (len - GANGWAY) / 2);
+      // Planks across to her side amidships.
+      box('staging', sx * (H.halfB(0) + 0.3), top - 0.05, 0, Math.max(0.1, x - H.halfB(0) - 0.3), 0.05, GANGWAY - 0.1);
+      // The flight up from the slip (the slip's deck lies just under her keel).
+      const base = -0.1, n = Math.ceil((top - base) / RISE);
+      for (let k = 0; k < n; k++) {
+        const t = Math.min(top, base + (k + 1) * RISE), z = -len - (n - k - 0.5) * TREAD;
+        box('step', sx * x, (base - 1 + t) / 2, z, 0.5, (t - base + 1) / 2, TREAD / 2);
+      }
+    }
+  }
+  return out;
+}

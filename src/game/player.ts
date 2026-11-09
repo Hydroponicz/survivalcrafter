@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import type { ToolKind, WearSlot } from '../data/items';
-import { pieceBoxes, STRUCTURES } from '../data/structures';
 import { buildToolMesh, HELD_ITEMS, swingPose, type SwingKind } from './tools';
 import { Y_MIN, type Terrain } from '../world/terrain';
 import { toLocal, type World } from '../world/world';
@@ -274,10 +273,9 @@ export class Player {
   groundAt(world: World, x: number, y: number, z: number): { y: number; piece: boolean } {
     let g = world.terrain.groundBelow(x, y + STEP, z);
     let piece = false;
-    for (const s of world.piecesNear(x, z)) {
-      if (!s.built) continue;
+    for (const s of world.solidsNear(x, z)) {
       const [lx, , lz] = toLocal(s, x, y, z);
-      for (const b of pieceBoxes(STRUCTURES[s.type], s.open)) {
+      for (const b of s.boxes) {
         if (Math.abs(lx - b.c[0]) > b.h[0] + 0.05 || Math.abs(lz - b.c[2]) > b.h[2] + 0.05) continue;
         const top = s.y + b.c[1] + b.h[1];
         if (top <= y + STEP && top > g) { g = top; piece = true; }
@@ -328,9 +326,11 @@ export class Player {
         if (o.age > 0.35) score += Math.max(0, RADIUS + TRUNK[o.species].r0 * treeScale(o).s * 0.9 - Math.hypot(x - o.x, z - o.z)) * 10;
         continue;
       }
-      if (o.kind !== 'structure' || !o.built) continue;
+    }
+    // Built pieces and ships: whatever stands higher than a step and lower than your head.
+    for (const o of world.solidsNear(x, z)) {
       const [lx, ly, lz] = toLocal(o, x, y, z);
-      for (const b of pieceBoxes(STRUCTURES[o.type], o.open)) {
+      for (const b of o.boxes) {
         const lo = b.c[1] - b.h[1], hi = b.c[1] + b.h[1];
         if (hi <= ly + STEP || lo >= ly + HEIGHT) continue;
         const px = b.h[0] + RADIUS - Math.abs(lx - b.c[0]);

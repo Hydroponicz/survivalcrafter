@@ -1,7 +1,7 @@
 import { type Item } from '../data/items';
-import { pieceBoxes, STRUCTURES, type V3 } from '../data/structures';
+import { pieceBoxes, STRUCTURES, type Box, type V3 } from '../data/structures';
 import { VESSELS, vesselOf, type VesselId } from '../data/vessels';
-import type { ShipDesign } from '../data/ships';
+import { shipSolids, type ShipDesign } from '../data/ships';
 import { mulberry32 } from './noise';
 import { Mat, Terrain } from './terrain';
 import { TreeCover, VEGETATION, type Species } from './trees';
@@ -162,8 +162,25 @@ export const cropPos = (key: number) => ({ x: (key % GSPAN) - GOFF + 0.5, z: Mat
 
 // ---------- piece geometry helpers
 
+/** Something solid you stand on and bump into: boxes in its own frame (a built piece's, a ship's). */
+export interface Solid { x: number; y: number; z: number; yaw: number; boxes: Box[] }
+
+/** How far a kind of piece reaches from where it stands (for finding the long ones, like a slipway, from anywhere along them). */
+const reachOf = new Map<string, number>();
+export function pieceReach(type: string): number {
+  let r = reachOf.get(type);
+  if (r === undefined) {
+    r = 0;
+    for (const b of STRUCTURES[type]?.boxes ?? []) r = Math.max(r, Math.hypot(Math.abs(b.c[0]) + b.h[0], Math.abs(b.c[2]) + b.h[2]));
+    reachOf.set(type, r);
+  }
+  return r;
+}
+/** Pieces reaching further than this are kept on a list of their own (the grid only finds things near where they stand). */
+const BIG = 3.5;
+
 /** A world point expressed in a piece's local frame. */
-export function toLocal(s: StructureObj, x: number, y: number, z: number): V3 {
+export function toLocal(s: { x: number; y: number; z: number; yaw: number }, x: number, y: number, z: number): V3 {
   const dx = x - s.x, dz = z - s.z;
   const c = Math.cos(s.yaw), sn = Math.sin(s.yaw);
   return [dx * c - dz * sn, y - s.y, dx * sn + dz * c];
@@ -175,6 +192,13 @@ export function toWorld(s: { x: number; y: number; z: number; yaw: number }, l: 
 }
 
 /** Is a point inside one of the piece's boxes (optionally grown by a margin)? */
+/** Whether a point lies inside something solid. */
+export function pointInSolid(s: Solid, x: number, y: number, z: number, margin = 0): boolean {
+  const [lx, ly, lz] = toLocal(s, x, y, z);
+  for (const b of s.boxes) if (Math.abs(lx - b.c[0]) <= b.h[0] + margin && Math.abs(ly - b.c[1]) <= b.h[1] + margin && Math.abs(lz - b.c[2]) <= b.h[2] + margin) return true;
+  return false;
+}
+
 export function pointInPiece(s: StructureObj, x: number, y: number, z: number, margin = 0): boolean {
   const [lx, ly, lz] = toLocal(s, x, y, z);
   for (const b of pieceBoxes(STRUCTURES[s.type], s.open)) {
@@ -218,6 +242,10 @@ export class World {
   /** Boulders you've broken up (by their spot: see groundcover's rockKey). */
   brokenRocks = new Set<string>();
   private grid = new Map<number, Set<WorldObj>>();
+  /** Pieces too long for the grid to find from their far end (slipways). */
+  private big = new Set<StructureObj>();
+  /** Ships' solid parts, worked out once for each stage of their building. */
+  private shipSolidCache = new WeakMap<object, { key: string; boxes: Box[] }>();
   private nextId = 1;
   private tickTimer = 0;
   listener?: WorldListener;
@@ -250,6 +278,7 @@ export class World {
     let set = this.grid.get(k);
     if (!set) this.grid.set(k, (set = new Set()));
     set.add(obj);
+    if (obj.kind === 'structure' && pieceReach(obj.type) > BIG) this.big.add(obj);
     this.listener?.added(obj);
     return obj;
   }
@@ -267,6 +296,7 @@ export class World {
   private detach(o: WorldObj) {
     this.objects.delete(o.id);
     this.grid.get(this.key(o.x, o.z))?.delete(o);
+    if (o.kind === 'structure') this.big.delete(o);
     this.listener?.removed(o);
   }
 
@@ -476,13 +506,42 @@ export class World {
 
   /** Built pieces whose colliders could touch a point. */
   piecesNear(x: number, z: number, r = 2.5): StructureObj[] {
-    return this.near(x, z, r + 1.5).filter((o): o is StructureObj => o.kind === 'structure');
+    const out = this.near(x, z, r + 1.5).filter((o): o is StructureObj => o.kind === 'structure' && !this.big.has(o));
+    for (const b of this.big) if (Math.hypot(b.x - x, b.z - z) < r + pieceReach(b.type) + 0.5) out.push(b);
+    return out;
   }
 
-  /** Is anything solid (terrain or a built piece) at this point? */
+  /**
+   * Everything solid near a point: built pieces (long ones found from
+   * anywhere along them), and ships, by what of them is built so far (and the
+   * staging round one on its slip).
+   */
+  solidsNear(x: number, z: number, r = 2.5): Solid[] {
+    const out: Solid[] = [];
+    for (const s of this.piecesNear(x, z, r)) if (s.built) out.push({ x: s.x, y: s.y, z: s.z, yaw: s.yaw, boxes: pieceBoxes(STRUCTURES[s.type], s.open) });
+    for (const c of this.carts) {
+      if (!c.ship) continue;
+      const def = vesselOf(c);
+      if (Math.hypot(c.x - x, c.z - z) > r + def.hit.hz + 4) continue;
+      out.push({ x: c.x, y: this.vesselY(c), z: c.z, yaw: c.rot, boxes: this.shipBoxes(c) });
+    }
+    return out;
+  }
+
+  private shipBoxes(c: CartObj): Box[] {
+    const s = c.ship!, onSlip = s.slipY !== undefined && s.launching === undefined;
+    const key = `${s.done}:${onSlip}`;
+    const hit = this.shipSolidCache.get(s);
+    if (hit && hit.key === key) return hit.boxes;
+    const boxes = shipSolids(s.design, s.done, onSlip).map((b) => ({ c: b.c, h: b.h }));
+    this.shipSolidCache.set(s, { key, boxes });
+    return boxes;
+  }
+
+  /** Is anything solid (terrain, a built piece, a ship) at this point? */
   blockedAt(x: number, y: number, z: number): boolean {
     if (this.terrain.solidAt(x, y, z)) return true;
-    for (const s of this.piecesNear(x, z, 0)) if (s.built && pointInPiece(s, x, y, z)) return true;
+    for (const s of this.solidsNear(x, z, 0)) if (pointInSolid(s, x, y, z)) return true;
     return false;
   }
 
