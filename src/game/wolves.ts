@@ -5,7 +5,8 @@
 // wherever you are, and runs you down on sight. They're afraid of fire: hold
 // a lit torch, or stand in the light of a campfire, a torch, a brazier or a
 // lantern, and they keep off at the edge of the light, circling, and shy away
-// if they come too close.
+// if they come too close. Kept off by the light for long enough (SPOOK_GIVE_UP
+// seconds), the pack gives you up for the night and goes home to its den.
 //
 // A pack is a den and a place where it is now (worked out whether you're near
 // or not); close to you, its wolves are real animals in the world (they
@@ -34,6 +35,10 @@ const isNight = (f: number) => f > 0.765 || f < 0.225;
 const REGROW_DAYS = 1.5;
 /** A carried torch keeps them this far off you (m). */
 const HELD_LIGHT = 5.5;
+/** Held off by the light this long (s), a pack gives up the hunt and goes home to its den till the next night. */
+const SPOOK_GIVE_UP = 10;
+/** A spell in the light is forgotten if the pack hasn't been near one for this long (s). */
+const SPOOK_FORGET = 20;
 
 export interface Den { key: string; x: number; z: number; yaw: number }
 export interface Pack {
@@ -46,6 +51,11 @@ export interface Pack {
   members: number;
   max: number;
   regrowAt: number;
+  /** Seconds this night its wolves have been held off by the light, and when they last were (game.elapsed). */
+  spooked?: number;
+  spookedAt?: number;
+  /** Given up the hunt (spooked by the light): home to the den for the rest of the night. */
+  retreat?: boolean;
 }
 
 export class Wolves {
@@ -72,6 +82,8 @@ export class Wolves {
     const night = this.night && !g.dev.on('peaceful');
     for (const pk of this.packs) {
       this.regrow(pk);
+      // Morning: a pack that gave up last night hunts again tonight.
+      if (!night && (pk.retreat || pk.spooked)) { pk.retreat = false; pk.spooked = 0; }
       const wolves = this.live.get(pk.id);
       const d = Math.hypot(pk.x - p.x, pk.z - p.z);
       if (wolves) {
@@ -187,7 +199,7 @@ export class Wolves {
   /** By night the pack ranges far, often toward you; by day it goes home to its den. */
   private travel(pk: Pack, dt: number, night: boolean) {
     const p = this.g.player.pos, gen = this.g.world.terrain.gen;
-    if (night) {
+    if (night && !pk.retreat) {
       if (!pk.goal || Math.hypot(pk.goal.x - pk.x, pk.goal.z - pk.z) < 20) {
         // On your trail (most nights, if you're within its range), or off across the country.
         if (Math.hypot(p.x - pk.den.x, p.z - pk.den.z) < RANGE + 400 && Math.random() < 0.6) {
@@ -207,7 +219,7 @@ export class Wolves {
     if (!pk.goal) return;
     const dx = pk.goal.x - pk.x, dz = pk.goal.z - pk.z, l = Math.hypot(dx, dz);
     if (l < 1) return;
-    const step = Math.min(l, TROT * (night ? 1 : 1.2) * dt);
+    const step = Math.min(l, TROT * (night && !pk.retreat ? 1 : 1.2) * dt);
     pk.x += (dx / l) * step; pk.z += (dz / l) * step;
   }
 
@@ -244,6 +256,8 @@ export class Wolves {
 
   /** A wolf struck: its whole pack (those close) turns on you, day or night. */
   provoked(a: AnimalObj) {
+    const pk = this.packs.find((x) => x.id === a.pack);
+    if (pk) pk.retreat = false;
     for (const o of this.g.world.animals) if (o.pack !== undefined && o.pack === a.pack && Math.hypot(o.x - a.x, o.z - a.z) < 50) { o.state = 'attack'; o.timer = 25; }
   }
 
@@ -283,9 +297,10 @@ export class Wolves {
     const light = this.lightAround(p.x, p.z);
     const night = this.night && !g.dev.on('peaceful');
     // Afraid of the light, whatever else: keep off its edge, and shy from it.
-    if (light && (night || a.state === 'attack') && toP < light.r + 16) {
+    if (light && !pk?.retreat && (night || a.state === 'attack') && toP < light.r + 16) {
       const dl = Math.hypot(a.x - light.x, a.z - light.z) || 1;
       const ox = (a.x - light.x) / dl, oz = (a.z - light.z) / dl;
+      if (pk && !pk.retreat) this.spook(pk);
       if (dl < light.r + 2) {
         a.state = 'flee'; a.timer = 1.5; a.windup = 0;
         a.dirX = ox; a.dirZ = oz; a.speed = ANIMALSPEED * 1.1;
@@ -302,6 +317,14 @@ export class Wolves {
       return true;
     }
     if (a.state === 'attack') return false;
+    // Given up for the night: off home at a lope, and lie up at the den.
+    if (pk?.retreat) {
+      const dd = Math.hypot(pk.den.x - a.x, pk.den.z - a.z);
+      if (dd <= 14) return false;
+      a.state = 'wander'; a.timer = 2;
+      a.dirX = (pk.den.x - a.x) / dd; a.dirZ = (pk.den.z - a.z) / dd; a.speed = ANIMALSPEED * 0.8;
+      return true;
+    }
     if (night) {
       // On the hunt: within sight of you it closes in to bite; further off it follows your scent.
       if (toP < 60 && !g.dev.on('peaceful')) {
@@ -310,7 +333,7 @@ export class Wolves {
           g.tips.add('wolves');
           g.ui.showNotice('Wolves!',
             `<p>A pack of <b>wolves</b> is hunting you. Wolves den in the forests at the foot of the mountains and lie up there by day, but <b>after sunset</b> they range far across the country, and they'll follow your scent.</p>
-            <p>They're <b>afraid of fire</b>. Hold a lit <b>torch</b>, or stand in the light of a lit <b>campfire</b>, torch, brazier or lantern, and they'll keep off at the edge of the light. Ring your camp with torches and keep the fire going through the night.</p>
+            <p>They're <b>afraid of fire</b>. Hold a lit <b>torch</b>, or stand in the light of a lit <b>campfire</b>, torch, brazier or lantern, and they'll keep off at the edge of the light, and if you hold them off long enough they give up and slink home to their den for the night. Ring your camp with torches and keep the fire going through the night.</p>
             <p>You can fight them: they're quick, and they bite hard, and when you strike one, its pack turns on you. They'll do the same by day if you attack them at the den.</p>`,
             'Stay in the light', () => {}, { kind: 'lesson' });
         }
@@ -331,6 +354,20 @@ export class Wolves {
       }
     }
     return false;
+  }
+
+  /** A pack held off by the light a moment longer (counted once a frame, whichever of its wolves sees it); long enough, and it goes home. */
+  private spook(pk: Pack) {
+    const g = this.g, now = g.elapsed, last = pk.spookedAt ?? -1e9;
+    if (now === last) return;
+    const dt = now - last;
+    pk.spooked = dt > SPOOK_FORGET ? 0 : (pk.spooked ?? 0) + Math.min(dt, 0.5);
+    pk.spookedAt = now;
+    if (pk.spooked < SPOOK_GIVE_UP) return;
+    pk.retreat = true; pk.goal = { x: pk.den.x, z: pk.den.z };
+    for (const o of this.live.get(pk.id) ?? []) if (o.state === 'attack') { o.state = 'wander'; o.timer = 2; o.windup = 0; }
+    g.msg('The wolves give up on you and slink off into the dark, back toward their den.', 'info');
+    telemetry.event('wolves', `A pack gives up, spooked by the light, and goes home`);
   }
 
   serialize() {
