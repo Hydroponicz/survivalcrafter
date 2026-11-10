@@ -103,13 +103,13 @@ const T: Record<string, Tutorial> = {
   },
   knap: {
     title: 'Knapping stone',
-    what: 'Chip flakes off the stone until it matches the tool shape outlined in gold.',
+    what: 'Chip flakes off the stone until it matches the tool shape drawn on the leather beside it. Nothing marks the shape on the stone: judge it by eye.',
     steps: [
-      { gesture: 'hold', text: 'Aim at the edge of the stone, outside the gold line. Hold the mouse button to build up force.' },
+      { gesture: 'hold', text: 'Aim at the edge of the stone, where it sticks out beyond the shape on the leather. Hold the mouse button to build up force.' },
       { gesture: 'release', text: 'Let go to strike and a flake breaks off. Harder hits, or hits further from the edge, take bigger flakes.' },
       { gesture: 'wait', text: 'Work your way around. Keep the force in the green band: hit too hard and you\'ll chip into the shape, and chip too much and the stone breaks.' },
     ],
-    quality: 'The closer the finished stone matches the outline, the better the tool.',
+    quality: 'The closer the finished stone matches the drawing, the better the tool.',
   },
   'strike:haft': {
     title: 'Hafting a mallet',

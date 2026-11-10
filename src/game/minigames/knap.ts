@@ -4,8 +4,9 @@ import type { Gesture } from './tutorials';
 
 // Knapping, as it's done: a stone on a leather pad, and a hammerstone in your
 // hand. Strike the stone's edge and a flake breaks away, leaving a scar;
-// work your way round until what's left is the shape of the tool (outlined
-// on the stone). Hold the button to put force behind a blow and let go to
+// work your way round until what's left is the shape of the tool (drawn in
+// charcoal on a scrap of leather beside it: nothing marks it on the stone,
+// you judge it by eye). Hold the button to put force behind a blow and let go to
 // strike: harder blows, and blows landed further in from the edge, take off
 // bigger flakes. Too hard, or too far in, and a flake bites into the shape
 // itself; bite too deep and the stone is spoiled.
@@ -103,7 +104,7 @@ export class KnapGame extends Minigame {
   private flakes: { mesh: THREE.Mesh; vel: THREE.Vector3; spin: THREE.Vector3; rest: boolean }[] = [];
   private aim = new THREE.Vector3();
   private strikes = 0;
-  /** The flake you'd take: its outline on the stone (pale, or red where it would bite the shape). */
+  /** The flake you'd take: its outline on the stone (pale; brighter for a hard blow). */
   private preview = new THREE.Group();
   private noiseSeed = Math.random() * 100;
   /** The force band that breaks clean flakes, and how much waste may be left. */
@@ -112,12 +113,12 @@ export class KnapGame extends Minigame {
 
   constructor(ease: number, private kind: KnapShape, hits: number) {
     super(ease);
-    this.instructions = `Shape the stone into ${NAMES[kind]}: chip flakes off its edges until it matches the gold outline. Hold the mouse button to build up force, then let go to strike.`;
+    this.instructions = `Shape the stone into ${NAMES[kind]}: the shape is drawn on the leather beside it. Chip flakes off the stone's edges, working inward, until what's left matches it. Hold the mouse button to build up force, then let go to strike.`;
     this.band = [0.28, 0.72 + 0.15 * ease];
     this.doneWaste = 0.12 + 0.1 * ease;
 
-    const pad = box(0.6, 0.02, 0.46, 0x7a5a3a);
-    pad.position.y = -0.0;
+    const pad = box(0.78, 0.02, 0.46, 0x7a5a3a);
+    pad.position.set(0.09, 0, 0);
     this.scene.add(pad);
 
     // The shape, and a stone around it a good deal bigger, irregular.
@@ -137,12 +138,9 @@ export class KnapGame extends Minigame {
     this.scene.add(this.stoneMesh);
     this.rebuild();
 
-    // The shape to leave, outlined on the stone.
-    const line = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(poly.map((p) => new THREE.Vector3(p.x, TOP + 0.004, p.y))),
-      new THREE.LineDashedMaterial({ color: 0xffd36a, dashSize: 0.008, gapSize: 0.005, transparent: true, opacity: 0.9, depthTest: false }));
-    line.computeLineDistances();
-    line.renderOrder = 10;
-    this.scene.add(line);
+    // The shape to leave isn't marked on the stone: it's drawn in charcoal on a scrap of leather to the right,
+    // smaller than life, turned lengthwise. You judge the stone against it by eye.
+    this.scene.add(leatherPattern(poly));
 
     // Where the next flake will come off: its outline on the stone, and the spot the hammerstone meets the edge.
     const pm = (c: number, o: number) => new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: o, depthTest: false, depthWrite: false, side: THREE.DoubleSide });
@@ -154,7 +152,7 @@ export class KnapGame extends Minigame {
     this.hammer = new THREE.Mesh(new THREE.DodecahedronGeometry(0.022, 1).scale(1.25, 0.9, 1), mat(0x8a857c, { flatShading: true }));
     this.hammer.castShadow = true;
     this.scene.add(this.hammer);
-    this.look([0, 0.47, 0.25], [0, 0, 0.01]);
+    this.look([0.07, 0.47, 0.26], [0.07, 0, 0.01]);
   }
 
   private wasteCells(): number {
@@ -271,16 +269,13 @@ export class KnapGame extends Minigame {
     const p = this.toScreen(this.aim.clone().setY(TOP + THICK));
     if (this.charging) {
       const [lo, hi] = this.band;
-      if (this.previewBites) return { x: p.x + 40, y: p.y - 30, text: 'the red flake would bite into the shape: ease off, or aim further out', gesture: 'release' };
       return { x: p.x + 40, y: p.y - 30, text: this.power < lo ? 'more force…' : this.power > hi ? 'too hard!' : 'let go to strike', gesture: 'release' };
     }
     const e = this.nearestEdge(this.aim.x, this.aim.z);
     const onEdge = e && e.inside < 0.02 && e.inside > -0.012;
-    const k = e ? idx(e.i, e.j) : -1;
-    if (onEdge && k >= 0 && this.shape[k]) return { x: p.x + 40, y: p.y - 30, text: 'that edge is the shape: strike the waste, outside the line', gesture: 'hold' };
     return onEdge
       ? { x: p.x + 40, y: p.y - 30, text: 'hold to put force behind the blow', gesture: 'hold' }
-      : { x: p.x + 40, y: p.y - 30, text: 'aim at the edge of the stone, outside the gold line', gesture: 'hold' };
+      : { x: p.x + 40, y: p.y - 30, text: 'aim at the edge of the stone: take off what isn\'t the shape on the leather', gesture: 'hold' };
   }
 
   update(dt: number, i: MgInput) {
@@ -332,7 +327,6 @@ export class KnapGame extends Minigame {
     const f = this.flakeAt(this.aim.x, this.aim.z, power);
     this.untint();
     this.preview.visible = f.ok && !this.blow;
-    this.previewBites = false;
     if (!f.ok || this.blow) return;
     // Tint the stone that would break away: pale where it's waste, red where it's the shape.
     const geo = this.stoneMesh.geometry, pos = geo.getAttribute('position') as THREE.BufferAttribute, col = geo.getAttribute('color') as THREE.BufferAttribute;
@@ -346,17 +340,16 @@ export class KnapGame extends Minigame {
       if (Math.hypot(pos.getX(v) - f.centre.x, pos.getZ(v) - f.centre.y) > f.R) continue;
       const cell = idx(Math.min(N - 1, i), Math.min(N - 1, j));
       if (!this.stone[cell]) continue;
-      const bite = !!this.shape[cell];
-      if (bite) this.previewBites = true;
-      const [tr, tg, tb] = bite ? [1.0, 0.25, 0.18] : f.hard ? [1.0, 0.8, 0.45] : [0.85, 0.92, 1.0];
-      const k = (bite ? 0.75 : 0.5) * strong;
+      // (Whether it would bite into the shape isn't shown: that's for you to judge from the pattern.)
+      const [tr, tg, tb] = f.hard ? [1.0, 0.8, 0.45] : [0.85, 0.92, 1.0];
+      const k = 0.5 * strong;
       C[v * 3] += (tr - C[v * 3]) * k; C[v * 3 + 1] += (tg - C[v * 3 + 1]) * k; C[v * 3 + 2] += (tb - C[v * 3 + 2]) * k;
       this.tinted.push(v);
     }
     col.needsUpdate = true;
     // And the spot the hammerstone meets the edge.
     const [dot] = this.preview.children as THREE.Mesh[];
-    (dot.material as THREE.MeshBasicMaterial).color.setHex(this.previewBites ? 0xff5a4a : 0xffffff);
+    (dot.material as THREE.MeshBasicMaterial).color.setHex(0xffffff);
     dot.position.set(f.edge.x, TOP + 0.006, f.edge.y);
   }
 
@@ -368,7 +361,6 @@ export class KnapGame extends Minigame {
     this.tinted = [];
     col.needsUpdate = true;
   }
-  private previewBites = false;
   /** The stone's own colours, and the corners tinted to show the next flake. */
   private baseCol = new Float32Array(0);
   private tinted: number[] = [];
@@ -444,7 +436,7 @@ export class KnapGame extends Minigame {
     const kept = this.keptShape(), waste = this.wasteCells() / this.wasteStart;
     if (!removed) this.say('Only grit comes away.', false);
     else if (nick > 0.03) this.say(hard ? 'Too hard! A big flake bites deep into the shape.' : 'Too deep: that flake bit into the shape.', false, 1.4);
-    else if (nick > 0) this.say('Careful: you nicked the outline.', false);
+    else if (nick > 0) this.say('Careful: that took a nick out of the shape.', false);
     else if (hard) this.say('Too hard, but it came away clean. Lucky.', true);
     else this.say(R > 0.03 ? 'A good big flake.' : 'A neat little flake.', true);
     this.sample(clamp01(1 - nick * 14) * (removed ? 1 : 0.4), 0.6);
@@ -562,4 +554,49 @@ export class KnapGame extends Minigame {
       { label: 'Waste left', value: waste, band: [0, this.doneWaste], color: '#c9a27a' },
     ];
   }
+}
+
+
+/**
+ * A scrap of soft leather lying to the right of the stone, the shape to knap
+ * drawn on it in charcoal (filled in faintly, a firm line round it), smaller
+ * than life and turned lengthwise. Its edge is stitched where it was cut.
+ */
+function leatherPattern(poly: THREE.Vector2[]): THREE.Group {
+  const g = new THREE.Group();
+  g.position.set(0.3, 0.011, 0.0);
+  g.rotation.y = 0.12;
+  // The leather: an irregular rounded patch.
+  const pts: THREE.Vector2[] = [];
+  for (let k = 0; k < 28; k++) {
+    const a = (k / 28) * Math.PI * 2, r = 1 + 0.06 * Math.sin(a * 3 + 1) + 0.04 * Math.sin(a * 5);
+    pts.push(new THREE.Vector2(Math.cos(a) * 0.072 * r, Math.sin(a) * 0.105 * r));
+  }
+  const hide = new THREE.Mesh(new THREE.ShapeGeometry(new THREE.Shape(pts)).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0xa47448, roughness: 0.95, side: THREE.DoubleSide }));
+  hide.receiveShadow = true;
+  g.add(hide);
+  const edge = new THREE.Mesh(new THREE.ShapeGeometry(new THREE.Shape(pts.map((p) => p.clone().multiplyScalar(1.04)))).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x6e4a2a, roughness: 1, side: THREE.DoubleSide }));
+  edge.position.y = -0.0008;
+  g.add(edge);
+  // Stitches round the edge.
+  for (let k = 0; k < 28; k += 2) {
+    const a = pts[k], b = pts[(k + 1) % 28], m = a.clone().add(b).multiplyScalar(0.5).multiplyScalar(0.92);
+    const st = new THREE.Mesh(new THREE.BoxGeometry(0.0012, 0.0008, 0.006), new THREE.MeshStandardMaterial({ color: 0xe0d0a8, roughness: 1 }));
+    st.position.set(m.x, 0.0008, -m.y);
+    st.rotation.y = Math.atan2(b.x - a.x, b.y - a.y);
+    g.add(st);
+  }
+  // The shape, smaller than life, its length along the leather.
+  let maxX = 0;
+  for (const p of poly) maxX = Math.max(maxX, Math.abs(p.x));
+  const scale = Math.min(0.62, 0.085 / Math.max(1e-3, maxX));
+  const drawn = poly.map((p) => new THREE.Vector2(p.y * scale, p.x * scale));
+  const fill = new THREE.Mesh(new THREE.ShapeGeometry(new THREE.Shape(drawn)).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x2a221c, transparent: true, opacity: 0.28, side: THREE.DoubleSide }));
+  fill.position.y = 0.0009;
+  g.add(fill);
+  // The line, a little uneven, as drawn with a burnt stick.
+  const line = drawn.map((p, k) => new THREE.Vector3(p.x + Math.sin(k * 1.7) * 0.0006, 0.0014, -p.y + Math.cos(k * 2.3) * 0.0006));
+  const tube = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(line, true), line.length * 2, 0.0011, 4, true), new THREE.MeshBasicMaterial({ color: 0x1a1612 }));
+  g.add(tube);
+  return g;
 }
