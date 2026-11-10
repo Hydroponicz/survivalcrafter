@@ -5,7 +5,7 @@ import { STRUCTURES, totalMaterials, type StructureDef } from '../data/structure
 import { vesselOf } from '../data/vessels';
 import { nextStep, shipLength, totalSteps } from '../data/ships';
 import type { SkillId } from '../data/skills';
-import { isRock, isSoft, Mat, MAT_NAMES, Y_MIN } from '../world/terrain';
+import { isRock, isSoft, Mat, MAT_NAMES, WATER_LEVEL, Y_MIN } from '../world/terrain';
 import { telemetry } from './telemetry';
 import {
   ANIMALS, APPLE_AGE, APPLES, corpseSpecies, toLocal, toWorld, CROP_STAGES, type CartObj, cropKey, type AnimalObj, type BushObj, type Crop, type ForageObj, type PileObj, type StructureObj, type Stump, type TreeObj, type WorldObj,
@@ -611,6 +611,58 @@ export const ACTIONS: ActionDef[] = [
       g.msg('You drink the fresh water.', 'info');
       g.quests?.note('drank');
     },
+  },
+  // ===== fishing: cast from the bank (or a jetty), strike, play the fish in; you fish until you stop
+  {
+    id: 'fish', label: 'Fish',
+    show: (c) => c.t.kind === 'water' && toolIs(c, 'rod'),
+    check: (c) => (c.g.boat || c.g.riding ? 'Get out onto the bank (or a jetty) to fish.' : null),
+    time: 30, skill: 'fishing', difficulty: 5,
+    minigame: (c) => {
+      const g = c.g, p = g.player, t = g.world.terrain, rod = c.tool!;
+      const pt = c.t.kind === 'water' ? c.t.point : p.pos;
+      return {
+        kind: 'fish', fine: rod.type === 'fine_fishing_rod', skill: g.skills.get('fishing'),
+        from: { x: p.pos.x, y: p.pos.y, z: p.pos.z }, toward: { x: pt.x, z: pt.z },
+        water: (x: number, z: number) => {
+          const surface = t.waterAt(x, z), depth = surface - t.heightAt(x, z);
+          return depth > 0.02 ? { surface, depth, sea: Math.abs(surface - WATER_LEVEL) < 0.3 } : null;
+        },
+        ground: (x: number, z: number) => t.heightAt(x, z),
+        clearance: (a: THREE.Vector3, b: THREE.Vector3) => {
+          // From the line between them to the nearest tree trunk's bark.
+          const mx = (a.x + b.x) / 2, mz = (a.z + b.z) / 2, len = Math.hypot(b.x - a.x, b.z - a.z) || 1;
+          let room = 9;
+          for (const o of g.world.near(mx, mz, len / 2 + 3)) {
+            if (o.kind !== 'tree' || o.age < 0.25) continue;
+            const ux = (b.x - a.x) / len, uz = (b.z - a.z) / len, ox = o.x - a.x, oz = o.z - a.z;
+            const along = Math.max(0, Math.min(len, ox * ux + oz * uz));
+            room = Math.min(room, Math.hypot(ox - ux * along, oz - uz * along) - (0.25 + 0.35 * treeScale(o).s));
+          }
+          return room;
+        },
+        dayFraction: () => g.world.dayFraction,
+        rodTip: () => {
+          let tip: THREE.Object3D | null = null;
+          p.heldItem.traverse((o) => { if (o.userData.rodTip) tip = o; });
+          return tip ? (tip as THREE.Object3D).getWorldPosition(new THREE.Vector3()) : null;
+        },
+        onCatch: ({ fish, kg, quality, seconds }) => {
+          // Into your pack, fresh: the better you played it (and the bigger it is), the better the fish.
+          const base = g.skills.rollQuality('fishing', rod.ql, 0, itemDef(rod.type).toolPower ?? 1);
+          const big = (kg - fish.kg[0]) / Math.max(0.01, fish.kg[1] - fish.kg[0]);
+          g.give(fish.id, Math.max(1, Math.min(99, base * (0.6 + 0.5 * quality) + big * 12)), 1);
+          g.msg(`You land a ${kg >= 1 ? `${kg.toFixed(1)} kg` : `${Math.round(kg * 1000)} g`} ${fish.name.toLowerCase()}.`, 'good');
+          const before = g.skills.get('fishing');
+          g.skills.gain('fishing', 5 + fish.strength * 20, true, seconds);
+          if (Math.floor(before) !== Math.floor(g.skills.get('fishing'))) g.msg(`Fishing increased to ${Math.floor(g.skills.get('fishing'))}.`, 'skill');
+          g.wear(rod, 0.4);
+          g.tutorials.record('fish');
+          telemetry.event('fishing', `Caught a ${kg} kg ${fish.id}`);
+        },
+      };
+    },
+    run: () => { /* (each fish is landed as you catch it: see the minigame's onCatch) */ },
   },
   {
     id: 'fill_canteen', label: 'Fill canteen',

@@ -157,6 +157,17 @@ const T: Record<string, Tutorial> = {
     ],
     quality: 'Clean, well-timed blows make better planks and kindling.',
   },
+  fish: {
+    title: 'Fishing',
+    what: 'Cast your line onto the water, wait for a fish to take the bait, strike, and play it in. Deeper water holds bigger fish; dawn and dusk are the best times, and eels bite at night. Cast off the end of a jetty for the deep water.',
+    steps: [
+      { gesture: 'hold', text: 'Hold the mouse button to swing the rod back, and let go to cast: let go at the top of the swing for the longest cast. Move the mouse left and right to aim.' },
+      { gesture: 'wait', text: 'Watch the float. Little twitches are fish nibbling: leave them. Strike too soon and you spook them.' },
+      { gesture: 'click', text: 'When the float is pulled right under, click at once to strike and set the hook.' },
+      { gesture: 'hold', text: 'Hold to reel in, keeping the tension in the green. Let go when it gets too tight or the line snaps; let it go slack too long and the hook shakes loose. When the fish runs one way, move the mouse the other way to turn it.' },
+    ],
+    quality: 'Playing a fish well (the line in the green) brings it in in better shape. Keep fishing as long as you like: right-click to stop.',
+  },
   boulder: {
     title: 'Breaking a boulder',
     what: 'Break the boulder up with your pickaxe for small rocks (and now and then a nodule of flint). Every blow bites into the stone, and it crumbles bit by bit.',

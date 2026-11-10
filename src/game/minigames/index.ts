@@ -8,6 +8,7 @@ import { BuildGame } from './build';
 import { ChopGame, type BlockSpot, type ChopVariant } from './chop';
 import { FireDrillGame, type FireSpot } from './firedrill';
 import { BoulderGame, type BoulderSpot } from './boulder';
+import { FishGame, type FishSpot } from './fish';
 import type { StructureObj } from '../../world/world';
 import { StrikeGame, type StrikeVariant } from './strike';
 import { KnapGame, type KnapShape } from './knap';
@@ -16,6 +17,7 @@ import { PourGame, QuenchGame } from './smithy';
 import type { Input } from '../input';
 import { gestureHtml, tutorialFor, type Tutorial } from './tutorials';
 import { FURNITURE } from '../../data/furniture';
+import { FISH } from '../../data/fish';
 
 export type MinigameSpec =
   | { kind: 'saw'; cuts: number }
@@ -33,7 +35,8 @@ export type MinigameSpec =
   | { kind: 'knap'; shape: KnapShape; hits: number }
   | { kind: 'build'; s: StructureObj; material: string }
   | { kind: 'chop'; variant: ChopVariant; block?: BlockSpot }
-  | ({ kind: 'boulder' } & BoulderSpot);
+  | ({ kind: 'boulder' } & BoulderSpot)
+  | ({ kind: 'fish' } & FishSpot);
 
 /**
  * `toolType`: the item you're working with, shown in the scene where the work uses one.
@@ -47,6 +50,7 @@ export function createMinigame(spec: MinigameSpec, ease: number, toolType?: stri
       return new ChopGame(ease, spec.variant, spec.block ?? { x: cam.position.x, y: 0, z: cam.position.z - 1, top: cam.position.y - 1.1 }, toolType, cam);
     }
     case 'boulder': return new BoulderGame(ease, spec, camera ?? new THREE.PerspectiveCamera());
+    case 'fish': return new FishGame(ease, spec, camera ?? new THREE.PerspectiveCamera());
     case 'saw': return new SawGame(ease, spec.cuts);
     case 'bowdrill': {
       // Out in the world: the kit laid out where you are (or beside the fire you're lighting).
@@ -71,8 +75,8 @@ export function createMinigame(spec: MinigameSpec, ease: number, toolType?: stri
 }
 
 /** Work played out in the world itself (building, splitting at the block), drawn by the game's own camera. */
-function inWorld(mg: Minigame): mg is (BuildGame | ChopGame | FireDrillGame | BoulderGame) {
-  return mg instanceof BuildGame || mg instanceof ChopGame || mg instanceof FireDrillGame || mg instanceof BoulderGame;
+function inWorld(mg: Minigame): mg is (BuildGame | ChopGame | FireDrillGame | BoulderGame | FishGame) {
+  return mg instanceof BuildGame || mg instanceof ChopGame || mg instanceof FireDrillGame || mg instanceof BoulderGame || mg instanceof FishGame;
 }
 
 /** The hands-on work for each recipe. */
@@ -88,6 +92,8 @@ export const RECIPE_MINIGAMES: Record<string, MinigameSpec> = {
   torch: { kind: 'bowdrill' },
   // (Stringing the bow and binding the kit together.)
   fire_kit: { kind: 'cord', plies: 3 },
+  fishing_rod: { kind: 'cord', plies: 4 },
+  fine_fishing_rod: { kind: 'carve', passes: 2, make: 'shaft' },
   relight_torch: { kind: 'bowdrill' },
   bandage: { kind: 'cord', plies: 3 },
   bow: { kind: 'carve', passes: 2, make: 'shaft' },
@@ -122,6 +128,7 @@ export const RECIPE_MINIGAMES: Record<string, MinigameSpec> = {
   iron_anvil: { kind: 'pour' },
   roast_mushroom: { kind: 'heat', variant: 'roast' },
   cooked_meat: { kind: 'heat', variant: 'roast' },
+  ...Object.fromEntries(FISH.map((f) => [`cook_${f.id}`, { kind: 'heat', variant: 'roast' } as MinigameSpec])),
   bread: { kind: 'heat', variant: 'bake' },
   mint_tea: { kind: 'heat', variant: 'brew' },
   flour: { kind: 'crank', variant: 'grind', turns: 4 },
@@ -170,6 +177,7 @@ export function minigameVerb(spec: MinigameSpec): string {
     case 'build': return 'build';
     case 'chop': return 'split';
     case 'boulder': return 'break stone';
+    case 'fish': return 'fish';
     case 'heat': return { roast: 'cook', bake: 'bake', fire: 'fire', brew: 'brew' }[spec.variant];
     case 'place': return 'lay';
     case 'center': return 'throw';

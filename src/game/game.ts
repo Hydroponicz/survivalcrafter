@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { getNextUid, isIdentified, itemDef, itemName, learnSpecies, makeItem, setNextUid, TORCH_BURN, WEAR_SLOTS, CLOTHING_SLOTS, type Item, type WearSlot } from '../data/items';
 import type { Recipe, StationKind } from '../data/recipes';
 import { SKILLS, Skills, type SkillId } from '../data/skills';
+import { FISH_BY_ID } from '../data/fish';
 import { pieceBoxes, STRUCTURES, type StructureDef, type V3 } from '../data/structures';
 import { VESSELS, vesselOf } from '../data/vessels';
 import { BuildGame } from './minigames/build';
@@ -653,8 +654,9 @@ export class Game {
     } else {
       this.inv.remove(uid);
       const verb = f.verb ? f.verb.toLowerCase() : 'eat';
-      this.msg(`You ${verb} the ${name}.${it.type === 'raw_meat' || it.type === 'mushroom' ? ' It doesn\'t taste great raw.' : ''}`, 'info');
-      if (it.type === 'raw_meat' && Math.random() < 0.3) { p.health -= 8; this.msg('Your stomach cramps.', 'fail'); }
+      const raw = it.type === 'raw_meat' || !!FISH_BY_ID[it.type];
+      this.msg(`You ${verb} the ${name}.${raw || it.type === 'mushroom' ? ' It doesn\'t taste great raw.' : ''}`, 'info');
+      if (raw && Math.random() < 0.3) { p.health -= 8; this.msg('Your stomach cramps.', 'fail'); }
     }
     if (f.effect) this.applyEffect(f.effect, it.type);
     // Eating something teaches you what it was, one way or another.

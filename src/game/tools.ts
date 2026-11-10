@@ -172,6 +172,29 @@ export function buildToolMesh(kind: ToolKind | undefined, itemType?: string): TH
       // The bow drill and its makings, bundled up (world/firekitModel).
       g.add(fireKitBundle());
       break;
+    case 'rod': {
+      // A long springy rod from the grip (at the hand) out to its tip: a plain shaft with a cord winder
+      // for the primitive one; a planed, jointed rod with a cork grip, guides and a wooden reel for the fine one.
+      const fine = itemType === 'fine_fishing_rod';
+      const L = fine ? 2.4 : 2.1;
+      const rodMat = fine ? mat(0xb08850, { roughness: 0.45 }) : mat(0x8a6a44, { roughness: 0.9 });
+      add(new THREE.CylinderGeometry(0.006, fine ? 0.016 : 0.019, L, 7), rodMat, 0, L / 2 - 0.25, 0);
+      if (fine) {
+        add(new THREE.CylinderGeometry(0.022, 0.022, 0.28, 8), mat(0xc8a070, { roughness: 1 }), 0, -0.05, 0); // cork grip
+        add(new THREE.CylinderGeometry(0.045, 0.045, 0.035, 14).rotateZ(Math.PI / 2), mat(0x5a3c22, { roughness: 0.6 }), 0.0, 0.16, -0.05);
+        add(new THREE.CylinderGeometry(0.008, 0.008, 0.05, 6).rotateX(Math.PI / 2), mat(0x3a2a1a), 0.025, 0.16, -0.08);
+        for (const y of [0.55, 1.0, 1.45, 1.85]) add(new THREE.TorusGeometry(0.009, 0.0018, 4, 10).rotateY(Math.PI / 2), mat(0x9aa0a6, { metalness: 0.6, roughness: 0.3 }), 0, y, -0.012);
+      } else {
+        add(new THREE.CylinderGeometry(0.024, 0.024, 0.16, 7), mat(0xc8b48a, { roughness: 1 }), 0, 0.06, 0); // cord wrap for the grip
+        add(new THREE.BoxGeometry(0.02, 0.12, 0.05), mat(0x6e5236), 0, 0.22, -0.035);
+        add(new THREE.BoxGeometry(0.022, 0.09, 0.06), mat(0xd8c8a0), 0, 0.22, -0.035); // cord wound on it
+      }
+      const tip = new THREE.Object3D();
+      tip.position.set(0, L - 0.25, 0);
+      tip.userData.rodTip = true;
+      g.add(tip);
+      break;
+    }
   }
   return g;
 }

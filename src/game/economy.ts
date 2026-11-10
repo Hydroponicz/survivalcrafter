@@ -15,6 +15,7 @@
 // stores the villagers work from.
 
 import { itemDef, makeItem, type Item } from '../data/items';
+import { FISH } from '../data/fish';
 import type { HouseRole, Village } from '../world/villages';
 import type { StructureObj } from '../world/world';
 import type { Game } from './game';
@@ -40,6 +41,9 @@ export const GOODS: Record<string, GoodDef> = {
   wheat_seeds: { value: 1, want: 16, job: 'farmer' },
   cooked_meat: { value: 7, want: 1, perHead: true, job: 'butcher', meals: 1 },
   raw_meat: { value: 4, want: 4, job: 'butcher' },
+  // (Fish: nobody in a village fishes yet, so the stores take what you bring, and the job board may ask for some.)
+  cooked_fish: { value: 5, want: 3, job: 'butcher' },
+  ...Object.fromEntries(FISH.map((f) => [f.id, { value: 1 + f.serves * 2, want: 1, job: 'butcher' as HouseRole }])),
   hide: { value: 6, want: 4, job: 'butcher' },
   wool: { value: 3, want: 8, job: 'shepherd' },
   log: { value: 4, want: 10, job: 'woodcutter' },

@@ -78,6 +78,14 @@ export const sfx = {
   clink() { tone(2300 + Math.random() * 500, 0.14, 0.03, 'square'); noise(0.04, 5200, 2, 0.05); },
   /** A small stone landing. */
   patter() { noise(0.03, 2200 + Math.random() * 1800, 2, 0.02 + Math.random() * 0.02); },
+  /** Something into the water: a float landing (small) or a fish thrashing (big). */
+  splash(k = 1) { noise(0.12 + 0.2 * k, 900 + Math.random() * 500, 0.7, 0.05 + 0.08 * k); noise(0.06, 2600, 1.2, 0.03 * k); },
+  /** The float plunging under: a bite! */
+  plop() { tone(320, 0.08, 0.05, 'sine'); tone(180, 0.12, 0.05, 'sine', 0.04); noise(0.1, 700, 1, 0.06); },
+  /** The reel's ratchet as you wind in. */
+  reel() { noise(0.018, 4200 + Math.random() * 800, 3, 0.025); },
+  /** The line parts. */
+  snap() { tone(1400, 0.05, 0.06, 'square'); noise(0.08, 3000, 1.5, 0.08); tone(220, 0.2, 0.03, 'triangle', 0.03); },
   /** The whole stone gives way: a deep crunch and a rattle of rubble. */
   crumble() {
     noise(0.9, 120, 0.6, 0.3, 'lowpass');

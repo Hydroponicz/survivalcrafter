@@ -1,3 +1,4 @@
+import { FISH } from './fish';
 import type { VesselId } from './vessels';
 import { FURNITURE } from './furniture';
 // Item definitions. Every item instance carries its own quality (QL 1-100)
@@ -6,12 +7,12 @@ import { FURNITURE } from './furniture';
 export type FoodEffect = 'nausea' | 'poison' | 'severe_poison' | 'heal' | 'refresh' | 'soothe';
 
 export type ToolKind =
-  | 'knife' | 'hatchet' | 'pickaxe' | 'shovel' | 'hoe' | 'hammer' | 'saw' | 'scythe' | 'weapon' | 'tongs' | 'crucible' | 'bow' | 'firekit';
+  | 'knife' | 'hatchet' | 'pickaxe' | 'shovel' | 'hoe' | 'hammer' | 'saw' | 'scythe' | 'weapon' | 'tongs' | 'crucible' | 'bow' | 'firekit' | 'rod';
 
 /** What each tool kind is called in requirement messages. */
 export const TOOL_NAMES: Record<ToolKind, string> = {
   knife: 'knife', hatchet: 'hatchet', pickaxe: 'pickaxe', shovel: 'shovel', hoe: 'hoe', hammer: 'hammer', saw: 'saw',
-  scythe: 'scythe', weapon: 'weapon', tongs: 'pair of tongs', crucible: 'crucible', bow: 'bow', firekit: 'fire making kit',
+  scythe: 'scythe', weapon: 'weapon', tongs: 'pair of tongs', crucible: 'crucible', bow: 'bow', firekit: 'fire making kit', rod: 'fishing rod',
 };
 
 /** Where on the body something is worn. */
@@ -179,6 +180,12 @@ const defs: ItemDef[] = [
   { id: 'hearty_stew', name: 'Hearty stew', icon: '🍲', weight: 3.5, food: { nutrition: 45, water: 15, returns: 'clay_jar' },
     desc: 'Meat and wild onion slow-cooked in a jar. The most filling meal in the game.' },
   { id: 'roast_mushroom', name: 'Roasted mushroom', icon: '🍄', weight: 0.1, food: { nutrition: 8 }, desc: 'Smoky and filling.' },
+  // --- fishing
+  { id: 'fishing_rod', name: 'Fishing rod', icon: '🎣', weight: 0.9, tool: 'rod', toolPower: 0.7, desc: 'A long springy shaft with a cord line, a bone hook and a cork float. Hold it and aim at water to fish: cast, wait for the float to go under, strike, and play the fish in.' },
+  { id: 'fine_fishing_rod', name: 'Fine fishing rod', icon: '🎣', weight: 0.7, tool: 'rod', toolPower: 1.2, desc: 'A jointed rod with a planed butt, line guides and a wooden reel. Casts further, bites come sooner, the line holds a heavy fish, it reels in faster, and now and then it hooks two from a shoal.' },
+  ...FISH.map((f) => ({ id: f.id, name: f.name, icon: '🐟', weight: Math.round(((f.kg[0] + f.kg[1]) / 2) * 10) / 10, food: { nutrition: 3 },
+    desc: `A ${f.sea ? 'sea' : 'freshwater'} fish (${f.kg[0]}–${f.kg[1]} kg). Cook it at a fire${f.serves > 1 ? `: a big fish, it makes ${f.serves} cooked fish` : ''}. Raw, it may make you sick.` })),
+  { id: 'cooked_fish', name: 'Cooked fish', icon: '🍢', weight: 0.3, food: { nutrition: 16, water: 2 }, desc: 'Fish roasted over the fire: flaky, filling and good.' },
   { id: 'raw_meat', name: 'Raw meat', icon: '🥩', weight: 0.6, food: { nutrition: 3 }, desc: 'Raw meat. Cook it first, or it may make you sick.' },
   { id: 'cooked_meat', name: 'Cooked meat', icon: '🍖', weight: 0.5, food: { nutrition: 22 }, desc: 'A hearty meal.' },
   { id: 'flour', name: 'Flour', icon: '🥡', weight: 0.5, desc: 'Ground wheat. Mix it into dough.' },

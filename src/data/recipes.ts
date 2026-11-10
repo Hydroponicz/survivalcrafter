@@ -1,3 +1,4 @@
+import { FISH } from './fish';
 import type { ToolKind } from './items';
 import type { SkillId } from './skills';
 import { FURNITURE } from './furniture';
@@ -58,6 +59,10 @@ export const RECIPES: Recipe[] = [
     inputs: [{ item: 'torch_spent', count: 1 }, { item: 'kindling', count: 1 }, { item: 'branch', count: 1 }], output: { item: 'torch', count: 1 } },
   { id: 'bandage', name: 'Bandage', category: 'Primitive', skill: 'herbalism', difficulty: 2, time: 5,
     inputs: [{ item: 'plant_fiber', count: 4 }], output: { item: 'bandage', count: 1 } },
+  { id: 'fishing_rod', name: 'Fishing rod', category: 'Primitive', skill: 'toolcrafting', difficulty: 5, time: 10,
+    inputs: [{ item: 'shaft', count: 3 }, { item: 'cordage', count: 5 }], output: { item: 'fishing_rod', count: 1 } },
+  { id: 'fine_fishing_rod', name: 'Fine fishing rod', category: 'Woodworking', skill: 'carpentry', difficulty: 14, time: 16, tool: 'knife',
+    inputs: [{ item: 'refined_plank', count: 1 }, { item: 'shaft', count: 3 }, { item: 'cordage', count: 5 }], output: { item: 'fine_fishing_rod', count: 1 } },
   { id: 'bow', name: 'Short bow', category: 'Primitive', skill: 'toolcrafting', difficulty: 10, time: 12,
     tool: 'knife', inputs: [{ item: 'shaft', count: 2 }, { item: 'cordage', count: 2 }], output: { item: 'bow', count: 1 } },
   { id: 'arrows', name: 'Arrows', category: 'Primitive', skill: 'toolcrafting', difficulty: 6, time: 8,
@@ -160,6 +165,8 @@ export const RECIPES: Recipe[] = [
     output: { item: 'hearty_stew', count: 1 } },
   { id: 'roast_mushroom', name: 'Roasted penny bun', category: 'Cooking', skill: 'cooking', difficulty: 2, time: 5,
     stations: ['fire'], inputs: [{ item: 'mushroom', count: 1 }], output: { item: 'roast_mushroom', count: 1 } },
+  ...FISH.map((f): Recipe => ({ id: `cook_${f.id}`, name: `Cooked fish (${f.name.toLowerCase()})`, category: 'Cooking', skill: 'cooking', difficulty: 4 + f.serves * 2, time: 6 + f.serves * 3,
+    stations: ['fire'], inputs: [{ item: f.id, count: 1 }], output: { item: 'cooked_fish', count: f.serves } })),
   { id: 'cooked_meat', name: 'Cooked meat', category: 'Cooking', skill: 'cooking', difficulty: 6, time: 10,
     stations: ['fire'], inputs: [{ item: 'raw_meat', count: 1 }], output: { item: 'cooked_meat', count: 1 } },
   { id: 'flour', name: 'Flour', category: 'Cooking', skill: 'cooking', difficulty: 8, time: 8,
