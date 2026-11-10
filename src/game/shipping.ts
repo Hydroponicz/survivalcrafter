@@ -129,6 +129,12 @@ export class Shipping {
     // Under way at a steady pace, easing off near either end (warping out of the harbour, and in).
     const total = r.len.at(-1)!, ease = Math.min(1, 0.2 + Math.min(s.d, total - s.d) / 60);
     s.d += this.pace(s) * ease * dt;
+    // Coming up on a slower ship ahead on the same passage: ease off and keep a cable or so astern of her, not sail through her.
+    for (const o of this.list) {
+      if (o === s || o.rest > 0 || o.from !== s.from || o.to !== s.to) continue;
+      const gap = o.d - s.d;
+      if (gap > 0 && gap < 110) s.d = Math.max(s.d - this.pace(s) * ease * dt, o.d - 110);
+    }
     if (s.d >= total) this.arrive(s);
   }
 
@@ -242,13 +248,56 @@ export class Shipping {
       const fb = (s.fromBerth ?? s.berth) % a.harbour!.berths.length;
       const ba = a.harbour!.berths[fb], bb = b.harbour!.berths[s.berth % b.harbour!.berths.length];
       const ma = this.moored({ ...s, berth: fb }, a), mb = this.moored(s, b);
-      pts = [ma, ba.entry, ...route, bb.entry, mb];
+      pts = [ma, ba.entry, ...this.ownCourse(s, route), bb.entry, mb];
     }
     const len = [0];
     for (let i = 1; i < pts.length; i++) len.push(len[i - 1] + Math.hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z));
     r = { pts, len };
     this.voyages.set(s.id, r);
     return r;
+  }
+
+  /**
+   * Her own course along a sea route: the route made into gentle curves, and
+   * kept to her starboard side of it (her own lane, so ships bound the other
+   * way pass well clear, and each sails her own line), wandering a little as a
+   * helmsman does; never into shallow water. Close to the harbour mouths she
+   * comes back in to the fairway.
+   */
+  private ownCourse(s: MerchantShip, route: Pt[]): Pt[] {
+    const gen = this.g.world.terrain.gen;
+    const deep = (x: number, z: number) => gen.height(x, z) < SEA - DEEP + 0.5;
+    // Every 25 m along it.
+    const dense: Pt[] = [route[0]];
+    for (let i = 1; i < route.length; i++) {
+      const a = route[i - 1], b = route[i], n = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.z - a.z) / 25));
+      for (let t = 1; t <= n; t++) dense.push({ x: a.x + ((b.x - a.x) * t) / n, z: a.z + ((b.z - a.z) * t) / n });
+    }
+    // Rounded off: the corners eased into curves (the ends stay where they are).
+    let pts = dense;
+    for (let pass = 0; pass < 6; pass++) {
+      pts = pts.map((p, i) => (i === 0 || i === pts.length - 1 ? p : { x: (pts[i - 1].x + p.x * 2 + pts[i + 1].x) / 4, z: (pts[i - 1].z + p.z * 2 + pts[i + 1].z) / 4 }));
+    }
+    // Her lane: 30 to 60 m to starboard (each ship her own), a slow weave of a few metres, eased in at either end.
+    const h = Math.sin(s.id * 12.9898) * 43758.5453, r = h - Math.floor(h);
+    const lane = 30 + 30 * r, phase = r * 20;
+    let along = 0;
+    const total = pts.reduce((a, p, i) => a + (i ? Math.hypot(p.x - pts[i - 1].x, p.z - pts[i - 1].z) : 0), 0);
+    const out: Pt[] = [];
+    for (let i = 0; i < pts.length; i++) {
+      if (i) along += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z);
+      const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)];
+      const dx = b.x - a.x, dz = b.z - a.z, l = Math.hypot(dx, dz) || 1;
+      // (Starboard of her heading.)
+      const rx = -dz / l, rz = dx / l;
+      const taper = Math.min(1, along / 180, (total - along) / 180);
+      let off = (lane + Math.sin(along / 170 + phase) * 7) * Math.max(0, taper);
+      // Not into the shallows: closer in to the route until it's deep enough.
+      while (off > 1 && !deep(pts[i].x + rx * off, pts[i].z + rz * off)) off *= 0.6;
+      if (off <= 1) off = 0;
+      out.push({ x: pts[i].x + rx * off, z: pts[i].z + rz * off });
+    }
+    return out;
   }
 
   /**
