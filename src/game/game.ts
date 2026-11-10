@@ -61,6 +61,8 @@ import { Shipping } from './shipping';
 import { Wolves } from './wolves';
 
 const REACH = 4.5;
+/** The view's field of view (degrees). */
+const VIEW_FOV = 72;
 /** Skill above a task's difficulty needed to do it the quick way. */
 export const QUICK_MARGIN = 10;
 const BUILD_REACH = 8;
@@ -230,7 +232,7 @@ export class Game {
     this.renderer.shadowMap.autoUpdate = false;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.0;
-    this.camera = new THREE.PerspectiveCamera(72, window.innerWidth / window.innerHeight, 0.08, 7000);
+    this.camera = new THREE.PerspectiveCamera(VIEW_FOV, window.innerWidth / window.innerHeight, 0.08, 7000);
     this.input = new Input(canvas);
 
     this.world = world;
@@ -1044,10 +1046,18 @@ export class Game {
     const label = typeof def.label === 'function' ? def.label(ctx) : def.label;
     // Making fire: the kit is laid out on the ground, beside the fire or torch you're lighting, or before you.
     if (spec.kind === 'bowdrill' && !spec.spot) spec = { ...spec, spot: this.fireSpot(ctx) };
+    // Work that isn't on a piece in the world is set down where you are, on the ground (or the deck, or floor) before you.
+    const p0 = this.player, fw = p0.forward();
+    const anchor = {
+      x: p0.pos.x, z: p0.pos.z, fx: fw.x, fz: fw.z,
+      ground: (x: number, z: number) => { const y = p0.groundAt(this.world, x, p0.pos.y + 0.6, z).y; return Number.isFinite(y) ? y : this.world.terrain.heightAt(x, z); },
+      light: () => (this.sky.hemi.intensity - 0.12) / 0.3,
+    };
     const session = new MinigameSession(spec, ease, this.ui.root, (perf, secs) => this.endWork(perf, secs), label,
-      { intro: runs === 0, coach: runs < 3 }, tool?.type, { scene: this.scene, camera: this.camera });
-    // Building happens at the piece itself: step up to it.
-    const stand = (session.mg as { stand?: { x: number; z: number; yaw: number } }).stand;
+      { intro: runs === 0, coach: runs < 3 }, tool?.type, { scene: this.scene, camera: this.camera, anchor });
+    // Building happens at the piece itself: step up to it. (Work set down before you: step to its side.)
+    const stand = (session.mg as { stand?: { x: number; z: number; yaw: number } }).stand
+      ?? (session.anchorStand ? { x: session.anchorStand.x, z: session.anchorStand.z, yaw: Math.atan2(session.anchorStand.face.x - session.anchorStand.x, session.anchorStand.face.z - session.anchorStand.z) } : undefined);
     if (stand) {
       const p = this.player, t = this.world.terrain;
       const y = this.player.groundAt(this.world, stand.x, t.heightAt(stand.x, stand.z) + 1, stand.z).y;
@@ -2442,7 +2452,7 @@ export class Game {
       const posture = (this.working?.session.mg as { bodyClip?: Clip } | undefined)?.bodyClip;
       p.work = this.working ? (body ?? { clip: posture ?? workClip(this.working.def.id, this.working.ctx) ?? 'craft' }) : null;
       p.faceYaw = this.working ? this.faceToward(this.working.ctx.t) : null;
-      const st = this.working ? inWorld?.standAt?.() : null;
+      const st = this.working ? (inWorld?.standAt?.() ?? this.working.session.anchorStand) : null;
       if (st) {
         const k = 1 - Math.exp(-dt * 6), nx = p.pos.x + (st.x - p.pos.x) * k, nz = p.pos.z + (st.z - p.pos.z) * k;
         const y = p.groundAt(this.world, nx, this.world.terrain.heightAt(nx, nz) + 1, nz).y;
@@ -2454,7 +2464,11 @@ export class Game {
       const wc = this.working?.session.worldCamera;
       p.workView = !!wc;
       p.updateCamera(this.camera, this.world.terrain);
-      if (wc) { this.camera.position.copy(wc.position); this.camera.quaternion.copy(wc.quaternion); }
+      if (wc) {
+        this.camera.position.copy(wc.position); this.camera.quaternion.copy(wc.quaternion);
+        // (Seen through the work's own lens, so it and the world line up.)
+        if (this.camera.fov !== wc.fov) { this.camera.fov = wc.fov; this.camera.updateProjectionMatrix(); }
+      }
       // At the chopping block the view looks past where you stand: keep your own body out of the way.
       if (wc && (this.working?.session.mg as { hidesPlayer?: boolean }).hidesPlayer) p.model.visible = false;
       this.tickLife(dt);
@@ -2522,6 +2536,8 @@ export class Game {
       this.cancelAction('You moved and stopped what you were doing.');
     }
     p.updateCamera(this.camera, this.world.terrain);
+    // (Back to your own eyes after seeing through a piece of work's lens.)
+    if (this.camera.fov !== VIEW_FOV) { this.camera.fov = VIEW_FOV; this.camera.updateProjectionMatrix(); }
     this.slopeFeedback(dt);
 
     // --- targeting

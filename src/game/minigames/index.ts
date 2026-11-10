@@ -184,6 +184,9 @@ export function minigameVerb(spec: MinigameSpec): string {
   }
 }
 
+/** Where work is set down in the world: where you are and which way you face, the ground there, and how light it is (0 night .. 1 day). */
+export interface WorkAnchor { x: number; z: number; fx: number; fz: number; ground: (x: number, z: number) => number; light: () => number }
+
 /**
  * Runs one minigame: feeds it mouse input, draws its HUD panel and pointer,
  * and renders its diorama over the dimmed world.
@@ -214,10 +217,12 @@ export class MinigameSession {
   private lastProgress = 0;
 
   constructor(spec: MinigameSpec, ease: number, root: HTMLElement, private onEnd: (perf: number | null, seconds: number) => void, private label: string,
-    guide: { intro: boolean; coach: boolean } = { intro: false, coach: false }, toolType?: string, world?: { scene: THREE.Scene; camera: THREE.Camera }) {
+    guide: { intro: boolean; coach: boolean } = { intro: false, coach: false }, toolType?: string, world?: { scene: THREE.Scene; camera: THREE.Camera; anchor?: WorkAnchor }) {
     this.mg = createMinigame(spec, ease, toolType, world?.camera);
     // Work done on the world itself shows there, under the game's own camera.
     if (inWorld(this.mg)) world?.scene.add(this.mg.overlay);
+    // Any other work is set down in the world where you are (on the ground, or a bench on its legs), and seen there.
+    else if (world?.anchor) this.anchorAt(world.anchor);
     this.coach = guide.coach;
     this.intro = guide.intro ? tutorialFor(spec) : null;
     if (this.intro) {
@@ -325,11 +330,102 @@ export class MinigameSession {
 
   /** The work happens in the world (the game draws it, from this camera). */
   get worldCamera(): THREE.PerspectiveCamera | null {
-    return inWorld(this.mg) && !this.ended ? this.mg.camera : null;
+    if (this.ended) return null;
+    if (inWorld(this.mg)) return this.mg.camera;
+    if (this.anchor) { this.placeAnchorCam(); return this.anchorCam; }
+    return null;
+  }
+
+  /**
+   * Work set down in the world: where its little scene sits (its frame in the
+   * world), where you stand beside it, and its lights (dimmed with the day).
+   */
+  private anchor: { frame: THREE.Matrix4; stand: { x: number; z: number }; centre: THREE.Vector3; lights: { light: THREE.Light; base: number }[]; light: () => number } | null = null;
+  private anchorCam = new THREE.PerspectiveCamera();
+
+  private anchorAt(a: WorkAnchor) {
+    const sc = this.mg.scene;
+    sc.updateMatrixWorld(true);
+    // How big the work is (its bench and all), leaving out the camera, lights and anything huge (catch-all planes for aiming).
+    const box = new THREE.Box3(), b = new THREE.Box3();
+    const measure = () => {
+      box.makeEmpty();
+      sc.traverse((o) => {
+        if (!(o instanceof THREE.Mesh) || !o.visible) return;
+        b.setFromObject(o);
+        if (b.isEmpty() || b.getSize(new THREE.Vector3()).length() > 6) return;
+        box.union(b);
+      });
+    };
+    measure();
+    // A floor of its own (a patch of ground under the fire, boards under the trough) gives way to the real ground there.
+    if (!box.isEmpty()) {
+      const floorY = box.min.y;
+      let hid = false;
+      sc.traverse((o) => {
+        if (!(o instanceof THREE.Mesh) || !o.visible) return;
+        b.setFromObject(o);
+        const sz = b.getSize(new THREE.Vector3());
+        if (sz.y < 0.06 && sz.x * sz.z > 0.25 && b.min.y < floorY + 0.03) { o.visible = false; hid = true; }
+      });
+      if (hid) measure();
+    }
+    if (box.isEmpty()) box.set(new THREE.Vector3(-0.3, -0.1, -0.3), new THREE.Vector3(0.3, 0.2, 0.3));
+    // Turned to face you (its +z toward you), its near edge a short step in front of you.
+    const f = new THREE.Vector3(a.fx, 0, a.fz).normalize();
+    const yaw = Math.atan2(-f.x, -f.z);
+    const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+    const cx = (box.min.x + box.max.x) / 2;
+    const front = new THREE.Vector3(a.x, 0, a.z).addScaledVector(f, 0.45);
+    const origin = front.sub(new THREE.Vector3(cx, 0, box.max.z).applyQuaternion(q));
+    // Resting on the ground (or a deck, or a floor) there.
+    origin.y = a.ground(origin.x, origin.z) - box.min.y;
+    const frame = new THREE.Matrix4().compose(origin, q, new THREE.Vector3(1, 1, 1));
+    // You stand at its side, a little toward the front.
+    const st = new THREE.Vector3(box.min.x - 0.32, 0, (box.min.z + box.max.z) / 2 + 0.25).applyMatrix4(frame);
+    const centre = box.getCenter(new THREE.Vector3()).applyMatrix4(frame);
+    // A soft shadow under it, so it sits on the ground.
+    const size = box.getSize(new THREE.Vector3());
+    const shadow = new THREE.Mesh(new THREE.CircleGeometry(0.5, 24).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.32, depthWrite: false }));
+    shadow.scale.set(size.x * 1.08 + 0.1, 1, size.z * 1.08 + 0.1);
+    shadow.position.set(cx, box.min.y + 0.003, (box.min.z + box.max.z) / 2);
+    shadow.renderOrder = -1;
+    sc.add(shadow);
+    const lights: { light: THREE.Light; base: number }[] = [];
+    sc.traverse((o) => { if (o instanceof THREE.Light) lights.push({ light: o, base: o.intensity }); });
+    this.anchor = { frame, stand: { x: st.x, z: st.z }, centre, lights, light: a.light };
+  }
+
+  /** Where you stand to do it, and what you face (work set down in the world). */
+  get anchorStand(): { x: number; z: number; face: { x: number; z: number } } | null {
+    return this.anchor && !this.ended ? { x: this.anchor.stand.x, z: this.anchor.stand.z, face: { x: this.anchor.centre.x, z: this.anchor.centre.z } } : null;
+  }
+
+  private placeAnchorCam() {
+    const a = this.anchor!, c = this.mg.camera;
+    c.updateMatrixWorld();
+    const m = a.frame.clone().multiply(c.matrixWorld);
+    m.decompose(this.anchorCam.position, this.anchorCam.quaternion, new THREE.Vector3());
+    this.anchorCam.fov = c.fov;
+    this.anchorCam.aspect = c.aspect;
+    this.anchorCam.updateProjectionMatrix();
+    this.anchorCam.updateMatrixWorld();
+    // Lit as the world is (but never too dark to work by).
+    const k = Math.max(0.45, Math.min(1, a.light()));
+    for (const l of a.lights) l.light.intensity = l.base * k;
   }
 
   render(renderer: THREE.WebGLRenderer) {
     if (this.ended || inWorld(this.mg)) return;
+    if (this.anchor) {
+      // Over the world, from the very spot the world was drawn from (no dimming: it's there, in front of you).
+      this.mg.resize();
+      renderer.autoClear = false;
+      renderer.clearDepth();
+      renderer.render(this.mg.scene, this.mg.camera);
+      renderer.autoClear = true;
+      return;
+    }
     this.mg.resize();
     renderer.autoClear = false;
     renderer.clearDepth();
