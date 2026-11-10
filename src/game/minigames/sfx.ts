@@ -68,4 +68,20 @@ export const sfx = {
   done() { tone(523, 0.35, 0.05, 'triangle'); tone(659, 0.35, 0.05, 'triangle', 0.09); tone(784, 0.5, 0.05, 'triangle', 0.18); },
   /** An off-cut drops to the bench. */
   thud() { noise(0.18, 220, 0.8, 0.14, 'lowpass'); },
+  /** A pick into stone: a sharp crack over a deep knock, heavier the harder the blow. */
+  crack(k = 1) {
+    noise(0.05, 3600 + Math.random() * 800, 1.2, 0.08 + 0.06 * k);
+    noise(0.28, 150, 0.7, 0.1 + 0.1 * k, 'lowpass');
+    tone(90 + Math.random() * 30, 0.12, 0.04 + 0.03 * k, 'triangle');
+  },
+  /** The pick glances off: a bright ring. */
+  clink() { tone(2300 + Math.random() * 500, 0.14, 0.03, 'square'); noise(0.04, 5200, 2, 0.05); },
+  /** A small stone landing. */
+  patter() { noise(0.03, 2200 + Math.random() * 1800, 2, 0.02 + Math.random() * 0.02); },
+  /** The whole stone gives way: a deep crunch and a rattle of rubble. */
+  crumble() {
+    noise(0.9, 120, 0.6, 0.3, 'lowpass');
+    noise(0.12, 2800, 1, 0.12);
+    for (let k = 0; k < 8; k++) setTimeout(() => noise(0.07, 900 + Math.random() * 2200, 1.4, 0.04 + Math.random() * 0.04), 80 + k * 70 + Math.random() * 60);
+  },
 };

@@ -1033,6 +1033,8 @@ export class Game {
       p.yaw = stand.yaw;
       p.pitch = 0;
     }
+    // Breaking a boulder: the work draws its own crumbling copy of it in its place.
+    if (spec.kind === 'boulder') this.groundCover.hide(spec.rock);
     this.working = { session, def, ctx, key };
     this.lastAction = { def, recipe: ctx.recipe };
     if (runs > 0) this.msg(`You set to work (${minigameVerb(spec)}). Right-click to stop.`, 'info');
@@ -1055,6 +1057,7 @@ export class Game {
     const w = this.working;
     this.working = null;
     if (!w) return;
+    this.groundCover.hide(null);
     telemetry.event('work', perf === null ? `Stopped ${w.def.id}` : `Finished ${w.def.id}`, { recipe: w.ctx.recipe?.id, perf: perf === null ? null : +perf.toFixed(2), seconds: +seconds.toFixed(1) });
     if (perf === null) {
       this.msg('You stop working.', 'info');

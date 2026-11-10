@@ -157,6 +157,16 @@ const T: Record<string, Tutorial> = {
     ],
     quality: 'Clean, well-timed blows make better planks and kindling.',
   },
+  boulder: {
+    title: 'Breaking a boulder',
+    what: 'Break the boulder up with your pickaxe for small rocks (and now and then a nodule of flint). Every blow bites into the stone, and it crumbles bit by bit.',
+    steps: [
+      { gesture: 'hold', text: 'Aim at the boulder and hold the mouse button: the pick rises as you gather force.' },
+      { gesture: 'release', text: 'Let go to strike, with the force in the green band. Too light only scuffs it; too hard and the pick glances off.' },
+      { gesture: 'click', text: 'Good blows open dark cracks. Aim at a crack (the ring turns gold) to split it much faster, until the whole stone gives way.' },
+    ],
+    quality: 'Clean blows, and blows into the cracks, break it up into more and better rocks.',
+  },
   build: {
     title: 'Building',
     what: 'Build each piece right where it stands, one layer at a time: set the material in place, then fix it there.',

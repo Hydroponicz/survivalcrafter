@@ -7,6 +7,7 @@ import { CarveGame } from './whittle';
 import { BuildGame } from './build';
 import { ChopGame, type BlockSpot, type ChopVariant } from './chop';
 import { FireDrillGame, type FireSpot } from './firedrill';
+import { BoulderGame, type BoulderSpot } from './boulder';
 import type { StructureObj } from '../../world/world';
 import { StrikeGame, type StrikeVariant } from './strike';
 import { KnapGame, type KnapShape } from './knap';
@@ -31,7 +32,8 @@ export type MinigameSpec =
   | { kind: 'cord'; plies: number }
   | { kind: 'knap'; shape: KnapShape; hits: number }
   | { kind: 'build'; s: StructureObj; material: string }
-  | { kind: 'chop'; variant: ChopVariant; block?: BlockSpot };
+  | { kind: 'chop'; variant: ChopVariant; block?: BlockSpot }
+  | ({ kind: 'boulder' } & BoulderSpot);
 
 /**
  * `toolType`: the item you're working with, shown in the scene where the work uses one.
@@ -44,6 +46,7 @@ export function createMinigame(spec: MinigameSpec, ease: number, toolType?: stri
       const cam = camera ?? new THREE.PerspectiveCamera();
       return new ChopGame(ease, spec.variant, spec.block ?? { x: cam.position.x, y: 0, z: cam.position.z - 1, top: cam.position.y - 1.1 }, toolType, cam);
     }
+    case 'boulder': return new BoulderGame(ease, spec, camera ?? new THREE.PerspectiveCamera());
     case 'saw': return new SawGame(ease, spec.cuts);
     case 'bowdrill': {
       // Out in the world: the kit laid out where you are (or beside the fire you're lighting).
@@ -68,8 +71,8 @@ export function createMinigame(spec: MinigameSpec, ease: number, toolType?: stri
 }
 
 /** Work played out in the world itself (building, splitting at the block), drawn by the game's own camera. */
-function inWorld(mg: Minigame): mg is (BuildGame | ChopGame | FireDrillGame) {
-  return mg instanceof BuildGame || mg instanceof ChopGame || mg instanceof FireDrillGame;
+function inWorld(mg: Minigame): mg is (BuildGame | ChopGame | FireDrillGame | BoulderGame) {
+  return mg instanceof BuildGame || mg instanceof ChopGame || mg instanceof FireDrillGame || mg instanceof BoulderGame;
 }
 
 /** The hands-on work for each recipe. */
@@ -166,6 +169,7 @@ export function minigameVerb(spec: MinigameSpec): string {
     case 'carve': return 'carve';
     case 'build': return 'build';
     case 'chop': return 'split';
+    case 'boulder': return 'break stone';
     case 'heat': return { roast: 'cook', bake: 'bake', fire: 'fire', brew: 'brew' }[spec.variant];
     case 'place': return 'lay';
     case 'center': return 'throw';

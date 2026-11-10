@@ -170,6 +170,11 @@ function fern(seed: number): THREE.BufferGeometry {
 }
 
 /** A lumpy rock, flattened; vertex colours white so instances carry the colour. */
+/** A boulder's shape (at scale 1), as drawn among the ground cover: the work on breaking one up starts from the same stone. */
+export function boulderGeometry(): THREE.BufferGeometry {
+  return rock(0.5, 1, 0.68, 71);
+}
+
 function rock(radius: number, detail: number, squash: number, seed: number): THREE.BufferGeometry {
   const r = mulberry32(seed);
   const g = new THREE.IcosahedronGeometry(radius, detail);
@@ -281,7 +286,7 @@ const KIND_DEFS: Omit<Kind, 'mesh' | 'material'>[] = [
     { colour: [0.36, 0.22, 0.11], width: 0.045, length: 0.14 }), range: 48, cap: 9000, sway: 0.45, shadow: false, far: false },
   { name: 'heather', geo: heather(51), range: 42, cap: 7000, sway: 0.5, shadow: false, far: false },
   { name: 'pebble', geo: rock(0.07, 0, 0.55, 61), range: 30, cap: 5000, sway: 0, shadow: false, far: false },
-  { name: 'boulder', geo: rock(0.5, 1, 0.68, 71), range: 150, cap: 2500, sway: 0, shadow: true, far: true },
+  { name: 'boulder', geo: boulderGeometry(), range: 150, cap: 2500, sway: 0, shadow: true, far: true },
   { name: 'log', geo: fallenLog(), range: 130, cap: 500, sway: 0, shadow: true, far: true },
 ];
 
@@ -297,8 +302,8 @@ const COVER: Record<Zone, { grass: number; tall: number; flowers: number; fern: 
   snow: { grass: 0, tall: 0, flowers: 0, fern: 0, heather: 0 },
 };
 
-/** A boulder lying on the ground: where, its size (scale), and its key for remembering it's been broken. */
-export interface Boulder { x: number; y: number; z: number; sc: number; key: string }
+/** A boulder lying on the ground: where, its size (scale), how it lies and its colour, and its key for remembering it's been broken. */
+export interface Boulder { x: number; y: number; z: number; sc: number; key: string; yaw: number; tilt: number; color: [number, number, number] }
 
 /** A boulder's lasting name (its spot, to a quarter metre). */
 export function rockKey(x: number, z: number): string {
@@ -345,6 +350,16 @@ export class GroundCover {
       this.byName[d.name] = i;
       return { ...d, mesh, material };
     });
+  }
+
+  /** A boulder being broken up just now: the work draws its own (crumbling) copy, so it's left out here. */
+  private hidden: Boulder | null = null;
+  hide(b: Boulder | null) {
+    const was = this.hidden;
+    if (was?.key === b?.key) return;
+    this.hidden = b;
+    if (was) this.invalidate(was.x, was.z, 2);
+    if (b) this.invalidate(b.x, b.z, 2);
   }
 
   /** Forget cached tiles around an edit so they're regenerated on the new ground. */
@@ -605,10 +620,10 @@ export class GroundCover {
           const yaw = r() * 6.28, tilt = rnd(r, -0.2, 0.2);
           // (Every draw above is made either way, so breaking one leaves the rest where they were.)
           const key = rockKey(x, z);
-          if (this.world.brokenRocks.has(key)) continue;
+          if (this.world.brokenRocks.has(key) || key === this.hidden?.key) continue;
           put('boulder', x, g.h - sc * 0.15, z, yaw, sc, col[0] * v, col[1] * v, col[2] * v, tilt);
           obs.push({ ax: x, az: z, bx: x, bz: z, r: 0.55 * sc });
-          rocks.push({ x, y: g.h - sc * 0.15, z, sc, key });
+          rocks.push({ x, y: g.h - sc * 0.15, z, sc, key, yaw, tilt, color: [col[0] * v, col[1] * v, col[2] * v] });
           continue;
         }
         // Fallen trees lie in the woods (where trees stand thick enough to fall),

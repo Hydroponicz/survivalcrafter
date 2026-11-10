@@ -409,17 +409,20 @@ export const ACTIONS: ActionDef[] = [
     show: (c) => c.t.kind === 'rock' && toolIs(c, 'pickaxe'),
     time: (c) => (c.t.kind === 'rock' ? 4 + c.t.rock.sc * 5 : 6), swing: 'chop', skill: 'mining', difficulty: (c) => (c.t.kind === 'rock' ? 3 + c.t.rock.sc * 4 : 5),
     stamina: 8, toolWear: 0.15,
+    // Worked by hand, on the boulder itself: it crumbles with every blow.
+    minigame: (c) => (c.t.kind === 'rock' ? { kind: 'boulder', rock: c.t.rock, ground: (x: number, z: number) => c.g.world.terrain.heightAt(x, z) } : undefined),
     run: (c, o) => {
       if (c.t.kind !== 'rock') return;
       const b = c.t.rock;
-      if (!o.success) return c.g.msg('Your pickaxe skips off the boulder. Try again.', 'fail');
+      // (Broken up by hand it always comes apart in the end: how well you worked it decides how much you get.)
+      if (!o.success && o.perf === undefined) return c.g.msg('Your pickaxe skips off the boulder. Try again.', 'fail');
       c.g.world.brokenRocks.add(b.key);
       c.g.groundCover.invalidate(b.x, b.z, 2);
-      const n = Math.max(2, Math.round(2 + b.sc * 5 + Math.random() * 2));
+      const n = Math.max(2, Math.round((2 + b.sc * 5 + Math.random() * 2) * (o.perf === undefined ? 1 : 0.7 + 0.45 * o.perf)));
       c.g.give('rock_shard', o.ql, n);
       // Some boulders hold a nodule or two of flint.
       if (Math.random() < 0.45) { const f = 1 + (Math.random() < 0.35 ? 1 : 0); c.g.give('flint', o.ql, f); c.g.msg(`There ${f > 1 ? 'are two nodules' : 'is a nodule'} of flint in it.`, 'good'); }
-      c.g.sound.chop(0.8);
+      if (o.perf === undefined) c.g.sound.chop(0.8);
       c.g.msg(`The boulder cracks apart: ${n} small rocks.`, 'good');
     },
   },
