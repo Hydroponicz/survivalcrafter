@@ -12,6 +12,15 @@ export class Tooltip {
   private left = false;
   private above = false;
   private tip = '';
+  /** Kept out of the way (a menu is open over what's hovered). */
+  private suppressed = false;
+
+  /** Hide it and keep it hidden (e.g. while a right-click menu is open), or let it show again. */
+  suppress(on: boolean) {
+    this.suppressed = on;
+    if (on) this.hide();
+    else { this.target = null; this.over(document.elementFromPoint(this.px, this.py), this.px, this.py); }
+  }
 
   constructor(root: HTMLElement) {
     this.el = document.createElement('div');
@@ -35,7 +44,7 @@ export class Tooltip {
     const title = t.getAttribute('title');
     if (title) { (t as HTMLElement).dataset.tip ??= escapeHtml(title); t.removeAttribute('title'); }
     const tip = (t as HTMLElement).dataset.tip;
-    if (!tip) { this.hide(); return; }
+    if (!tip || this.suppressed) { this.hide(); return; }
     // (A window redrawn under the pointer gives the same tip again: leave it be.)
     if (this.tip !== tip) { this.tip = tip; this.el.innerHTML = tip; this.left = this.above = false; }
     this.el.style.display = 'block';
@@ -45,7 +54,7 @@ export class Tooltip {
   /** Keep the box by the pointer, inside the screen. */
   place(x: number, y: number) {
     this.px = x; this.py = y;
-    if (this.el.style.display !== 'block') return;
+    if (this.el.style.display !== 'block' || this.suppressed) return;
     const w = this.el.offsetWidth, h = this.el.offsetHeight;
     // Right of and below the pointer unless it won't fit; once moved, it stays
     // on that side until it fits back comfortably (no flipping at the edge).

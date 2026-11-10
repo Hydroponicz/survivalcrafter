@@ -897,6 +897,8 @@ export class UI {
       m.appendChild(b);
     }
     this.root.appendChild(m);
+    // (The item's tooltip would sit over the menu: keep it hidden while the menu's open.)
+    this.tooltip.suppress(true);
     // At the pointer, kept on screen.
     const r = this.root.getBoundingClientRect();
     m.style.left = `${Math.min(x - r.left + 6, r.width - m.offsetWidth - 8)}px`;
@@ -905,6 +907,7 @@ export class UI {
   }
 
   closeItemMenu() {
+    if (this.itemMenuEl) this.tooltip.suppress(false);
     this.itemMenuEl?.remove();
     this.itemMenuEl = null;
   }
