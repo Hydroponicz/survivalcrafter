@@ -1543,6 +1543,18 @@ export const ACTIONS: ActionDef[] = [
 export const ACTION_MAP: Record<string, ActionDef> = Object.fromEntries(ACTIONS.map((a) => [a.id, a]));
 
 
+/** Undoing work (removing a plan, knocking a piece down): never what a plain click does, only chosen from the menu. */
+const DESTRUCTIVE = new Set(['destroy_plan', 'demolish']);
+
+/**
+ * What a plain click (or E) does with these options: the first that can be
+ * done and isn't destructive; failing that, the first one (a click then says
+ * why it can't be done yet).
+ */
+export function defaultOption<T extends { def: ActionDef; problem: string | null }>(opts: T[]): T | undefined {
+  return opts.find((o) => !o.problem && !DESTRUCTIVE.has(o.def.id)) ?? opts.find((o) => !DESTRUCTIVE.has(o.def.id)) ?? opts[0];
+}
+
 export function nextMaterial(def: StructureDef, s: StructureObj): string | undefined {
   for (const m of def.materials) if ((s.consumed[m.item] ?? 0) < m.count) return m.item;
   return undefined;

@@ -28,7 +28,7 @@ import {
   ANIMALS, DAY_LENGTH, pointInPiece, type CartObj, toLocal, toWorld, World, type AnimalObj, type ForageObj, type PileObj, type StructureObj, type TreeObj, type WorldObj,
 } from '../world/world';
 import {
-  ACTION_MAP, ACTIONS, COMFORT_REGEN, craftProblem, DIG_RADIUS, EARTH_PER_ITEM, LEVEL_RADIUS, type ActionDef, type Ctx, type Target,
+  ACTION_MAP, ACTIONS, COMFORT_REGEN, craftProblem, defaultOption, DIG_RADIUS, EARTH_PER_ITEM, LEVEL_RADIUS, type ActionDef, type Ctx, type Target,
 } from './actions';
 import { DevSettings } from './dev';
 import { distVol, Sound } from './sound';
@@ -2516,7 +2516,7 @@ export class Game {
       if (!this.target) continue;
       const opts = this.actionsFor(this.target);
       if (btn === 0) {
-        const first = opts.find((o) => !o.problem) ?? opts[0];
+        const first = defaultOption(opts);
         if (first) this.request(first.def, first.ctx);
       } else if (btn === 2) {
         this.ui.openContextMenu(this.target, opts);
@@ -2525,7 +2525,7 @@ export class Game {
     if (inp.hit('KeyF') && inp.locked && this.target && !this.placing) this.ui.openContextMenu(this.target, this.actionsFor(this.target));
     if (inp.hit('KeyE') && inp.locked && this.target && !this.placing) {
       const opts = this.actionsFor(this.target);
-      const first = opts.find((o) => !o.problem) ?? opts[0];
+      const first = defaultOption(opts);
       if (first) this.request(first.def, first.ctx);
     }
 

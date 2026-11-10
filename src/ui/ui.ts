@@ -12,10 +12,11 @@ import { CharacterPreview } from './preview';
 import { BUILDABLE, STRUCTURES, totalMaterials } from '../data/structures';
 import { vesselOf } from '../data/vessels';
 import { allowed, nextStep, pointsTo, settle, SHIP_PRESETS, windName, shipLength, shipMaterials, shipStats, totalSteps, type ShipDesign } from '../data/ships';
-import { ACTION_MAP, craftProblem, forageName, type ActionDef, type Ctx, type Target } from '../game/actions';
+import { ACTION_MAP, craftProblem, defaultOption, forageName, type ActionDef, type Ctx, type Target } from '../game/actions';
 import { DEV_FLAGS, devCommands, type DevFlag } from '../game/dev';
 import { BIOME_NAMES, IDENTIFY } from '../data/forage';
 import { VirtualCursor } from './cursor';
+import { controlsFor, controlsHtml } from './controls';
 import { BIOMES, biomeAt } from '../game/forage';
 import { QUICK_MARGIN, type Game, type MsgKind } from '../game/game';
 import { minigameVerb, RECIPE_MINIGAMES } from '../game/minigames';
@@ -56,6 +57,9 @@ export class UI {
   private open = new Set<WindowName>();
   private bars: Record<string, HTMLElement> = {};
   private targetEl: HTMLElement;
+  /** What you can press right now, and what it does. */
+  private controlsEl: HTMLElement;
+  private controlsTimer = 0;
   private hintEl: HTMLElement;
   private progress: HTMLElement;
   private progressFill: HTMLElement;
@@ -134,6 +138,7 @@ export class UI {
       </svg><div class="wg-text"></div></div>
       <div class="bars"></div>
       <div class="hotbar"></div>
+      <div class="controls"></div>
       <div class="log"></div>`;
     this.root.appendChild(hud);
     this.targetEl = hud.querySelector('.target-name')!;
@@ -145,6 +150,7 @@ export class UI {
     this.clockEl = hud.querySelector('.clock')!;
     this.perfEl = hud.querySelector('.perf-line')!;
     this.statusEl = hud.querySelector('.status')!;
+    this.controlsEl = hud.querySelector('.controls')!;
     this.windEl = hud.querySelector('.wind-gauge')!;
     this.logEl = hud.querySelector('.log')!;
     const bars = hud.querySelector('.bars')!;
@@ -608,10 +614,17 @@ export class UI {
     if (p.effects.refreshed) status.push('<span class="good-text" data-tip="Mint tea: stamina comes back twice as fast for a while.">Refreshed</span>');
     if (p.effects.bandaged) status.push('<span class="good-text" data-tip="A bandage is slowly healing you.">Bandaged</span>');
     if (p.effects.rested) status.push(`<span class="good-text" data-tip="You slept in comfort (${p.effects.rested.rate}): stamina comes back ${Math.round(p.effects.rested.rate * 20)}% faster for a while.">Well rested</span>`);
-    if (g.placing) status.push(`Placing: ${g.placing.name} — Left-click place · ${g.placing.attach ? 'aim at the side of a forge' : 'Wheel or Q/E rotate'} · Right-click cancel${g.placement?.snapped ? ' · snapped' : ''}`);
-    if (g.placement && !g.placement.valid) status.push(`<span class="warn">${esc(g.placement.reason)}</span>`);
     setHTML(this.statusEl, status.join(' · '));
     this.updateWindGauge(g);
+
+    // The controls for what you're doing now (a few times a second).
+    this.controlsTimer -= 1 / 60;
+    if (this.controlsTimer <= 0) {
+      this.controlsTimer = 0.15;
+      const c = this.anyWindowOpen() ? null : controlsFor(g);
+      setStyle(this.controlsEl, 'display', c ? 'block' : 'none');
+      if (c) { setHTML(this.controlsEl, controlsHtml(c)); this.controlsEl.classList.toggle('quiet', !!c.quiet); }
+    }
 
     // What you're aiming at, and what a click would do (worked out a few times a second, or when the aim changes).
     const t = g.target;
@@ -623,7 +636,7 @@ export class UI {
       if (t && !g.placing) {
         setText(this.targetEl, this.describeTarget(t));
         const opts = g.actionsFor(t);
-        const first = opts.find((o) => !o.problem) ?? opts[0];
+        const first = defaultOption(opts);
         setHTML(this.hintEl, first ? `<b>LMB</b> ${esc(first.label)} &nbsp; <b>RMB</b> more` : '');
       } else {
         setText(this.targetEl, '');

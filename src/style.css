@@ -663,3 +663,30 @@ button.dev-on { background: #6b5530; border-color: var(--accent); color: #fff3d6
 .item-menu-title { padding: 5px 12px 6px; color: var(--accent); font-weight: bold; border-bottom: 1px solid var(--panel-edge); margin-bottom: 2px; white-space: nowrap; }
 .item-menu-item { display: block; width: 100%; text-align: left; background: none; border: none; border-radius: 0; color: var(--ink); padding: 6px 12px; cursor: pointer; }
 .item-menu-item:hover, .item-menu-item.vhover { background: rgba(232, 181, 98, 0.22); }
+
+/* ---------- the controls for what you're doing now (bottom right) */
+.controls {
+  position: absolute; right: 16px; bottom: 106px; width: 330px; max-width: 34vw; pointer-events: none;
+  background: rgba(14, 11, 8, 0.72); border: 1px solid rgba(232, 181, 98, 0.22); border-radius: 8px;
+  padding: 8px 10px 7px; font-size: 12.5px; line-height: 1.3; text-shadow: 0 1px 2px #000;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.45);
+}
+.ctl-title { color: var(--accent); font-weight: bold; font-size: 13.5px; margin-bottom: 5px; }
+.ctl-row { display: flex; gap: 8px; align-items: baseline; padding: 2px 0; }
+.ctl-keys { flex: 0 0 auto; min-width: 92px; display: flex; flex-wrap: wrap; gap: 2px; align-items: baseline; }
+.ctl-keys i { color: var(--muted); font-style: normal; font-size: 10px; margin: 0 1px; }
+.ctl-keys:empty { min-width: 0; }
+.ctl-text { flex: 1; color: var(--ink); }
+.ctl-row.good .ctl-text { color: #9fdc7c; }
+.ctl-row.bad .ctl-text { color: #ff9a7a; }
+.ctl-row.good .ctl-keys:empty::before { content: '✓'; color: #9fdc7c; font-weight: bold; }
+.ctl-row.bad .ctl-keys:empty::before { content: '✕'; color: #ff9a7a; font-weight: bold; }
+.ctl-note { margin-top: 6px; padding-top: 5px; border-top: 1px solid rgba(255, 255, 255, 0.08); color: var(--muted); font-size: 11.5px; }
+.controls kbd {
+  font: inherit; font-size: 11px; font-weight: bold; padding: 0 5px; border-radius: 4px; color: #f3e6cf;
+  background: linear-gradient(#4a3c2c, #2e251b); border: 1px solid rgba(255, 255, 255, 0.18); border-bottom-width: 2px;
+}
+.controls kbd.kbd-mouse { background: linear-gradient(#3c4a5a, #26303c); }
+#ui.working .controls, #ui.no-hud .controls { display: none; }
+.ctl-row:not(.good):not(.bad) .ctl-keys:empty::before { content: '•'; color: var(--muted); }
+.controls.quiet { opacity: 0.6; }
