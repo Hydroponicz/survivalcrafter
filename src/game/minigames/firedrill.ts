@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { bowStave, fireboard, handhold, pouch, spindle, tinderNest } from '../../world/firekitModel';
-import { clamp01, Minigame, type Meter, type MgInput } from './core';
+import { clamp01, clearView, Minigame, type Blocked, type Meter, type MgInput } from './core';
 import type { Gesture } from './tutorials';
 
 // Making fire with the bow drill, out in the world: wherever you start it
@@ -259,6 +259,11 @@ export class FireDrillGame extends Minigame {
       (s.mesh.material as THREE.MeshStandardMaterial).opacity = Math.max(0, s.life * 0.32);
       if (s.life <= 0) { this.work.remove(s.mesh); s.mesh.geometry.dispose(); (s.mesh.material as THREE.Material).dispose(); this.smoke.splice(this.smoke.indexOf(s), 1); }
     }
+  }
+
+  /** If something stands between the view and the work, swing the view round to a clear one. */
+  fitView(blocked: Blocked) {
+    this.camTo.copy(clearView(this.camTo, this.lookAt, blocked));
   }
 
   resize() { /* the game's own camera keeps its shape */ }

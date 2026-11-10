@@ -264,6 +264,27 @@ export function fireMesh(): { group: THREE.Group; flicker: (t: number, strength?
   };
 }
 
+/** Whether something stands between two points (a tree, a wall, the hillside): given by the game, for work seen in the world. */
+export type Blocked = (from: THREE.Vector3, to: THREE.Vector3) => boolean;
+
+/**
+ * A view of the work (a camera at `pos` looking at `look`) that something
+ * stands in the way of, swung round the work (and up a little) to the
+ * nearest clear one; failing that, closer in. Returns where the camera goes.
+ */
+export function clearView(pos: THREE.Vector3, look: THREE.Vector3, blocked: Blocked): THREE.Vector3 {
+  if (!blocked(pos, look)) return pos.clone();
+  const off = pos.clone().sub(look), up = new THREE.Vector3(0, 1, 0);
+  for (const a of [0.45, -0.45, 0.9, -0.9, 1.35, -1.35, 1.9, -1.9, 2.5, -2.5, Math.PI]) {
+    for (const lift of [0, 0.7]) {
+      const p = off.clone().applyAxisAngle(up, a).add(look);
+      p.y += lift;
+      if (!blocked(p, look)) return p;
+    }
+  }
+  return look.clone().addScaledVector(off, 0.4);
+}
+
 /** Clamp helper. */
 export const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
 

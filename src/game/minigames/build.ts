@@ -6,7 +6,7 @@ import { builtShare, fillDir, pieceBounds } from '../../world/pieceFill';
 import { ASSEMBLIES } from '../../world/assembly';
 import { buildPieceMesh } from '../../world/view';
 import { surfaceMat, type Surface } from '../../world/surfaces';
-import { clamp01, Minigame, type Meter, type MgInput } from './core';
+import { clamp01, clearView, Minigame, type Blocked, type Meter, type MgInput } from './core';
 import { buildToolMesh } from '../tools';
 import { sfx } from './sfx';
 import type { Gesture } from './tutorials';
@@ -293,6 +293,18 @@ export class BuildGame extends Minigame {
     this.stand = { x: standAt.x, z: standAt.z, yaw: Math.atan2(look.x, look.z) };
     this.placeCarried(0.8);
     this.workLight.copy(worldCentre).addScaledVector(look, 0.9).add(new THREE.Vector3(0, 0.6, 0));
+  }
+
+  /** If something stands between the view and the piece, swing the view round to a clear one (it stays yours to turn with Alt). */
+  fitView(blocked: Blocked) {
+    const from = this.viewPos(this.autoView), to = clearView(from, this.autoView.focus, blocked);
+    if (to.distanceTo(from) < 1e-3) return;
+    const off = to.clone().sub(this.autoView.focus), d = off.length();
+    this.autoView.yaw = Math.atan2(off.x, off.z);
+    this.autoView.pitch = Math.asin(Math.max(-1, Math.min(1, off.y / d)));
+    this.autoView.dist = d;
+    this.view = { ...this.autoView, focus: this.autoView.focus.clone() };
+    this.camTo.pos.copy(this.viewPos(this.autoView));
   }
 
   /** Where the camera stands for a view (kept above the ground). */

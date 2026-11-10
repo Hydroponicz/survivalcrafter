@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { itemDef } from '../../data/items';
 import { buildToolMesh } from '../tools';
-import { clamp01, Minigame, type Meter, type MgInput } from './core';
+import { clamp01, clearView, Minigame, type Blocked, type Meter, type MgInput } from './core';
 import { sfx } from './sfx';
 import type { Gesture } from './tutorials';
 
@@ -433,6 +433,11 @@ export class ChopGame extends Minigame {
       (c.mesh.material as THREE.MeshStandardMaterial).opacity = Math.max(0, c.life * 2);
       if (c.life <= 0) { this.overlay.remove(c.mesh); c.mesh.geometry.dispose(); (c.mesh.material as THREE.Material).dispose(); this.chips.splice(this.chips.indexOf(c), 1); }
     }
+  }
+
+  /** If something stands between the view and the work, swing the view round to a clear one. */
+  fitView(blocked: Blocked) {
+    this.camTo.copy(clearView(this.camTo, this.lookAt, blocked));
   }
 
   resize() { /* the game's own camera keeps its shape */ }

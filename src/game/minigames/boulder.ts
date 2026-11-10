@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { ConvexGeometry } from 'three/examples/jsm/geometries/ConvexGeometry.js';
 import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { boulderGeometry, type Boulder } from '../../world/groundcover';
-import { clamp01, Minigame, type Meter, type MgInput } from './core';
+import { clamp01, clearView, Minigame, type Blocked, type Meter, type MgInput } from './core';
 import { sfx } from './sfx';
 import type { Gesture } from './tutorials';
 
@@ -81,6 +81,7 @@ export class BoulderGame extends Minigame {
   private camFrom = { pos: new THREE.Vector3(), quat: new THREE.Quaternion() };
   private camTo = new THREE.Vector3();
   private camLook = new THREE.Quaternion();
+  private lookPt = new THREE.Vector3();
   private faceAt = new THREE.Vector3();
 
   constructor(ease: number, spot: BoulderSpot, from: THREE.Camera) {
@@ -141,7 +142,8 @@ export class BoulderGame extends Minigame {
     this.camTo.copy(this.work.localToWorld(new THREE.Vector3(0.55 + 0.5 * R, 0.62 + 1.1 * R, R + 0.95 + 0.9 * R)));
     const look = new THREE.PerspectiveCamera();
     look.position.copy(this.camTo);
-    look.lookAt(this.work.localToWorld(new THREE.Vector3(-0.08, h * 0.6, 0.05)));
+    this.lookPt.copy(this.work.localToWorld(new THREE.Vector3(-0.08, h * 0.6, 0.05)));
+    look.lookAt(this.lookPt);
     this.camLook.copy(look.quaternion);
     this.camera.position.copy(from.position);
     this.camera.quaternion.copy(from.quaternion);
@@ -611,6 +613,15 @@ export class BoulderGame extends Minigame {
       (s.mesh.material as THREE.MeshBasicMaterial).opacity = Math.min(1, s.life * 5);
       if (s.life <= 0) { this.overlay.remove(s.mesh); s.mesh.geometry.dispose(); (s.mesh.material as THREE.Material).dispose(); this.sparkList.splice(this.sparkList.indexOf(s), 1); }
     }
+  }
+
+  /** If something stands between the view and the work, swing the view round to a clear one. */
+  fitView(blocked: Blocked) {
+    this.camTo.copy(clearView(this.camTo, this.lookPt, blocked));
+    const look = new THREE.PerspectiveCamera();
+    look.position.copy(this.camTo);
+    look.lookAt(this.lookPt);
+    this.camLook.copy(look.quaternion);
   }
 
   resize() { /* the game's own camera keeps its shape */ }

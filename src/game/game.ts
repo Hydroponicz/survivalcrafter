@@ -1053,8 +1053,11 @@ export class Game {
       ground: (x: number, z: number) => { const y = p0.groundAt(this.world, x, p0.pos.y + 0.6, z).y; return Number.isFinite(y) ? y : this.world.terrain.heightAt(x, z); },
       light: () => (this.sky.hemi.intensity - 0.12) / 0.3,
     };
+    // (The work's view looks past trees and walls: see viewBlocked.)
+    const target = ctx.t.kind === 'object' ? ctx.t.obj : null;
+    const blocked = (a: THREE.Vector3, b: THREE.Vector3) => this.viewBlocked(a, b, target);
     const session = new MinigameSession(spec, ease, this.ui.root, (perf, secs) => this.endWork(perf, secs), label,
-      { intro: runs === 0, coach: runs < 3 }, tool?.type, { scene: this.scene, camera: this.camera, anchor });
+      { intro: runs === 0, coach: runs < 3 }, tool?.type, { scene: this.scene, camera: this.camera, anchor, blocked });
     // Building happens at the piece itself: step up to it. (Work set down before you: step to its side.)
     const stand = (session.mg as { stand?: { x: number; z: number; yaw: number } }).stand
       ?? (session.anchorStand ? { x: session.anchorStand.x, z: session.anchorStand.z, yaw: Math.atan2(session.anchorStand.face.x - session.anchorStand.x, session.anchorStand.face.z - session.anchorStand.z) } : undefined);
@@ -1888,6 +1891,30 @@ export class Game {
       if (!tooFar && p.y < t.waterAt(p.x, p.z)) return { kind: 'water', point: p.clone() };
     }
     return null;
+  }
+
+  /**
+   * Whether something stands between a view and what it looks at: the
+   * hillside, a tree's trunk, or a built piece (other than the one being
+   * worked on). The last stretch up to the work itself doesn't count.
+   */
+  viewBlocked(from: THREE.Vector3, to: THREE.Vector3, skip?: WorldObj | null): boolean {
+    const t = this.world.terrain, len = from.distanceTo(to);
+    if (len < 0.4) return false;
+    const mx = (from.x + to.x) / 2, mz = (from.z + to.z) / 2;
+    const near = this.world.near(mx, mz, len / 2 + 3).filter((o) => o !== skip && ((o.kind === 'tree' && o.age > 0.2) || (o.kind === 'structure' && o.built)));
+    const p = new THREE.Vector3();
+    for (let d = 0.15; d < len - 0.35; d += 0.2) {
+      p.copy(from).lerp(to, d / len);
+      if (t.solidAt(p.x, p.y, p.z)) return true;
+      for (const o of near) {
+        if (o.kind === 'tree') {
+          const sc = treeScale(o), g = t.heightAt(o.x, o.z);
+          if (Math.hypot(p.x - o.x, p.z - o.z) < 0.22 + 0.32 * sc.s && p.y > g - 0.5 && p.y < g + 3 + 7 * sc.s * sc.hs) return true;
+        } else if (this.hitObject(o, p)) return true;
+      }
+    }
+    return false;
   }
 
   private hitObject(o: WorldObj, p: THREE.Vector3): boolean {

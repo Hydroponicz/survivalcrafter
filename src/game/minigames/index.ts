@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Minigame, type MgInput } from './core';
+import { Minigame, type Blocked, type MgInput } from './core';
 import { CordageGame } from './cordage';
 import { CrankGame, type CrankVariant } from './crank';
 import { CenterGame, HeatGame, PlaceGame, type HeatVariant, type PlaceVariant } from './shape';
@@ -217,12 +217,16 @@ export class MinigameSession {
   private lastProgress = 0;
 
   constructor(spec: MinigameSpec, ease: number, root: HTMLElement, private onEnd: (perf: number | null, seconds: number) => void, private label: string,
-    guide: { intro: boolean; coach: boolean } = { intro: false, coach: false }, toolType?: string, world?: { scene: THREE.Scene; camera: THREE.Camera; anchor?: WorkAnchor }) {
+    guide: { intro: boolean; coach: boolean } = { intro: false, coach: false }, toolType?: string, world?: { scene: THREE.Scene; camera: THREE.Camera; anchor?: WorkAnchor; blocked?: Blocked }) {
     this.mg = createMinigame(spec, ease, toolType, world?.camera);
     // Work done on the world itself shows there, under the game's own camera.
-    if (inWorld(this.mg)) world?.scene.add(this.mg.overlay);
+    if (inWorld(this.mg)) {
+      world?.scene.add(this.mg.overlay);
+      // (If a tree or a wall stands between the view and the work, it swings round to a clear one.)
+      if (world?.blocked) (this.mg as { fitView?: (b: Blocked) => void }).fitView?.(world.blocked);
+    }
     // Any other work is set down in the world where you are (on the ground, or a bench on its legs), and seen there.
-    else if (world?.anchor) this.anchorAt(world.anchor);
+    else if (world?.anchor) this.anchorAt(world.anchor, world.blocked);
     this.coach = guide.coach;
     this.intro = guide.intro ? tutorialFor(spec) : null;
     if (this.intro) {
@@ -343,7 +347,7 @@ export class MinigameSession {
   private anchor: { frame: THREE.Matrix4; stand: { x: number; z: number }; centre: THREE.Vector3; lights: { light: THREE.Light; base: number }[]; light: () => number } | null = null;
   private anchorCam = new THREE.PerspectiveCamera();
 
-  private anchorAt(a: WorkAnchor) {
+  private anchorAt(a: WorkAnchor, blocked?: Blocked) {
     const sc = this.mg.scene;
     sc.updateMatrixWorld(true);
     // How big the work is (its bench and all), leaving out the camera, lights and anything huge (catch-all planes for aiming).
@@ -371,16 +375,22 @@ export class MinigameSession {
       if (hid) measure();
     }
     if (box.isEmpty()) box.set(new THREE.Vector3(-0.3, -0.1, -0.3), new THREE.Vector3(0.3, 0.2, 0.3));
-    // Turned to face you (its +z toward you), its near edge a short step in front of you.
-    const f = new THREE.Vector3(a.fx, 0, a.fz).normalize();
-    const yaw = Math.atan2(-f.x, -f.z);
-    const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+    // Turned to face you (its +z toward you), its near edge a short step in front of you; or, if
+    // the view of it there is blocked (a tree, a wall), turned round you to where it's clear.
+    const ahead = new THREE.Vector3(a.fx, 0, a.fz).normalize();
+    let f = ahead.clone();
+    if (blocked) {
+      this.mg.camera.updateMatrixWorld();
+      const camLocal = this.mg.camera.position.clone(), mid = box.getCenter(new THREE.Vector3());
+      for (const turn of [0, 0.6, -0.6, 1.2, -1.2, 1.8, -1.8, 2.5, -2.5, Math.PI]) {
+        const t = ahead.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), turn);
+        const fr = this.frameFor(a, t, box);
+        if (!blocked(camLocal.clone().applyMatrix4(fr), mid.clone().applyMatrix4(fr))) { f = t; break; }
+      }
+    }
     const cx = (box.min.x + box.max.x) / 2;
-    const front = new THREE.Vector3(a.x, 0, a.z).addScaledVector(f, 0.45);
-    const origin = front.sub(new THREE.Vector3(cx, 0, box.max.z).applyQuaternion(q));
-    // Resting on the ground (or a deck, or a floor) there.
-    origin.y = a.ground(origin.x, origin.z) - box.min.y;
-    const frame = new THREE.Matrix4().compose(origin, q, new THREE.Vector3(1, 1, 1));
+    // (Resting on the ground, or a deck, or a floor, there.)
+    const frame = this.frameFor(a, f, box);
     // You stand at its side, a little toward the front.
     const st = new THREE.Vector3(box.min.x - 0.32, 0, (box.min.z + box.max.z) / 2 + 0.25).applyMatrix4(frame);
     const centre = box.getCenter(new THREE.Vector3()).applyMatrix4(frame);
@@ -394,6 +404,15 @@ export class MinigameSession {
     const lights: { light: THREE.Light; base: number }[] = [];
     sc.traverse((o) => { if (o instanceof THREE.Light) lights.push({ light: o, base: o.intensity }); });
     this.anchor = { frame, stand: { x: st.x, z: st.z }, centre, lights, light: a.light };
+  }
+
+  /** Where the work's frame goes in the world, set down facing `f` (its +z toward you) on the ground before you. */
+  private frameFor(a: WorkAnchor, f: THREE.Vector3, box: THREE.Box3): THREE.Matrix4 {
+    const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.atan2(-f.x, -f.z));
+    const cx = (box.min.x + box.max.x) / 2;
+    const origin = new THREE.Vector3(a.x, 0, a.z).addScaledVector(f, 0.45).sub(new THREE.Vector3(cx, 0, box.max.z).applyQuaternion(q));
+    origin.y = a.ground(origin.x, origin.z) - box.min.y;
+    return new THREE.Matrix4().compose(origin, q, new THREE.Vector3(1, 1, 1));
   }
 
   /** Where you stand to do it, and what you face (work set down in the world). */

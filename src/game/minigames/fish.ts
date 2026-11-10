@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { whichFish, type FishDef } from '../../data/fish';
-import { clamp01, Minigame, type Meter, type MgInput } from './core';
+import { clamp01, clearView, Minigame, type Blocked, type Meter, type MgInput } from './core';
 import { sfx } from './sfx';
 import type { Gesture } from './tutorials';
 
@@ -59,6 +59,7 @@ export class FishGame extends Minigame {
   private camFrom = { pos: new THREE.Vector3(), quat: new THREE.Quaternion() };
   private camTo = new THREE.Vector3();
   private camLook = new THREE.Quaternion();
+  private lookPt = new THREE.Vector3();
   private maxCast: number;
   // The cast.
   private power = 0;
@@ -146,6 +147,7 @@ export class FishGame extends Minigame {
     look.position.copy(this.camTo);
     look.lookAt(lookAt);
     this.camLook.copy(look.quaternion);
+    this.lookPt.copy(lookAt);
     this.camFrom.pos.copy(from.position);
     this.camFrom.quat.copy(from.quaternion);
     this.camera.position.copy(from.position);
@@ -548,6 +550,15 @@ export class FishGame extends Minigame {
       d.mesh.position.addScaledVector(d.vel, dt);
       if (d.life <= 0 || (this.here && d.mesh.position.y < this.here.surface - 0.05)) { this.overlay.remove(d.mesh); d.mesh.geometry.dispose(); (d.mesh.material as THREE.Material).dispose(); this.drops.splice(this.drops.indexOf(d), 1); }
     }
+  }
+
+  /** If something stands between the view and the work, swing the view round to a clear one. */
+  fitView(blocked: Blocked) {
+    this.camTo.copy(clearView(this.camTo, this.lookPt, blocked));
+    const look = new THREE.PerspectiveCamera();
+    look.position.copy(this.camTo);
+    look.lookAt(this.lookPt);
+    this.camLook.copy(look.quaternion);
   }
 
   resize() { /* the game's own camera keeps its shape */ }
