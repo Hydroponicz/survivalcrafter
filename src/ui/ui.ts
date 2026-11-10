@@ -83,7 +83,10 @@ export class UI {
   private slipObj: StructureObj | null = null;
   private shipDraft: ShipDesign = { ...SHIP_PRESETS[0].design };
   private craftCategory = 'Primitive';
-  private expanded = new Set<string>();
+  /** The kind of item picked out in the backpack (its details shown under the grid). */
+  private selectedType: string | null = null;
+  /** The right-click menu on an item in the backpack. */
+  private itemMenuEl: HTMLElement | null = null;
   private refreshTimer = 0;
   private hintTimer = 0;
   private hintKey = '';
@@ -167,6 +170,8 @@ export class UI {
     this.root.appendChild(this.menuEl);
     this.cursor = new VirtualCursor(this.root, () => this.cursorActive(), (target, button) => {
       // Right-click, or clicking off the action menu, closes it.
+      // A press anywhere but on it closes an item's menu (and still goes where it was aimed).
+      if (this.itemMenuEl && (!target || !this.itemMenuEl.contains(target))) this.closeItemMenu();
       if (this.menuOpen && (button === 2 || !target || !this.menuEl.contains(target))) {
         this.closeMenu();
         return true;
@@ -285,6 +290,7 @@ export class UI {
     document.addEventListener('mousedown', (e) => {
       // With the mouse captured, clicks are routed through clickMenuCursor instead.
       if (this.menuOpen && !this.g.input.locked && !this.menuEl.contains(e.target as Node)) this.closeMenu();
+      if (this.itemMenuEl && !this.itemMenuEl.contains(e.target as Node)) this.closeItemMenu();
     });
     for (const [t, k] of g.pendingMsgs) this.log(t, k);
     g.pendingMsgs = [];
@@ -379,12 +385,13 @@ export class UI {
     this.pendingRender.delete(name);
     if (name === 'container') this.container = null;
     if (name === 'store') this.storeObj = null;
-    if (name === 'inventory') this.hoveredItem = null;
+    if (name === 'inventory') { this.hoveredItem = null; this.closeItemMenu(); }
     if (!this.anyWindowOpen() && !this.g.input.locked) this.wantsRelock = true;
   }
 
   private onKey(e: KeyboardEvent) {
     if ((e.target as HTMLElement).tagName === 'INPUT') return;
+    if (this.itemMenuEl && e.code === 'Escape') { this.closeItemMenu(); e.stopImmediatePropagation(); return; }
     if (this.menuOpen) {
       const n = parseInt(e.key, 10);
       if (n >= 1 && n <= 9) {
@@ -835,6 +842,92 @@ export class UI {
     return row;
   }
 
+  /** What you can do with a kind of item in your pack (shown on right-click). */
+  private invActions(items: Item[]): { label: string; fn: (it: Item) => void }[] {
+    const g = this.g;
+    const type = items[0].type, def = itemDef(type);
+    const actions: { label: string; fn: (it: Item) => void }[] = [];
+    const isActive = items.some((i) => i.uid === g.activeUid);
+    const chest = this.container?.kind === 'structure' || this.container?.kind === 'cart' ? this.container : null;
+    if (def.wear) {
+      const on = items.some((i) => g.equipped[def.wear!.slot] === i.uid);
+      actions.push(on ? { label: 'Take off', fn: () => g.takeOff(def.wear!.slot) } : { label: 'Wear', fn: (it) => g.putOn(it.uid) });
+    } else actions.push({ label: isActive ? 'Put away' : 'Use', fn: (it) => g.setActive(isActive ? null : it.uid) });
+    if (def.food) actions.push({ label: def.food.verb ?? (def.food.nutrition || def.food.effect ? 'Eat' : 'Drink'), fn: (it) => g.eat(it.uid) });
+    if (def.sips) actions.push({ label: 'Drink', fn: (it) => g.drinkCanteen(it.uid) });
+    if (def.holds) {
+      actions.push({ label: 'Load arrows', fn: (it) => { const n = g.loadQuiver(it); g.msg(n ? `You slide ${n} arrow(s) into the quiver.` : 'No arrows in your pack to load (or the quiver is full).', 'info'); g.dressPlayer(); } });
+      actions.push({ label: 'Unload', fn: (it) => { const n = g.unloadQuiver(it); g.msg(`You take ${n} arrow(s) out of the quiver.`, 'info'); g.dressPlayer(); } });
+    }
+    if (def.places) actions.push({ label: 'Place', fn: (it) => g.startPlacingItem(it) });
+    if (def.cart || def.vessel) actions.push({ label: 'Set down', fn: (it) => g.setDownCart(it) });
+    if (type === 'bandage') actions.push({ label: 'Apply', fn: () => g.applyBandage() });
+    if (!isIdentified(type)) actions.push({ label: 'Study', fn: (it) => g.request(ACTION_MAP.study, { g, t: { kind: 'none' }, item: it }) });
+    if (chest) {
+      actions.push({ label: 'Store', fn: (it) => g.putIntoContainer(chest, [it.uid]) });
+      if (items.length > 1) actions.push({ label: `Store all (${items.length})`, fn: () => g.putIntoContainer(chest, items.map((i) => i.uid)) });
+    } else {
+      actions.push({ label: 'Drop', fn: (it) => g.dropItems([it.uid]) });
+      if (items.length > 1) actions.push({ label: `Drop all (${items.length})`, fn: () => g.dropItems(items.map((i) => i.uid)) });
+    }
+    return actions;
+  }
+
+  /** The little menu of things to do with an item, opened at the pointer by a right-click. */
+  private openItemMenu(x: number, y: number, title: string, it: Item, actions: { label: string; fn: (it: Item) => void }[]) {
+    this.closeItemMenu();
+    const m = el('div', 'item-menu');
+    m.appendChild(el('div', 'item-menu-title', title));
+    for (const a of actions) {
+      const b = el('button', 'item-menu-item', esc(a.label));
+      b.addEventListener('click', (e) => { e.stopPropagation(); this.closeItemMenu(); a.fn(it); });
+      m.appendChild(b);
+    }
+    this.root.appendChild(m);
+    // At the pointer, kept on screen.
+    const r = this.root.getBoundingClientRect();
+    m.style.left = `${Math.min(x - r.left + 6, r.width - m.offsetWidth - 8)}px`;
+    m.style.top = `${Math.min(y - r.top + 6, r.height - m.offsetHeight - 8)}px`;
+    this.itemMenuEl = m;
+  }
+
+  closeItemMenu() {
+    this.itemMenuEl?.remove();
+    this.itemMenuEl = null;
+  }
+
+  /** One pocket of the backpack: the item's picture, how many, and what it's doing (in hand, worn, glowing hot). */
+  private invSlot(items: Item[]): HTMLElement {
+    const g = this.g;
+    const best = items[0], def = itemDef(best.type);
+    const active = items.some((i) => i.uid === g.activeUid);
+    const worn = !!def.wear && items.some((i) => g.equipped[def.wear!.slot] === i.uid);
+    const slot = el('div', `inv-slot${active ? ' active' : ''}${worn ? ' worn' : ''}${best.hot ? ' hot' : ''}${this.selectedType === best.type ? ' selected' : ''}`);
+    slot.dataset.type = best.type;
+    slot.innerHTML = `<span class="icon">${itemIcon(best.type)}</span>${items.length > 1 ? `<span class="inv-count">${items.length}</span>` : ''}${worn ? '<span class="inv-badge" title="Worn">W</span>' : active ? '<span class="inv-badge" title="In hand">✋</span>' : ''}`;
+    slot.dataset.tip = `${itemTip(best, items.length)}<br><span class="tip-facts">Right-click for options</span>`;
+    slot.addEventListener('click', () => { this.selectedType = this.selectedType === best.type ? null : best.type; this.renderInventory(); });
+    slot.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this.selectedType = best.type;
+      this.renderInventory();
+      this.openItemMenu(e.clientX, e.clientY, `${esc(itemName(best))}${items.length > 1 ? ` ×${items.length}` : ''}`, best, this.invActions(items));
+    });
+    slot.addEventListener('mouseenter', () => { this.hoveredItem = best.uid; });
+    slot.addEventListener('mouseleave', () => { if (this.hoveredItem === best.uid) this.hoveredItem = null; });
+    if (!def.noPickup) {
+      slot.draggable = true;
+      slot.addEventListener('dragstart', (e) => {
+        e.dataTransfer!.setData(DRAG_ITEM, best.type);
+        e.dataTransfer!.effectAllowed = 'copy';
+        this.hotbarEl.classList.add('dragging');
+      });
+      slot.addEventListener('dragend', () => this.hotbarEl.classList.remove('dragging'));
+    }
+    return slot;
+  }
+
   private renderInventory() {
     const g = this.g;
     const body = el('div');
@@ -842,64 +935,43 @@ export class UI {
     const carrying = el('div', 'inv-weight', `Carrying <b>${w.toFixed(1)}</b> / ${g.carryCapacity()} kg${w > g.carryCapacity() ? ' — <span class="warn">overloaded, you move slowly</span>' : ''} · Purse: <b>${fmtCoins(g.coins)}</b> coins`);
     carrying.dataset.tip = weightTip(g.inv.items, g.carryCapacity(), 'Over this you move slowly.');
     body.appendChild(carrying);
-    body.appendChild(el('div', 'hint', 'Click <b>Use</b> to equip an item (tools, seeds, dirt…). Drag an item onto the hotbar, or hover over it and press <b>1-9</b>, to add it there.'));
     const groups = g.inv.grouped().sort((a, b) => itemDef(a.type).name.localeCompare(itemDef(b.type).name));
-    if (!groups.length) body.appendChild(el('div', 'empty', 'Your pack is empty.'));
-    const chest = this.container?.kind === 'structure' || this.container?.kind === 'cart' ? this.container : null;
-    for (const grp of groups) {
-      const def = itemDef(grp.type);
-      const actions: { label: string; fn: (it: Item) => void }[] = [];
-      const isActive = grp.items.some((i) => i.uid === g.activeUid);
-      if (def.wear) {
-        const on = grp.items.some((i) => g.equipped[def.wear!.slot] === i.uid);
-        actions.push(on ? { label: 'Take off', fn: () => g.takeOff(def.wear!.slot) } : { label: 'Wear', fn: (it) => g.putOn(it.uid) });
-      } else actions.push({ label: isActive ? 'Unuse' : 'Use', fn: (it) => g.setActive(isActive ? null : it.uid) });
-      if (def.food) actions.push({ label: def.food.verb ?? (def.food.nutrition || def.food.effect ? 'Eat' : 'Drink'), fn: (it) => g.eat(it.uid) });
-      if (def.sips) actions.push({ label: 'Drink', fn: (it) => g.drinkCanteen(it.uid) });
-      if (def.holds) {
-        actions.push({ label: 'Load arrows', fn: (it) => { const n = g.loadQuiver(it); g.msg(n ? `You slide ${n} arrow(s) into the quiver.` : 'No arrows in your pack to load (or the quiver is full).', 'info'); g.dressPlayer(); } });
-        actions.push({ label: 'Unload', fn: (it) => { const n = g.unloadQuiver(it); g.msg(`You take ${n} arrow(s) out of the quiver.`, 'info'); g.dressPlayer(); } });
-      }
-      if (def.places) actions.push({ label: 'Place', fn: (it) => g.startPlacingItem(it) });
-      if (def.cart || def.vessel) actions.push({ label: 'Set down', fn: (it) => g.setDownCart(it) });
-      if (grp.type === 'bandage') actions.push({ label: 'Apply', fn: () => g.applyBandage() });
-      if (!isIdentified(grp.type)) actions.push({ label: 'Study', fn: (it) => g.request(ACTION_MAP.study, { g, t: { kind: 'none' }, item: it }) });
-      if (chest) {
-        actions.push({ label: 'Store', fn: (it) => g.putIntoContainer(chest, [it.uid]) });
-        if (grp.items.length > 1) actions.push({ label: 'Store all', fn: () => g.putIntoContainer(chest, grp.items.map((i) => i.uid)) });
-      } else {
-        actions.push({ label: 'Drop', fn: (it) => g.dropItems([it.uid]) });
-        if (grp.items.length > 1) actions.push({ label: 'Drop all', fn: () => g.dropItems(grp.items.map((i) => i.uid)) });
-      }
-      const row = this.itemRow(grp.items, actions);
-      if (grp.items.length > 1) {
-        const open = this.expanded.has(grp.type);
-        const tog = el('button', 'expand', open ? '▾' : '▸');
-        tog.title = 'Show individual items';
-        tog.addEventListener('click', (e) => {
-          e.stopPropagation();
-          if (open) this.expanded.delete(grp.type); else this.expanded.add(grp.type);
-          this.renderInventory();
-        });
-        row.prepend(tog);
-      } else {
-        row.prepend(el('span', 'expand'));
-      }
-      body.appendChild(row);
-      if (this.expanded.has(grp.type)) {
-        for (const it of grp.items) {
-          const sub = el('div', `item-sub${it.uid === g.activeUid ? ' active' : ''}`,
-            `QL ${it.ql.toFixed(1)}${it.dmg > 0 ? ` · dmg ${it.dmg.toFixed(1)}` : ''}`);
-          sub.dataset.uid = String(it.uid);
-          const u = el('button', '', it.uid === g.activeUid ? 'Unuse' : 'Use');
-          u.addEventListener('click', () => g.setActive(it.uid === g.activeUid ? null : it.uid));
-          const d = el('button', '', 'Drop');
-          d.addEventListener('click', () => g.dropItems([it.uid]));
-          sub.append(u, d);
-          body.appendChild(sub);
+    // The pack's pockets, in a grid: enough rows for everything and a few spare.
+    const grid = el('div', 'inv-grid');
+    const cols = 6, cells = Math.max(30, Math.ceil((groups.length + 1) / cols) * cols);
+    for (const grp of groups) grid.appendChild(this.invSlot(grp.items));
+    for (let k = groups.length; k < cells; k++) grid.appendChild(el('div', 'inv-slot empty'));
+    body.appendChild(grid);
+    // The chosen item, in full (and each of a stack, to pick one out).
+    const sel = groups.find((x) => x.type === this.selectedType);
+    if (!sel) this.selectedType = null;
+    const info = el('div', 'inv-detail');
+    if (sel) {
+      const items = sel.items, best = items[0], def = itemDef(best.type);
+      const ql = items.length > 1 ? `QL ${items.at(-1)!.ql.toFixed(0)}–${best.ql.toFixed(0)}` : `QL ${best.ql.toFixed(1)}`;
+      info.innerHTML = `<div class="inv-detail-head"><span class="icon">${itemIcon(best.type)}</span><div><b>${esc(itemName(best))}</b>${items.length > 1 ? ` ×${items.length}` : ''}
+        <small>${ql}${def.holds ? ` · ${best.contents?.length ?? 0}/${def.holds.max} arrows` : ''}${def.sips ? ` · ${best.fill ?? 0}/${def.sips} drinks` : ''}${def.carry ? ` · +${def.carry} kg capacity` : ''}${def.tool && best.dmg > 0 ? ` · worn ${best.dmg.toFixed(1)}%` : ''}${best.quenched ? ' · hardened' : ''}${best.hot ? ` · <span class="warn">glowing, ${Math.ceil(best.hot)}s to quench</span>` : ''} · ${(items.length * def.weight).toFixed(1)} kg</small></div></div>
+        <div class="inv-detail-desc">${esc(typeDesc(best.type))}</div>`;
+      if (items.length > 1 && items.some((i) => Math.abs(i.ql - best.ql) > 0.05 || i.dmg > 0)) {
+        const list = el('div', 'inv-each');
+        for (const it of items) {
+          const chip = el('div', `inv-each-item${it.uid === g.activeUid ? ' active' : ''}`, `QL ${it.ql.toFixed(1)}${it.dmg > 0 ? ` · worn ${it.dmg.toFixed(0)}%` : ''}`);
+          chip.dataset.uid = String(it.uid);
+          chip.addEventListener('contextmenu', (e) => {
+            e.preventDefault(); e.stopPropagation();
+            this.openItemMenu(e.clientX, e.clientY, `${esc(itemName(it))} (QL ${it.ql.toFixed(1)})`, it, this.invActions([it]));
+          });
+          list.appendChild(chip);
         }
+        info.appendChild(list);
       }
+      info.appendChild(el('div', 'hint', 'Right-click an item for what you can do with it.'));
+    } else {
+      info.appendChild(el('div', 'hint', groups.length
+        ? '<b>Right-click</b> an item for what you can do with it (use, wear, eat, drop…). Click one to look it over. Drag it onto the hotbar, or hover over it and press <b>1-9</b>, to put it there.'
+        : 'Your pack is empty.'));
     }
+    body.appendChild(info);
     this.frame('inventory', 'Backpack', body);
   }
 
