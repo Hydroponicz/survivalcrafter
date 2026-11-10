@@ -176,8 +176,6 @@ export class MinigameSession {
   private pointerShown = false;
   private wasDown = false;
   /** The right button: held last frame, and how far it's been dragged since it went down (a short press cancels). */
-  private rWasDown = false;
-  private rDrag = 0;
   private elapsed = 0;
   private ended = false;
   private endDelay = -1;
@@ -233,16 +231,12 @@ export class MinigameSession {
   update(dt: number, input: Input) {
     if (this.ended) return;
     const clicks = input.takeClicks();
-    // A right-click cancels; where you can look around, only a click, not a drag.
+    // A right-click stops the work. Where you can look around the work, holding Alt turns the view with the mouse
+    // (otherwise the mouse only ever moves your hands).
+    if (clicks.includes(2)) { this.end(null); return; }
     const orbits = this.mg.orbits && !this.intro;
-    if (clicks.includes(2)) { if (orbits) this.rDrag = 0; else { this.end(null); return; } }
-    const rDown = input.held.has(2);
     let orbit: { dx: number; dy: number } | undefined;
-    if (orbits) {
-      if (rDown) { this.rDrag += Math.abs(input.mouseDX) + Math.abs(input.mouseDY); orbit = { dx: input.mouseDX, dy: input.mouseDY }; }
-      if (this.rWasDown && !rDown && this.rDrag < 8) { this.end(null); return; }
-      this.rWasDown = rDown;
-    }
+    if (orbits && (input.keys.has('AltLeft') || input.keys.has('AltRight'))) orbit = { dx: input.mouseDX, dy: input.mouseDY };
     if (this.intro) {
       // Read the card first; the work starts when you click.
       input.mouseDX = input.mouseDY = input.wheel = 0;
@@ -257,10 +251,11 @@ export class MinigameSession {
     }
     this.elapsed += dt;
     const down = input.held.has(0);
-    // (While looking around, the pointer stays put.)
+    // (While looking around, the pointer stays put. Holding Space steadies your hands: it moves finely.)
     if (!orbit) {
-      this.px = Math.max(0, Math.min(window.innerWidth - 1, this.px + input.mouseDX));
-      this.py = Math.max(0, Math.min(window.innerHeight - 1, this.py + input.mouseDY));
+      const fine = this.mg.orbits && input.keys.has('Space') ? 0.35 : 1;
+      this.px = Math.max(0, Math.min(window.innerWidth - 1, this.px + input.mouseDX * fine));
+      this.py = Math.max(0, Math.min(window.innerHeight - 1, this.py + input.mouseDY * fine));
     }
     const i: MgInput = {
       dx: orbit ? 0 : input.mouseDX, dy: orbit ? 0 : input.mouseDY, wheel: input.wheel, orbit, keys: input.keys, hit: (c: string) => input.hit(c),
@@ -336,8 +331,8 @@ export class MinigameSession {
       <div class="mg-how">${m.instructions}</div>
       <div class="mg-meter"><span>Progress</span><div class="mg-track"><div class="mg-fill" style="width:${m.progress * 100}%"></div></div></div>
       ${meters}
-      <div class="mg-foot"><span>Work: <b>${grade}</b></span><span>${m.orbits ? 'Right-click (tap) to stop' : 'Right-click to stop'}</span></div>
-      ${m.orbits ? `<div class="mg-keys"><span><kbd>RMB</kbd> drag: look around</span><span><kbd>Wheel</kbd> zoom</span><span><kbd>WASD</kbd> move view</span><span><kbd>Q</kbd><kbd>E</kbd> turn</span><span><kbd>R</kbd> reset view</span><span><kbd>Space</kbd> steady hands</span></div>` : ''}
+      <div class="mg-foot"><span>Work: <b>${grade}</b></span><span>Right-click to stop</span></div>
+      ${m.orbits ? `<div class="mg-keys"><span><kbd>Alt</kbd> + mouse: look around</span><span><kbd>Wheel</kbd> zoom</span><span><kbd>WASD</kbd> move view</span><span><kbd>Q</kbd><kbd>E</kbd> turn</span><span><kbd>R</kbd> reset view</span><span><kbd>Space</kbd> steady hands (fine aim)</span></div>` : ''}
       ${fb}`;
     this.panel.style.visibility = this.intro ? 'hidden' : 'visible';
     const h = this.intro ? null : ((this.coach || this.idle > 5) ? m.hint() : null) ?? m.tag();

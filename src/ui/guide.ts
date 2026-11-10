@@ -13,6 +13,7 @@ export const GUIDE_HTML = `
         <tr><td>R · X</td><td>Repeat last action · stop current action (or get off your horse, or step out of a boat)</td></tr>
         <tr><td>I / Tab · C · B · K</td><td>Inventory · Crafting · Build · Skills</td></tr>
         <tr><td>Hold Left Alt</td><td>Show the cursor: hover over things for tooltips, or drag windows and the quest panel around</td></tr>
+        <tr><td>Building by hand</td><td>Move the mouse to carry the material onto the outline (Space steadies your hands for fine aim), click to set it. Hold Alt and move the mouse to look around the work; the wheel zooms, WASD and Q/E move and turn the view, R resets it; right-click stops</td></tr>
         <tr><td>H · Esc</td><td>This guide · free the mouse / close windows</td></tr>
         <tr><td>G · J · M</td><td>Survey for nearby finds · Field journal · World map</td></tr>
         <tr><td>L</td><td>Quest log: accept quests, track one (its objectives are marked), pin the ones you want on screen</td></tr>

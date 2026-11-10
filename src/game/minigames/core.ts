@@ -48,7 +48,7 @@ export abstract class Minigame {
   done = false;
   /** Whether the in-game pointer is drawn. */
   showPointer = true;
-  /** Lets you look around it: right-drag to orbit, the wheel to zoom (a quick right-click still cancels). */
+  /** Lets you look around it: hold Alt and move the mouse to orbit, the wheel to zoom (right-click cancels). */
   readonly orbits: boolean = false;
   abstract readonly title: string;
   abstract readonly instructions: string;

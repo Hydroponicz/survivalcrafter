@@ -137,10 +137,9 @@ export class BuildGame extends Minigame {
   readonly workLight = new THREE.Vector3();
   private camLook = new THREE.Vector3();
   private placeQ = 0;
-  /** How well it would fit if set down now (0..1), whether it's settled into the slot, and a nudge as it does. */
+  /** How well it would fit if set down now (0..1), and whether it's in a good fit (for the tick). */
   private hoverQ = 0;
   private snapped = false;
-  private nudge = 0;
   private strikeQ: number[] = [];
   private setFrom = new THREE.Vector3();
   private bits: { mesh: THREE.Mesh; vel: THREE.Vector3; life: number }[] = [];
@@ -268,7 +267,7 @@ export class BuildGame extends Minigame {
   }
 
   /**
-   * Looking around: right-drag circles the work, the wheel comes closer or
+   * Looking around: Alt + mouse circles the work, the wheel comes closer or
    * stands back, WASD moves the view along it, Q/E turn, R puts it back.
    * Space steadies your hands.
    */
@@ -345,7 +344,7 @@ export class BuildGame extends Minigame {
     const pct = Math.round(this.hoverQ * 100);
     return pct > 0
       ? { x: p.x + 30, y: p.y - 56, text: `fit ${pct}% — click to set`, gesture: 'click' }
-      : { x: p.x + 30, y: p.y - 56, text: `move the ${itemDef(this.material).name.toLowerCase()} onto the outline (right-drag to look around)` };
+      : { x: p.x + 30, y: p.y - 56, text: `move the ${itemDef(this.material).name.toLowerCase()} onto the outline (hold Alt to look around)` };
   }
 
   meters(): Meter[] {
@@ -378,14 +377,10 @@ export class BuildGame extends Minigame {
         if (k >= 1) {
           this.phase = 'place'; this.t = 0;
           this.camLook.copy(this.camTo.look);
-          // You pick the material up off to one side: it has to be carried onto the slot, not just
-          // clicked where the view happens to be centred. It sways a little in your hands, too.
-          const [tu, tv] = this.tolerances();
-          const a = Math.random() * Math.PI * 2, r = 1.8 + Math.random() * 1.2;
+          // The material is where you point: you carry it onto the slot yourself. It sways a
+          // little in your hands (less the more skilled you are; not at all held steady with Space).
           this.grip.set(0, 0, 0);
-          this.grip[this.u] = Math.cos(a) * tu * r;
-          this.grip[this.v] = Math.sin(a) * tv * r;
-          this.swayAmp = 0.28 * (1.15 - this.ease * 0.6);
+          this.swayAmp = 0.06 * (1.15 - this.ease * 0.6);
         }
         return;
       }
@@ -411,19 +406,16 @@ export class BuildGame extends Minigame {
         const tol = 1;
         const q = clamp01(1 - off / tol);
         this.hoverQ = q;
-        // Close enough, and it settles into the slot with a little nudge.
-        const inside = off < tol;
-        if (inside && !this.snapped) { this.snapped = true; this.nudge = 1; sfx.tick(2); }
-        else if (!inside) this.snapped = false;
-        const want = inside ? c.clone() : local.clone();
-        if (!inside) {
-          // Held a hand's breadth off the surface (toward you), so it reads as carried.
-          want[this.n] += (this.piece.worldToLocal(this.camera.position.clone())[this.n] > c[this.n] ? 1 : -1) * 0.05;
-        }
-        this.carried.position.lerp(want, 1 - Math.exp(-dt * (inside ? 16 : 30)));
-        this.nudge = Math.max(0, this.nudge - dt * 4);
-        this.carried.position.y += Math.sin(this.nudge * Math.PI) * 0.015;
-        this.carried.rotation.z = inside ? 0 : Math.sin(this.time * 2) * 0.02;
+        // It stays exactly where you hold it (no pulling into place: the fit is what you see). A soft tick
+        // as it comes into a good fit, so you can feel it as well as read it.
+        const good = q > 0.85;
+        if (good && !this.snapped) { this.snapped = true; sfx.tick(2); }
+        else if (!good) this.snapped = false;
+        const want = local.clone();
+        // Held a hand's breadth off the surface (toward you), so it reads as carried.
+        want[this.n] += (this.piece.worldToLocal(this.camera.position.clone())[this.n] > c[this.n] ? 1 : -1) * 0.05;
+        this.carried.position.lerp(want, 1 - Math.exp(-dt * 40));
+        this.carried.rotation.z = Math.sin(this.time * 2) * 0.02 * amp / Math.max(1e-3, this.swayAmp);
         // The outline warms from gold to green as you close in.
         (this.slotGlow.material as THREE.LineBasicMaterial).color.copy(GOLD).lerp(GREEN, q);
         (this.slotFill.material as THREE.MeshBasicMaterial).color.copy(GOLD).lerp(GREEN, q);

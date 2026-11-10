@@ -444,6 +444,8 @@ export class UI {
 
   /** Holding Left Alt shows the cursor (hover for tooltips, drag windows) without opening anything. */
   get peeking(): boolean {
+    // (Not while building by hand: there Alt turns the view about the work instead.)
+    if (this.g.working) return false;
     return this.g.input.keys.has('AltLeft') || !!this.windowDrag || !!this.altHint;
   }
 
@@ -641,7 +643,7 @@ export class UI {
     drawIcons();
     // The tutorial panel steps aside while a window is open.
     if (this.root.classList.contains('has-window') !== this.open.size > 0) this.root.classList.toggle('has-window', this.open.size > 0);
-    if (!this.altSeen && g.input.locked && g.input.keys.has('AltLeft')) this.showAltHint();
+    if (!this.altSeen && g.input.locked && g.input.keys.has('AltLeft') && !g.working) this.showAltHint();
     // Tooltips follow the in-game cursor, and go when it does (and stay out of the way of a drag).
     this.tooltip.check();
     if (this.cursor.isVisible) this.tooltip.place(this.cursor.x, this.cursor.y);
