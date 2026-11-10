@@ -309,8 +309,10 @@ export class UI {
     if (name === 'map') { this.mapView.mount(this.windows.get('map')!); this.mapView.opened(); }
     this.open.add(name);
     this.windows.get(name)!.style.display = 'flex';
-    const pos = this.windowPos[name];
+    // (The build menu always opens big in the middle of the screen; others where you left them.)
+    const pos = name === 'build' ? null : this.windowPos[name];
     if (pos) this.placeWindow(this.windows.get(name)!, pos.x, pos.y);
+    if (name === 'build') Object.assign(this.windows.get(name)!.style, { left: '', top: '', right: '', bottom: '', transform: '' });
     this.render(name);
   }
 
@@ -1262,53 +1264,164 @@ export class UI {
     this.frame('skills', 'Skills', `<div class="hint">Skills rise slowly through use, fastest on tasks close to your level.</div>${rows}`);
   }
 
+  // ---------- the build menu: categories down the side, a search, the pieces as pictures, the chosen one in detail
+  private buildCat = 'All';
+  private buildQuery = '';
+  private buildReady = false;
+  private buildSel: string | null = null;
+  private buildShell: { root: HTMLElement; side: HTMLElement; tiles: HTMLElement; detail: HTMLElement; count: HTMLElement; search: HTMLInputElement } | null = null;
+
+  /** The order the categories are listed in (any others after). */
+  private static readonly BUILD_ORDER = ['Foundations', 'Walls', 'Roofs & stairs', 'Doors & fences', 'Furniture', 'Crafting', 'Decor', 'Garden & paths', 'Farm & mill', 'Defences', 'Waterside', 'Boats', 'Smithy'];
+
   private renderBuild() {
-    const g = this.g;
-    const body = el('div');
-    body.appendChild(el('div', 'hint', 'Choose a piece: an outline follows your aim and snaps to nearby floors, walls and roofs. Left-click to place it (you can keep placing more), use the wheel or Q/E to rotate, and right-click to stop. Then aim at a placed outline with the right tool and click to build it.'));
-    const cats = [...new Set(BUILDABLE.map((d) => d.category))];
-    for (const cat of cats) {
-      body.appendChild(el('h3', '', cat));
-      const grid = el('div', 'build-grid');
-      for (const def of BUILDABLE.filter((d) => d.category === cat)) {
-        const card = el('div', 'build-card');
-        // What it needs, as pictures: green when you have enough, red when you don't.
-        let ready = true;
-        const mats = def.materials.map((m) => {
-          const have = g.inv.count(m.item);
-          if (have < m.count) ready = false;
-          return `<span class="mat-chip ${have >= m.count ? 'ok' : 'no'}" data-tip="${escAttr(`<b>${itemDef(m.item).name}</b>: you have ${have}, need ${m.count}`)}">${itemIcon(m.item, 'chip-img')}<b>${m.count}</b> ${esc(itemDef(m.item).name.toLowerCase())}</span>`;
-        }).join('');
-        const tool = def.tool ? g.toolFor(def.tool) : undefined;
-        if (def.tool && !tool) ready = false;
-        const { min, max } = pieceBounds(def);
-        const size = `${(max.x - min.x).toFixed(1)} × ${(max.z - min.z).toFixed(1)} m, ${(max.y - min.y).toFixed(1)} m tall`.replace(/\.0/g, '');
-        const lvl = g.skills.get(def.skill);
-        card.innerHTML = `
-          <div class="build-pic">${pieceIcon(def.id, def.icon)}</div>
-          <div class="build-info">
-            <div class="build-name">${def.name}${ready ? '<span class="build-ready">Ready to build</span>' : ''}</div>
-            <div class="build-desc">${esc(def.desc)}</div>
-            <div class="build-mats">${mats}</div>
-            <div class="build-meta">
-              ${def.tool ? `<span class="${tool ? 'ok' : 'no'}">Tool: ${def.tool}${tool ? '' : ' (you have none)'}</span>` : '<span class="ok">No tool needed</span>'}
-              <span data-tip="Your ${SKILLS[def.skill]} skill against how hard this is to build. Below the difficulty, the work is less forgiving.">${SKILLS[def.skill]} ${Math.floor(lvl)} · difficulty ${def.difficulty}</span>
-              <span>${size}</span>
-              <span>${def.snap ? 'Snaps to other pieces' : 'Freestanding'}</span>
-            </div>
-          </div>`;
-        const b = el('button', 'build-place', 'Place');
-        b.dataset.tip = 'Pick it up as an outline to place in the world. Then build it with the materials above.';
-        b.addEventListener('click', () => {
-          g.startPlacing(def);
-          this.close('build');
-        });
-        card.appendChild(b);
-        grid.appendChild(card);
-      }
-      body.appendChild(grid);
+    const w = this.windows.get('build')!;
+    if (!this.buildShell || !w.contains(this.buildShell.root)) {
+      const root = el('div', 'build-ui');
+      root.innerHTML = `
+        <div class="build-side"></div>
+        <div class="build-main">
+          <div class="build-top">
+            <input class="build-search" type="search" placeholder="Search…" spellcheck="false" autocomplete="off">
+            <label class="build-readyonly" data-tip="Only show what you have the materials and tool for."><input type="checkbox"> Ready to build</label>
+            <span class="build-count"></span>
+          </div>
+          <div class="build-tiles"></div>
+        </div>
+        <div class="build-detail"></div>`;
+      this.lastHtml.delete('build');
+      this.frame('build', 'Build', root);
+      const search = root.querySelector('.build-search') as HTMLInputElement;
+      search.value = this.buildQuery;
+      search.addEventListener('input', () => { this.buildQuery = search.value; this.fillBuild(); });
+      search.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') { if (search.value) { search.value = ''; this.buildQuery = ''; this.fillBuild(); } else search.blur(); e.stopPropagation(); }
+        if (e.key === 'Enter' && this.buildSel) this.placeFromBuild(this.buildSel);
+      });
+      const ready = root.querySelector('.build-readyonly input') as HTMLInputElement;
+      ready.checked = this.buildReady;
+      ready.addEventListener('change', () => { this.buildReady = ready.checked; this.fillBuild(); });
+      // (Clicks are handled once here: the lists inside are redrawn as you search.)
+      root.addEventListener('click', (e) => {
+        const t = e.target as HTMLElement;
+        const cat = t.closest('[data-cat]') as HTMLElement | null;
+        if (cat) { this.buildCat = cat.dataset.cat!; this.fillBuild(); return; }
+        const place = t.closest('.build-place') as HTMLElement | null;
+        if (place?.dataset.piece) { this.placeFromBuild(place.dataset.piece); return; }
+        const tile = t.closest('.build-tile') as HTMLElement | null;
+        if (tile?.dataset.piece) {
+          // A second click on the one already chosen places it.
+          if (this.buildSel === tile.dataset.piece && t.closest('.bt-pic')) { this.placeFromBuild(tile.dataset.piece); return; }
+          this.buildSel = tile.dataset.piece; this.fillBuild();
+        }
+      });
+      this.buildShell = { root, side: root.querySelector('.build-side')!, tiles: root.querySelector('.build-tiles')!, detail: root.querySelector('.build-detail')!, count: root.querySelector('.build-count')!, search };
     }
-    this.frame('build', 'Build', body);
+    this.fillBuild();
+  }
+
+  private placeFromBuild(id: string) {
+    const def = BUILDABLE.find((d) => d.id === id);
+    if (!def) return;
+    this.g.startPlacing(def);
+    this.close('build');
+  }
+
+  /** Whether you have what a piece takes (materials and tool). */
+  private buildReadyFor(def: (typeof BUILDABLE)[number]): boolean {
+    const g = this.g;
+    if (def.tool && !g.toolFor(def.tool)) return false;
+    return def.materials.every((m) => g.inv.count(m.item) >= m.count);
+  }
+
+  /** Redraw the lists for the category, search and filter chosen (only what's changed). */
+  private fillBuild() {
+    const sh = this.buildShell;
+    if (!sh) return;
+    if (this.pressedWindow === 'build') { this.pendingRender.add('build'); return; }
+    const g = this.g;
+    const cats = [...new Set(BUILDABLE.map((d) => d.category))].sort((a, b) => {
+      const ia = UI.BUILD_ORDER.indexOf(a), ib = UI.BUILD_ORDER.indexOf(b);
+      return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+    });
+    if (this.buildCat !== 'All' && !cats.includes(this.buildCat as never)) this.buildCat = 'All';
+    // Every word of the search somewhere in its name, category, description or materials.
+    const words = this.buildQuery.toLowerCase().split(/\s+/).filter(Boolean);
+    const matches = (d: (typeof BUILDABLE)[number]) => {
+      if (this.buildReady && !this.buildReadyFor(d)) return false;
+      if (!words.length) return true;
+      const hay = `${d.name} ${d.category} ${d.desc} ${d.materials.map((m) => itemDef(m.item).name).join(' ')} ${d.tool ?? ''}`.toLowerCase();
+      return words.every((wd) => hay.includes(wd));
+    };
+    // (Those with the words in their name first.)
+    const named = (d: (typeof BUILDABLE)[number]) => words.every((wd) => d.name.toLowerCase().includes(wd)) ? 0 : 1;
+    const hits = BUILDABLE.filter(matches).sort((a, b) => named(a) - named(b));
+    const inCat = (c: string) => hits.filter((d) => c === 'All' || d.category === c);
+    // The categories, each with how many match.
+    const sideHtml = ['All', ...cats].map((c) => {
+      const n = inCat(c).length;
+      return `<button class="build-cat${c === this.buildCat ? ' on' : ''}${n ? '' : ' empty'}" data-cat="${escAttr(c)}"><span>${esc(c)}</span><b>${n}</b></button>`;
+    }).join('');
+    setHTML(sh.side, sideHtml);
+    sh.search.placeholder = this.buildCat === 'All' ? 'Search everything…' : `Search ${this.buildCat.toLowerCase()}…`;
+    // The pieces: on the All tab grouped under their categories.
+    const shown = inCat(this.buildCat);
+    if (!this.buildSel || !shown.some((d) => d.id === this.buildSel)) this.buildSel = shown[0]?.id ?? null;
+    const tile = (d: (typeof BUILDABLE)[number]) => `<div class="build-tile${d.id === this.buildSel ? ' sel' : ''}${this.buildReadyFor(d) ? ' ready' : ''}" data-piece="${d.id}">
+        <div class="bt-pic">${pieceIcon(d.id, d.icon)}</div><div class="bt-name">${esc(d.name)}</div></div>`;
+    let tilesHtml = '';
+    if (!shown.length) {
+      const elsewhere = this.buildCat !== 'All' ? hits.length : 0;
+      tilesHtml = `<div class="build-none">Nothing here matches${words.length ? ` “${esc(this.buildQuery)}”` : ''}.${elsewhere ? ` <button class="link" data-cat="All">${elsewhere} found in other categories</button>` : ''}</div>`;
+    } else if (this.buildCat === 'All') {
+      for (const c of cats) {
+        const list = shown.filter((d) => d.category === c);
+        if (list.length) tilesHtml += `<h4 class="build-group">${esc(c)}</h4><div class="build-tilegrid">${list.map(tile).join('')}</div>`;
+      }
+    } else {
+      tilesHtml = `<div class="build-tilegrid">${shown.map(tile).join('')}</div>`;
+      const more = hits.length - shown.length;
+      if (words.length && more > 0) tilesHtml += `<div class="build-none"><button class="link" data-cat="All">${more} more in other categories</button></div>`;
+    }
+    setHTML(sh.tiles, tilesHtml);
+    setText(sh.count, `${shown.length} piece${shown.length === 1 ? '' : 's'}`);
+    // The chosen piece in full.
+    const def = BUILDABLE.find((d) => d.id === this.buildSel);
+    if (!def) { setHTML(sh.detail, '<div class="build-none">Choose a piece.</div>'); return; }
+    const mats = def.materials.map((m) => {
+      const have = g.inv.count(m.item);
+      return `<span class="mat-chip ${have >= m.count ? 'ok' : 'no'}" data-tip="${escAttr(`<b>${itemDef(m.item).name}</b>: you have ${have}, need ${m.count}`)}">${itemIcon(m.item, 'chip-img')}<b>${m.count}</b> ${esc(itemDef(m.item).name.toLowerCase())}</span>`;
+    }).join('');
+    const tool = def.tool ? g.toolFor(def.tool) : undefined;
+    const ready = this.buildReadyFor(def);
+    const { min, max } = pieceBounds(def);
+    const size = `${(max.x - min.x).toFixed(1)} × ${(max.z - min.z).toFixed(1)} m, ${(max.y - min.y).toFixed(1)} m tall`.replace(/\.0/g, '');
+    const lvl = g.skills.get(def.skill);
+    // What it does for you, besides being built.
+    const does: string[] = [];
+    if (def.station) does.push(`A <b>station</b>: stand by it to craft ${def.station === 'fire' ? 'at a fire (cooking, firing pots)' : `at a ${def.station.replace(/_/g, ' ')}`}${def.burns ? ' once it\'s lit' : ''}.`);
+    else if (def.burns) does.push('Takes fuel and gives <b>light</b> once lit.');
+    if (def.bed) does.push('A <b>bed</b>: sleep here to rest and wake here.');
+    if (def.container) does.push(`<b>Storage</b> for ${def.container} kg.`);
+    if (def.comfort) does.push(`<b>Comfort ${def.comfort}</b>: near your bed, helps you wake well rested.`);
+    if (def.spring) does.push('<b>Water</b>: drink, fill a canteen or a jar here.');
+    if (def.climb) does.push('<b>Climb</b> it: walk into it with W, S to climb down.');
+    if (def.mooring) does.push('<b>Moors ships</b>: leave a ship\'s helm near it.');
+    if (def.opens) does.push('<b>Opens and closes.</b>');
+    if (def.waterside) does.push(`Built <b>out from the shore</b>: its top ${def.waterside.top} m above the water.`);
+    setHTML(sh.detail, `
+      <div class="bd-pic">${pieceIcon(def.id, def.icon)}</div>
+      <div class="bd-name">${esc(def.name)}${ready ? '<span class="build-ready">Ready to build</span>' : ''}</div>
+      <div class="bd-cat">${esc(def.category)} · ${def.snap ? 'snaps to other pieces' : 'freestanding'} · ${size}</div>
+      <div class="build-desc">${esc(def.desc)}</div>
+      ${does.length ? `<ul class="bd-does">${does.map((x) => `<li>${x}</li>`).join('')}</ul>` : ''}
+      <div class="bd-label">Materials</div>
+      <div class="build-mats">${mats}</div>
+      <div class="build-meta">
+        ${def.tool ? `<span class="${tool ? 'ok' : 'no'}">Tool: ${def.tool}${tool ? '' : ' (you have none)'}</span>` : '<span class="ok">No tool needed</span>'}
+        <span data-tip="Your ${SKILLS[def.skill]} skill against how hard this is to build. Below the difficulty, the work is less forgiving.">${SKILLS[def.skill]} ${Math.floor(lvl)} · difficulty ${def.difficulty}</span>
+      </div>
+      <button class="build-place" data-piece="${def.id}" data-tip="Pick it up as an outline to place in the world (Enter). Left-click to place, wheel or Q/E to turn, right-click to stop; then build it with the right tool.">Place</button>`);
   }
 
   private renderDev() {

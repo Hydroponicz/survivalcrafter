@@ -3,6 +3,8 @@ import { itemDef } from '../data/items';
 import { buildToolMesh } from '../game/tools';
 import { buildPieceMesh } from '../world/view';
 import { surfacesLoading } from '../world/surfaces';
+import { STRUCTURES } from '../data/structures';
+import { fillsAcross } from '../world/pieceFill';
 
 // Item portraits: each kind of item drawn once as a little 3D picture (its
 // tool model where it has one, else a simple model of the thing), kept as an
@@ -91,17 +93,18 @@ export function drawIcons(max = 3) {
 
 function portrait(type: string): string {
   const obj = model(type);
-  // Turned to show its shape, framed to fill the picture.
-  obj.rotation.y += 0.6;
+  // Turned to show its shape, seen from the side that shows it best, framed to fill the picture.
+  const view = viewFor(type);
+  obj.rotation.y += view.turn;
   scene.add(obj);
   const box = new THREE.Box3().setFromObject(obj);
   const sphere = box.getBoundingSphere(new THREE.Sphere());
-  const dir = new THREE.Vector3(0.35, 0.45, 1).normalize();
+  const dir = view.dir.clone().normalize();
   camera.position.copy(sphere.center).addScaledVector(dir, sphere.radius * 3);
   camera.lookAt(sphere.center);
   camera.updateMatrixWorld();
   // The item's extent as the camera sees it: fit the view to that, with a little margin.
-  const view = new THREE.Box3();
+  const seen = new THREE.Box3();
   obj.updateMatrixWorld(true);
   obj.traverse((o) => {
     const g = (o as THREE.Mesh).geometry;
@@ -110,11 +113,11 @@ function portrait(type: string): string {
     const v = new THREE.Vector3();
     for (let i = 0; i < pos.count; i += Math.max(1, Math.floor(pos.count / 400))) {
       v.fromBufferAttribute(pos, i).applyMatrix4(o.matrixWorld).applyMatrix4(camera.matrixWorldInverse);
-      view.expandByPoint(v);
+      seen.expandByPoint(v);
     }
   });
-  const cx = (view.min.x + view.max.x) / 2, cy = (view.min.y + view.max.y) / 2;
-  const half = Math.max(view.max.x - view.min.x, view.max.y - view.min.y) / 2 * 1.08;
+  const cx = (seen.min.x + seen.max.x) / 2, cy = (seen.min.y + seen.max.y) / 2;
+  const half = Math.max(seen.max.x - seen.min.x, seen.max.y - seen.min.y) / 2 * 1.08;
   camera.left = cx - half; camera.right = cx + half; camera.top = cy + half; camera.bottom = cy - half;
   camera.near = 0.001; camera.far = sphere.radius * 8;
   camera.updateProjectionMatrix();
@@ -122,6 +125,22 @@ function portrait(type: string): string {
   const url = renderer!.domElement.toDataURL('image/png');
   scene.remove(obj);
   return url;
+}
+
+/**
+ * Which way to look at a thing for its picture. Most things from the front
+ * (+z) and a little above. A building piece that slopes up toward its back
+ * (a roof, stairs) from behind and above, so its top is what you see: the
+ * thatch, the shingles, the treads. A flat piece (a floor, a path) from high
+ * up, so you see its surface.
+ */
+function viewFor(type: string): { dir: THREE.Vector3; turn: number } {
+  if (!type.startsWith('piece:')) return { dir: new THREE.Vector3(0.35, 0.45, 1), turn: 0.6 };
+  const id = type.slice(6), def = STRUCTURES[id];
+  if (/roof/.test(id) && id !== 'roof_ridge') return { dir: new THREE.Vector3(0.55, 1.05, -1), turn: 0.5 };
+  if (/stairs$/.test(id)) return { dir: new THREE.Vector3(0.6, 0.75, -1), turn: 0.45 };
+  if (def && fillsAcross(def)) return { dir: new THREE.Vector3(0.4, 1.3, 1), turn: 0.6 };
+  return { dir: new THREE.Vector3(0.35, 0.45, 1), turn: 0.6 };
 }
 
 // ---------- simple models of things
