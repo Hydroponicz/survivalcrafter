@@ -152,7 +152,7 @@ export class KnapGame extends Minigame {
     this.hammer = new THREE.Mesh(new THREE.DodecahedronGeometry(0.022, 1).scale(1.25, 0.9, 1), mat(0x8a857c, { flatShading: true }));
     this.hammer.castShadow = true;
     this.scene.add(this.hammer);
-    this.look([0.07, 0.47, 0.26], [0.07, 0, 0.01]);
+    this.look([0.09, 0.47, 0.26], [0.09, 0, 0.01]);
   }
 
   private wasteCells(): number {
@@ -565,12 +565,11 @@ export class KnapGame extends Minigame {
 function leatherPattern(poly: THREE.Vector2[]): THREE.Group {
   const g = new THREE.Group();
   g.position.set(0.3, 0.011, 0.0);
-  g.rotation.y = 0.12;
   // The leather: an irregular rounded patch.
   const pts: THREE.Vector2[] = [];
   for (let k = 0; k < 28; k++) {
     const a = (k / 28) * Math.PI * 2, r = 1 + 0.06 * Math.sin(a * 3 + 1) + 0.04 * Math.sin(a * 5);
-    pts.push(new THREE.Vector2(Math.cos(a) * 0.072 * r, Math.sin(a) * 0.105 * r));
+    pts.push(new THREE.Vector2(Math.cos(a) * 0.11 * r, Math.sin(a) * 0.075 * r));
   }
   const hide = new THREE.Mesh(new THREE.ShapeGeometry(new THREE.Shape(pts)).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0xa47448, roughness: 0.95, side: THREE.DoubleSide }));
   hide.receiveShadow = true;
@@ -586,11 +585,11 @@ function leatherPattern(poly: THREE.Vector2[]): THREE.Group {
     st.rotation.y = Math.atan2(b.x - a.x, b.y - a.y);
     g.add(st);
   }
-  // The shape, smaller than life, its length along the leather.
-  let maxX = 0;
-  for (const p of poly) maxX = Math.max(maxX, Math.abs(p.x));
-  const scale = Math.min(0.62, 0.085 / Math.max(1e-3, maxX));
-  const drawn = poly.map((p) => new THREE.Vector2(p.y * scale, p.x * scale));
+  // The shape, smaller than life, lying the same way round as the stone it's to be made from.
+  let maxX = 0, maxY = 0;
+  for (const p of poly) { maxX = Math.max(maxX, Math.abs(p.x)); maxY = Math.max(maxY, Math.abs(p.y)); }
+  const scale = Math.min(0.62, 0.088 / Math.max(1e-3, maxX), 0.058 / Math.max(1e-3, maxY));
+  const drawn = poly.map((p) => new THREE.Vector2(p.x * scale, -p.y * scale));
   const fill = new THREE.Mesh(new THREE.ShapeGeometry(new THREE.Shape(drawn)).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x2a221c, transparent: true, opacity: 0.28, side: THREE.DoubleSide }));
   fill.position.y = 0.0009;
   g.add(fill);
