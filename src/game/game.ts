@@ -367,9 +367,29 @@ export class Game {
 
   setActive(uid: number | null) {
     this.activeUid = uid;
-    const it = this.activeItem();
-    this.player.setHeld(it ? itemDef(it.type).tool : undefined, it?.type);
+    this.showHeld();
     this.ui?.refresh();
+  }
+
+  /**
+   * What's in your hands: the tool the job you're at uses (the hatchet at the
+   * chopping block, the hammer at the workbench), taken from your pack even if
+   * it isn't the item you have out; otherwise your active item.
+   */
+  heldNow(): Item | undefined {
+    const job = this.working?.ctx ?? this.action?.ctx;
+    const tool = job?.tool && this.inv.find(job.tool.uid) && itemDef(job.tool.type).tool ? job.tool : undefined;
+    return tool ?? this.activeItem();
+  }
+
+  /** The uid last put in your hands (so it's only rebuilt when it changes). */
+  private shownHeld: number | null | undefined = undefined;
+  showHeld() {
+    const it = this.heldNow();
+    const uid = it?.uid ?? null;
+    if (uid === this.shownHeld) return;
+    this.shownHeld = uid;
+    this.player.setHeld(it ? itemDef(it.type).tool : undefined, it?.type);
   }
 
   /** Remove the active item from the inventory (e.g. dropped dirt) and pick the next of the same type. */
@@ -2317,6 +2337,8 @@ export class Game {
     try {
       if (this.tour) this.tourStep(dt);
       else if (!this.paused) perf.time('update', () => this.update(dt));
+      // (The tool for the job in your hands, or what you have out.)
+      this.showHeld();
       this.render();
       this.frameErrors = 0;
     } catch (e) {
@@ -2764,7 +2786,7 @@ export class Game {
     perf.time('draw', () => { if (this.composer) this.composer.render(this.renderDt); else this.renderer.render(this.scene, this.camera); });
     // First-person hands and tool, on top of the world.
     if (!this.working && !this.tour) {
-      const it = this.activeItem();
+      const it = this.heldNow();
       const kind = it ? itemDef(it.type).tool : undefined;
       this.viewModel.setTool(kind, it?.type);
       const speed = Math.min(1, Math.hypot(p.vel.x, p.vel.z) / 4);
