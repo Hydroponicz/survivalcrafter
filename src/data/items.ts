@@ -6,12 +6,12 @@ import { FURNITURE } from './furniture';
 export type FoodEffect = 'nausea' | 'poison' | 'severe_poison' | 'heal' | 'refresh' | 'soothe';
 
 export type ToolKind =
-  | 'knife' | 'hatchet' | 'pickaxe' | 'shovel' | 'hoe' | 'hammer' | 'saw' | 'scythe' | 'weapon' | 'tongs' | 'crucible' | 'bow';
+  | 'knife' | 'hatchet' | 'pickaxe' | 'shovel' | 'hoe' | 'hammer' | 'saw' | 'scythe' | 'weapon' | 'tongs' | 'crucible' | 'bow' | 'firekit';
 
 /** What each tool kind is called in requirement messages. */
 export const TOOL_NAMES: Record<ToolKind, string> = {
   knife: 'knife', hatchet: 'hatchet', pickaxe: 'pickaxe', shovel: 'shovel', hoe: 'hoe', hammer: 'hammer', saw: 'saw',
-  scythe: 'scythe', weapon: 'weapon', tongs: 'pair of tongs', crucible: 'crucible', bow: 'bow',
+  scythe: 'scythe', weapon: 'weapon', tongs: 'pair of tongs', crucible: 'crucible', bow: 'bow', firekit: 'fire making kit',
 };
 
 /** Where on the body something is worn. */
@@ -118,6 +118,7 @@ const defs: ItemDef[] = [
   { id: 'hide_boots', name: 'Hide boots', icon: '🥾', weight: 0.6, wear: { slot: 'feet', armor: 0.04, colour: 0x4a3220 }, desc: 'Soft hide boots, bound at the ankle.' },
 
   // --- tools
+  { id: 'fire_kit', name: 'Fire making kit', icon: '🔥', weight: 0.8, tool: 'firekit', toolPower: 0.8, desc: 'A bow drill and its makings, bundled in a cord: a bow strung with cordage, a spindle, a fireboard notched to catch the ember, a handhold, and a pouch of tinder. Needed to light any fire or torch. Keep it in your pack.' },
   { id: 'stone_knife', name: 'Stone knife', icon: '🔪', weight: 0.3, tool: 'knife', toolPower: 0.7, damage: 4, desc: 'A rough stone blade. Cuts branches, kindling and meat.' },
   { id: 'stone_hatchet', name: 'Stone hatchet', icon: '🪓', weight: 1.2, tool: 'hatchet', toolPower: 0.6, damage: 7, desc: 'A stone head tied to a branch. Chops trees and splits logs, slowly.' },
   { id: 'stone_pickaxe', name: 'Stone pickaxe', icon: '⛏️', weight: 1.5, tool: 'pickaxe', toolPower: 0.55, damage: 6, desc: 'A stone pick. Slow on rock, but it gets the job done.' },

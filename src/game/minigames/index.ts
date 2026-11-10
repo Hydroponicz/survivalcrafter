@@ -6,6 +6,7 @@ import { CenterGame, HeatGame, PlaceGame, type HeatVariant, type PlaceVariant } 
 import { CarveGame } from './whittle';
 import { BuildGame } from './build';
 import { ChopGame, type BlockSpot, type ChopVariant } from './chop';
+import { FireDrillGame, type FireSpot } from './firedrill';
 import type { StructureObj } from '../../world/world';
 import { StrikeGame, type StrikeVariant } from './strike';
 import { KnapGame, type KnapShape } from './knap';
@@ -17,7 +18,7 @@ import { FURNITURE } from '../../data/furniture';
 
 export type MinigameSpec =
   | { kind: 'saw'; cuts: number }
-  | { kind: 'bowdrill' }
+  | { kind: 'bowdrill'; spot?: FireSpot }
   | { kind: 'bellows'; gear?: number }
   | { kind: 'pour'; gear?: number }
   | { kind: 'quench'; gear?: number }
@@ -44,7 +45,14 @@ export function createMinigame(spec: MinigameSpec, ease: number, toolType?: stri
       return new ChopGame(ease, spec.variant, spec.block ?? { x: cam.position.x, y: 0, z: cam.position.z - 1, top: cam.position.y - 1.1 }, toolType, cam);
     }
     case 'saw': return new SawGame(ease, spec.cuts);
-    case 'bowdrill': return new BowDrillGame(ease);
+    case 'bowdrill': {
+      // Out in the world: the kit laid out where you are (or beside the fire you're lighting).
+      if (camera) {
+        const f = new THREE.Vector3(); camera.getWorldDirection(f); f.y = 0; f.normalize();
+        return new FireDrillGame(ease, spec.spot ?? { x: camera.position.x + f.x * 0.8, y: camera.position.y - 1.6, z: camera.position.z + f.z * 0.8 }, camera);
+      }
+      return new BowDrillGame(ease);
+    }
     case 'bellows': return new BellowsGame(ease, spec.gear);
     case 'pour': return new PourGame(ease, spec.gear ?? 0.5);
     case 'quench': return new QuenchGame(ease, spec.gear ?? 0.5);
@@ -60,8 +68,8 @@ export function createMinigame(spec: MinigameSpec, ease: number, toolType?: stri
 }
 
 /** Work played out in the world itself (building, splitting at the block), drawn by the game's own camera. */
-function inWorld(mg: Minigame): mg is (BuildGame | ChopGame) {
-  return mg instanceof BuildGame || mg instanceof ChopGame;
+function inWorld(mg: Minigame): mg is (BuildGame | ChopGame | FireDrillGame) {
+  return mg instanceof BuildGame || mg instanceof ChopGame || mg instanceof FireDrillGame;
 }
 
 /** The hands-on work for each recipe. */
@@ -75,6 +83,8 @@ export const RECIPE_MINIGAMES: Record<string, MinigameSpec> = {
   stone_spear: { kind: 'knap', shape: 'spear', hits: 4 },
   kindling_branch: { kind: 'carve', passes: 1, make: 'kindling' },
   torch: { kind: 'bowdrill' },
+  // (Stringing the bow and binding the kit together.)
+  fire_kit: { kind: 'cord', plies: 3 },
   relight_torch: { kind: 'bowdrill' },
   bandage: { kind: 'cord', plies: 3 },
   bow: { kind: 'carve', passes: 2, make: 'shaft' },

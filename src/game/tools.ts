@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { fireKitBundle } from '../world/firekitModel';
 import type { ToolKind } from '../data/items';
 import { STONE_HAMMER } from './models/stone_hammer';
 import { STONE_HATCHET } from './models/stone_hatchet';
@@ -166,6 +167,10 @@ export function buildToolMesh(kind: ToolKind | undefined, itemType?: string): TH
     }
     case 'crucible':
       add(new THREE.CylinderGeometry(0.07, 0.055, 0.12, 10), mat(0x55504a), 0, 0.05, 0);
+      break;
+    case 'firekit':
+      // The bow drill and its makings, bundled up (world/firekitModel).
+      g.add(fireKitBundle());
       break;
   }
   return g;

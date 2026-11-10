@@ -172,6 +172,10 @@ function floorTop(c: Ctx): number | null {
   return Math.abs(c.t.point.y - top) < 0.12 ? top : null;
 }
 
+/** Fire is made with a fire making kit (a bow drill): yours, in your pack. (Villagers have their own.) */
+const needsFireKit = (c: Ctx) => ((c.g as { isVillager?: boolean }).isVillager || c.g.toolFor('firekit') ? null
+  : 'You need a fire making kit to light it: craft one (C → Primitive) from 3 cordage, a rough plank and a shaft.');
+
 /** A built water source you're aiming at (a well, a rain barrel, a fountain). */
 const isSpring = (c: Ctx) => { const s = obj(c, 'structure'); return !!s && s.built && !!STRUCTURES[s.type].spring; };
 
@@ -571,7 +575,7 @@ export const ACTIONS: ActionDef[] = [
   {
     id: 'relight_torch', label: 'Relight torch',
     show: (c) => { const s = obj(c, 'structure'); return !!s && TORCHES.has(s.type) && !s.lit; },
-    check: (c) => (c.g.inv.count('kindling') === 0 || c.g.inv.count('branch') === 0 ? 'Relighting a torch takes a kindling and a branch.' : null),
+    check: (c) => (c.g.inv.count('kindling') === 0 || c.g.inv.count('branch') === 0 ? 'Relighting a torch takes a kindling and a branch.' : needsFireKit(c)),
     time: 5, skill: 'firemaking', difficulty: 2, stamina: 2,
     minigame: () => ({ kind: 'bowdrill' }),
     run: (c, o) => {
@@ -961,7 +965,7 @@ export const ACTIONS: ActionDef[] = [
       const s = obj(c, 'structure')!;
       if (s.fuel <= 0) return 'There is no fuel in it. Add branches, kindling or logs first.';
       if (c.g.inv.count('kindling') === 0) return 'You need kindling to light a fire. Craft it from 3 branches with a knife, or split a plank at a chopping block.';
-      return null;
+      return needsFireKit(c);
     },
     time: 6, skill: 'firemaking', difficulty: 8, stamina: 3,
     minigame: () => ({ kind: 'bowdrill' }),

@@ -987,6 +987,24 @@ export class Game {
     return this.skills.get(skill) >= difficulty + QUICK_MARGIN;
   }
 
+  /** Where the bow drill is laid out: between you and the fire (or torch) you're lighting, or on the ground before you. */
+  private fireSpot(ctx: Ctx): { x: number; y: number; z: number } {
+    const p = this.player, w = this.world;
+    let x: number, z: number;
+    const s = ctx.t.kind === 'object' && ctx.t.obj.kind === 'structure' ? ctx.t.obj : null;
+    if (s && s.type !== 'wall_torch') {
+      // Just outside the fire ring, on your side of it.
+      const dx = p.pos.x - s.x, dz = p.pos.z - s.z, l = Math.hypot(dx, dz) || 1, off = s.type === 'campfire' ? 0.95 : 0.6;
+      x = s.x + (dx / l) * off; z = s.z + (dz / l) * off;
+    } else {
+      const f = p.forward(), l = Math.hypot(f.x, f.z) || 1;
+      x = p.pos.x + (f.x / l) * 0.8; z = p.pos.z + (f.z / l) * 0.8;
+    }
+    // On whatever's underfoot there (the ground, or a floor).
+    const y = p.groundAt(w, x, p.pos.y + 0.5, z).y;
+    return { x, y: Number.isFinite(y) ? y : w.terrain.heightAt(x, z), z };
+  }
+
   /** Start hands-on work: the view moves to the workstation and you do the job yourself. */
   private startWork(def: ActionDef, ctx: Ctx, spec: MinigameSpec) {
     const skill = this.skillOf(def, ctx);
@@ -1002,6 +1020,8 @@ export class Game {
     // (Equipment like bellows and anvils helps through the spec's own `gear`.)
     if (!this.working && !this.reopen.length) this.reopen = this.ui.closeAllWindows();
     const label = typeof def.label === 'function' ? def.label(ctx) : def.label;
+    // Making fire: the kit is laid out on the ground, beside the fire or torch you're lighting, or before you.
+    if (spec.kind === 'bowdrill' && !spec.spot) spec = { ...spec, spot: this.fireSpot(ctx) };
     const session = new MinigameSession(spec, ease, this.ui.root, (perf, secs) => this.endWork(perf, secs), label,
       { intro: runs === 0, coach: runs < 3 }, tool?.type, { scene: this.scene, camera: this.camera });
     // Building happens at the piece itself: step up to it.
@@ -2391,7 +2411,9 @@ export class Game {
         standAt?: () => { x: number; z: number; face: { x: number; z: number } } | null;
       } | undefined;
       const body = inWorld?.bodyWork?.() ?? null;
-      p.work = this.working ? (body ?? { clip: workClip(this.working.def.id, this.working.ctx) ?? 'craft' }) : null;
+      // (Some work has its own posture: kneeling at the bow drill.)
+      const posture = (this.working?.session.mg as { bodyClip?: Clip } | undefined)?.bodyClip;
+      p.work = this.working ? (body ?? { clip: posture ?? workClip(this.working.def.id, this.working.ctx) ?? 'craft' }) : null;
       p.faceYaw = this.working ? this.faceToward(this.working.ctx.t) : null;
       const st = this.working ? inWorld?.standAt?.() : null;
       if (st) {
