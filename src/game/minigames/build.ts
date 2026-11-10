@@ -4,6 +4,7 @@ import { itemDef } from '../../data/items';
 import type { StructureObj } from '../../world/world';
 import { builtShare, fillDir, pieceBounds } from '../../world/pieceFill';
 import { ASSEMBLIES } from '../../world/assembly';
+import { buildPieceMesh } from '../../world/view';
 import { surfaceMat, type Surface } from '../../world/surfaces';
 import { clamp01, Minigame, type Meter, type MgInput } from './core';
 import { buildToolMesh } from '../tools';
@@ -53,6 +54,8 @@ function materialMesh(item: string, w: number, h: number, d: number): THREE.Obje
   const add = (geo: THREE.BufferGeometry, m: THREE.Material, x = 0, y = 0, z = 0) => { const o = new THREE.Mesh(geo, m); o.position.set(x, y, z); o.castShadow = true; g.add(o); return o; };
   switch (item) {
     case 'log': {
+      // Stood on end where the slot is tall (a post, a stump); otherwise lying along it.
+      if (h > Math.max(w, d) * 0.9) { const r = Math.min(w, d) * 0.5; add(new THREE.CylinderGeometry(r, r * 1.04, h, 12), mat('rough_wood')); break; }
       const r = Math.min(h, d) * 0.5;
       add(new THREE.CylinderGeometry(r, r, w * 1.04, 12).rotateZ(Math.PI / 2), mat('rough_wood'));
       break;
@@ -66,6 +69,8 @@ function materialMesh(item: string, w: number, h: number, d: number): THREE.Obje
       add(new THREE.BoxGeometry(w, h, d), mat('thatch'));
       break;
     case 'shaft': case 'branch':
+      // Upright for a tall slot (a fence's uprights), else lying along it.
+      if (h > Math.max(w, d)) { for (const x of [-w * 0.25, w * 0.25]) add(new THREE.CylinderGeometry(0.025, 0.025, h, 6), mat('rough_wood'), x, 0, 0); break; }
       for (const z of [-d * 0.25, d * 0.25]) add(new THREE.CylinderGeometry(0.025, 0.025, w, 6).rotateZ(Math.PI / 2), mat('rough_wood'), 0, 0, z);
       break;
     case 'hide':
@@ -173,8 +178,11 @@ export class BuildGame extends Minigame {
     this.slot.max[fd] = min[fd] + (max[fd] - min[fd]) * b;
     // Thin pieces still get a slot you can see.
     // A piece put together from real parts (a campfire, a dugout): this step's parts, where they go.
+    // A piece made of just one thing (a chopping block: one log, stood on end): carried in as itself, the right way up.
     const step = ASSEMBLIES[s.type]?.[done];
-    const parts = step?.carry();
+    const single = !step && total === 1 ? () => ownCopy(buildPieceMesh(s.type)) : null;
+    const make = step ? () => step.carry() : single;
+    const parts = make?.();
     if (parts) {
       parts.updateMatrixWorld(true);
       const bb = new THREE.Box3().setFromObject(parts);
@@ -194,14 +202,14 @@ export class BuildGame extends Minigame {
     this.slotFill = new THREE.Mesh(box, new THREE.MeshBasicMaterial({ color: 0xffd36a, transparent: true, opacity: 0.18, depthWrite: false, fog: false }));
     this.slotFill.position.copy(centre);
     this.piece.add(this.slotGlow, this.slotFill);
-    if (parts && step) {
+    if (parts && make) {
       // Its parts glow where they go (no box: the stones, the sticks themselves).
       this.slotGlow.visible = this.slotFill.visible = false;
       this.ghostMat = new THREE.MeshBasicMaterial({ color: 0xffd36a, transparent: true, opacity: 0.35, depthWrite: false, fog: false });
-      const ghost = step.carry();
+      const ghost = make();
       ghost.traverse((o) => { if (o instanceof THREE.Mesh) { (o.material as THREE.Material).dispose(); o.material = this.ghostMat!; o.castShadow = false; } });
       this.piece.add(ghost);
-      this.instructions = `${step.label}. ${this.instructions}`;
+      if (step) this.instructions = `${step.label}. ${this.instructions}`;
     }
 
     // What you carry in.
@@ -805,4 +813,15 @@ export class BuildGame extends Minigame {
       }
     });
   }
+}
+
+/** A model of the work's own, safe to throw away with it (the world's piece models share their materials and some geometry). */
+function ownCopy(o: THREE.Object3D): THREE.Object3D {
+  o.traverse((c) => {
+    if (c instanceof THREE.Mesh) {
+      c.geometry = c.geometry.clone();
+      c.material = Array.isArray(c.material) ? c.material.map((m) => m.clone()) : (c.material as THREE.Material).clone();
+    }
+  });
+  return o;
 }
