@@ -29,6 +29,12 @@ interface Step {
   targets?: (g: Game, q: QuestState) => Target[];
   /** Where to go when there's nothing of the kind near by. */
   far?: string;
+  /**
+   * Taught when this step is done (once): the game stops and shows a picture
+   * of the idea and how it works, before you go on. The tutorial teaches the
+   * game's ideas this way, at the moment they matter.
+   */
+  lesson?: { title: string; image?: string; text: string; button?: string };
 }
 
 export interface QuestDef {
@@ -179,11 +185,25 @@ const HOME_STEPS: Step[] = [
     // Done once your first tree is down and its logs are lying in a pile.
     progress: (g, q) => !!q.flags?.includes('felled') || g.inv.count('log') > 0 || g.inv.count('plank') > 0,
     targets: (g) => trees(g),
-    far: 'No full-grown trees nearby. Head for the woods.' },
+    far: 'No full-grown trees nearby. Head for the woods.',
+    lesson: {
+      title: 'Time to make camp',
+      image: 'images/tutorial/camp.jpg',
+      text: `<p>Your first tree is down. Before you go further, it's a good idea to <b>set up a basic camp</b> near here: a <b>campfire</b> and a <b>chopping block</b> to start with, somewhere to come back to while you build your home.</p>
+        <p>Many things you build are <b>stations</b>, and standing near one opens up new <b>crafting recipes</b>. At a <b>chopping block</b> you split logs into planks and kindling. At a <b>lit campfire</b> you cook food and fire clay pots. Later a <b>workbench</b> lets you make furniture, and a <b>forge</b> lets you work iron.</p>
+        <p>Other pieces bring <b>benefits</b> of their own. A fire gives light and warmth through the night. A tent or lean-to is a bed far from home. Fine furniture round your bed lets you wake <b>well rested</b>. More decorations will bring benefits as the game grows. Look at a piece's description in the Build menu (${KEY('B')}) to see what it does.</p>
+        <p>Everything in this picture you can make yourself: the campfire, the chopping block, a lean-to, a hide tent, a woodpile, a drying rack and a couple of torches.</p>`,
+      button: 'Let\'s make camp',
+    } },
   { id: 'block', title: 'Set up a chopping block',
     text: `Grab the logs from the pile (aim at it, ${KEY('Right click')} → <b>Take all</b>). Logs are split on a <b>chopping block</b>: press ${KEY('B')}, choose <b>Chopping block</b> (Crafting) and place it on open ground. Then, with your hatchet equipped, aim at it and ${KEY('Left click')} to build it. It costs one log.`,
     progress: (g) => g.inv.count('plank') >= 5 || [...g.world.near(g.player.pos.x, g.player.pos.z, 40)].some((o) => o.kind === 'structure' && o.type === 'chopping_block' && o.built),
     targets: (g) => { const p = plans(g, ['chopping_block']); return p.length || g.inv.count('log') > 0 ? p : logPiles(g); } },
+  { id: 'campfire', title: 'Build a campfire',
+    text: `Every camp needs a fire. Press ${KEY('B')}, choose <b>Campfire</b> (Crafting) and place it near your chopping block, then build it from 4 small rocks and 3 branches. To light it, aim at it, add fuel (branches, kindling or logs) and choose <b>Light</b>. A lit fire is a <b>station</b>: stand by it to cook (${KEY('C')} → Cooking).`,
+    progress: (g) => [...g.world.near(g.player.pos.x, g.player.pos.z, 60)].some((o) => o.kind === 'structure' && o.type === 'campfire' && o.built),
+    targets: (g) => { const p = plans(g, ['campfire']); return p.length ? p : forage(g, ['pebbles', 'fallen_branch']); },
+    far: 'Gather small rocks and branches for it.' },
   { id: 'planks', title: 'Split rough planks',
     text: `Stand by your chopping block with the hatchet equipped, press ${KEY('C')} and choose <b>Split log into rough planks</b> (Woodworking). Each log gives 2 planks. You need 1 for your hammer and 4 for the first floor. (Later, an iron saw makes <b>refined planks</b> for fine furniture.)`,
     // (A plank already made into the hammer counts.)
@@ -408,6 +428,8 @@ export class QuestLog {
   private offered = new Map<string, number>();
   /** The first quest offered, waiting for a quiet moment to explain the quest log. */
   private introFor: string | null = null;
+  /** Lessons waiting to be shown (steps just done that teach something). */
+  private lessons: { quest: string; step: Step }[] = [];
   /** Called when something the quest log shows has changed. */
   onChange?: () => void;
 
@@ -612,6 +634,13 @@ export class QuestLog {
       this.changed();
     }
     if (this.introFor && !g.working && !g.ui.modalOpen && !g.ui.anyWindowOpen()) this.intro(g, this.introFor);
+    // A lesson waiting (a step just done that teaches something): shown as soon as you're free to read it.
+    if (this.lessons.length && !this.introFor && !g.working && !g.action && !g.ui.modalOpen && !g.ui.anyWindowOpen()) {
+      const { quest, step } = this.lessons.shift()!, l = step.lesson!;
+      g.tips.add(`lesson:${quest}:${step.id}`);
+      telemetry.event('quest', `lesson: ${l.title}`);
+      g.ui.showNotice(l.title, l.text, l.button ?? 'Got it', () => {}, { image: l.image, kind: 'lesson' });
+    }
     const home = this.quests.find((q) => q.id === 'home');
     // The house's floor: the first floor you finish (or the nearest, for an old plan).
     if (home && !home.anchor) {
@@ -629,6 +658,7 @@ export class QuestLog {
       const d = this.def(q);
       while (q.step < d.steps.length && isDone(d.steps[q.step].progress(g, q))) {
         g.msg(`${d.title}: ${d.steps[q.step].title} — done!`, 'good');
+        if (d.steps[q.step].lesson && !g.tips.has(`lesson:${q.id}:${d.steps[q.step].id}`)) this.lessons.push({ quest: q.id, step: d.steps[q.step] });
         telemetry.event('quest', `${q.id}: ${d.steps[q.step].id} done`, { step: q.step + 1, of: d.steps.length });
         q.step++;
         flash = true;

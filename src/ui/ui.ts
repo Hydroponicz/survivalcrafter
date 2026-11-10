@@ -527,14 +527,19 @@ export class UI {
 
   /** A notice that pauses the game until you've read it. */
   modalOpen = false;
-  showNotice(title: string, html: string, button: string, onOk: () => void) {
+  /**
+   * A notice that stops the game until you've read it: a warning (red), or a
+   * lesson (a picture of the thing, then how it works).
+   */
+  showNotice(title: string, html: string, button: string, onOk: () => void, opts: { image?: string; kind?: 'warning' | 'lesson' } = {}) {
     const g = this.g;
     this.modalOpen = true;
     g.paused = true;
     g.input.unlock();
     this.cursor.setVisible(false);
     const el2 = el('div', 'notice-backdrop');
-    el2.innerHTML = `<div class="notice"><div class="notice-head">${title}</div><div class="notice-body">${html}</div><button class="notice-ok">${button}</button></div>`;
+    const pic = opts.image ? `<img class="notice-pic" src="${opts.image}" alt="" draggable="false">` : '';
+    el2.innerHTML = `<div class="notice${opts.kind === 'lesson' ? ' lesson' : ''}">${pic}<div class="notice-head">${title}</div><div class="notice-body">${html}</div><button class="notice-ok">${button}</button></div>`;
     this.root.appendChild(el2);
     el2.querySelector('button')!.addEventListener('click', () => {
       el2.remove();

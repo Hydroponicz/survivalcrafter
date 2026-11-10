@@ -568,3 +568,8 @@ button.dev-on { background: #6b5530; border-color: var(--accent); color: #fff3d6
 .wind-gauge .wg-ship { fill: #c9a26b; stroke: #3b2a17; stroke-width: 1.5; }
 .wind-gauge .wg-arrow path { fill: none; stroke: #9fd6ff; stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; }
 #ui.no-hud .wind-gauge { display: none !important; }
+
+/* A lesson: a picture of the thing, then how it works (the tutorial's way of teaching). */
+.notice.lesson { width: min(760px, calc(100vw - 32px)); max-height: calc(100vh - 24px); overflow-y: auto; border-top-color: var(--accent); padding-top: 14px; }
+.notice.lesson .notice-head { color: var(--accent); }
+.notice-pic { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 5px; margin-bottom: 12px; border: 1px solid var(--panel-edge); background: #1a1410; }
