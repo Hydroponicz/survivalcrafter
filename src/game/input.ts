@@ -16,10 +16,11 @@ export class Input {
       if (isTyping(e)) return;
       if (!this.keys.has(e.code)) this.pressed.add(e.code);
       this.keys.add(e.code);
-      // (Alt shows the cursor: don't let it also open the browser's menu bar.)
-      if (['Space', 'Tab', 'F1', 'F2', 'AltLeft', 'ControlLeft'].includes(e.code)) e.preventDefault();
+      // (Alt shows the cursor, and Alt + mouse looks around the work: don't let Alt open the browser's
+      // menu bar, nor Alt + a key run a browser shortcut, such as Alt+D jumping to the address bar.)
+      if (e.altKey || ['Space', 'Tab', 'F1', 'F2', 'AltLeft', 'AltRight', 'ControlLeft'].includes(e.code)) e.preventDefault();
     });
-    window.addEventListener('keyup', (e) => { this.keys.delete(e.code); if (e.code === 'AltLeft') e.preventDefault(); });
+    window.addEventListener('keyup', (e) => { this.keys.delete(e.code); if (e.altKey || e.code === 'AltLeft' || e.code === 'AltRight') e.preventDefault(); });
     window.addEventListener('blur', () => this.keys.clear());
     document.addEventListener('mousemove', (e) => {
       if (!this.locked) return;
