@@ -56,6 +56,7 @@ import { WorldMap } from '../ui/worldmap';
 import { VillageLife } from './villagers';
 import { Economy } from './economy';
 import { Traders } from './traders';
+import { Shipping } from './shipping';
 
 const REACH = 4.5;
 /** Skill above a task's difficulty needed to do it the quick way. */
@@ -114,6 +115,8 @@ export class Game {
   coins = 20;
   /** The travelling traders on the roads. */
   traders = new Traders(this);
+  /** The merchant ships sailing between the ports. */
+  shipping = new Shipping(this);
   player = new Player();
   inv = new Inventory();
   skills = new Skills();
@@ -1443,7 +1446,8 @@ export class Game {
       if (!s || s.slipY !== undefined || s.launching !== undefined) { this.shipPoses.delete(k); continue; }
       const was = this.shipPoses.get(k) ?? { x: k.x, z: k.z, rot: k.rot, y: w.vesselY(k) };
       // (Only near you: far out the water under her may not be known.)
-      if (k !== this.boat && (s.speed || s.sail) && Math.hypot(k.x - p.pos.x, k.z - p.pos.z) < 500) this.sailShip(k, dt, 0, 0, false);
+      // (A merchant ship is sailed by her own crew: see game/shipping.)
+      if (k !== this.boat && s.npc === undefined && (s.speed || s.sail) && Math.hypot(k.x - p.pos.x, k.z - p.pos.z) < 500) this.sailShip(k, dt, 0, 0, false);
       const now = { x: k.x, z: k.z, rot: k.rot, y: w.vesselY(k) };
       if (k !== this.boat && !p.boat && (now.x !== was.x || now.z !== was.z || now.rot !== was.rot || now.y !== was.y) && this.onShip(k, was, p.pos.x, p.pos.y, p.pos.z)) {
         const dx = p.pos.x - was.x, dz = p.pos.z - was.z, c0 = Math.cos(was.rot), s0 = Math.sin(was.rot);
@@ -2449,6 +2453,7 @@ export class Game {
     // --- player
     const over = this.dev.on('noWeight') ? 0 : this.inv.weight() - this.carryCapacity();
     // Ships first (they carry anyone standing aboard), then you.
+    perf.time('ships', () => this.shipping.update(dt));
     this.updateShips(dt);
     p.update(dt, inp, this.world, !!this.action, over, !this.ui.menuOpen, this.dev.on('fly'));
     // A swamped boat: over the side (or ashore, if it's close).
@@ -2767,6 +2772,7 @@ export class Game {
         explored: this.map.serialize(),
         economy: this.economy.serialize(),
         traders: this.traders.serialize(),
+        shipping: this.shipping.serialize(),
         coins: this.coins,
       };
       await writeSave(SAVE_KEY, data);
@@ -2921,6 +2927,7 @@ export class Game {
       g.map.load(data.explored);
       g.economy.load(data.economy);
       g.traders.load(data.traders);
+      g.shipping.load(data.shipping);
       g.coins = data.coins ?? 20;
       const quests = data.quests ?? data.onboarding;
       if (quests) g.quests = QuestLog.load(g.markerTex, quests);

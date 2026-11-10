@@ -228,8 +228,7 @@ else over the side.
   - A short-handed ship will set less sail and row slower. A big ship with
     one man aboard will barely move.
   - The shipyard already shows the crew each design needs.
-- **Trade by sea:** the traders' system extended to ships between port towns.
-  A ship carries tonnes where a cart carries a few hundred kg.
+- **Trade by sea:** done (phase 7): merchant ships between port towns.
 - **The dry dock:** for repairing big hulls without careening.
 
 **5. Ship types (done)**
@@ -304,6 +303,63 @@ Measured in a test: quays could be placed from the waterline out to 3.8 m
 deep. A knarr sailed at a quay stopped against it with 3% hull wear, and
 leaving her helm by a bollard moored her. Climbing the jetty ladder took you
 from the water onto the deck and back along the jetty to the quay.
+
+**7. Ports and merchant shipping (done)**
+
+**Port towns** (`kind: 'port'` in `world/villages.ts`) are planned along the
+coast.
+- **Siting:** the site search starts from points on the shore. It sets the town
+  back inland, facing straight down the slope to the sea.
+- **What a site needs:** dry land for the town, inside its 512 m planning
+  square. Open sea just beyond the harbour, and further out.
+- **Size:** a 7 × 7 block grid, like a castle city.
+- **Ground:** it steps down to the waterfront. Each row of blocks inland stands
+  at most 2.4 m above the row below it.
+- **Quayside:** made ground at the harbour's level (1.2 m above the sea),
+  paved, running out to a stone harbour wall. The wall's blocks are stacked
+  down to the bed.
+- **The harbour:** a basin dredged to 4.6 m in front of the wall, so the
+  coastline doesn't have to fit the plan. The basin can reach past the town's
+  planning square: the ground of neighbouring squares takes in a port's shape
+  (`shapersNear`).
+- **Piers:** four, each two jetties wide, out over the basin. Each has bollards,
+  lanterns and a berth down each side.
+- **Mole:** quay blocks running out to a lighthouse (the harbour beacon) at the
+  east end.
+- **The rest of the waterfront:** treadwheel cranes, cargo stacked on the quay,
+  a fish market with net racks, and a shipyard with a great slipway just west
+  of the quay.
+- **The town:**
+  - the market square, cathedral, merchants' hall and mayor inland
+  - two sailors' taverns and deep stone warehouses along the waterfront
+  - **dockhands** (a new role) living just behind, working the quays by day
+
+**Merchant ships** (`game/shipping.ts`), on the same pattern as the traders on
+the roads:
+- **Fleets:** each port fits out two or three merchant ships of the trading
+  types: cogs, hulks, knarrs, caravels, balingers and nefs, now and then a
+  carrack.
+- **A ship is a place along her voyage**, kept whether you're near or not.
+  Within 900 m of you she becomes a real ship on the water (a `CartObj` with
+  `ship.npc` set, not saved with the world): alongside her berth with her sails
+  furled, or under way with them set and braced to the wind. You can walk
+  aboard; she carries you as she moves. Examine her for her name, voyage and
+  hold. Her master won't hand you the helm.
+- **Sea routes:** found once per pair of ports, by A* over the map's raw land
+  on a 24 m grid (only from map tiles already made), then smoothed into long
+  straight legs.
+- **A voyage:** off the berth, out past the pier ends, along the sea route, in
+  past the other port's piers, alongside a free berth.
+- **Trade:** she loads what her destination is short of and sells it there,
+  through the ports' stores and treasuries, as the traders do. If no other port
+  can be reached by sea, she sails out over the horizon to trade abroad and
+  comes home later.
+
+Measured in a test (seed 777): 8 ports within 5 km of the start. 9 ships
+fitted out by the 5 nearest. Sea routes were found between 7 pairs (one pair
+has no way by sea). After 15 minutes all but one ship was under way between
+ports. Dockhands went down to the quays in the morning. An update in the port
+took 4 ms.
 
 ## Streamlining (how new things should be added)
 

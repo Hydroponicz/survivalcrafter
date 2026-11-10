@@ -29,7 +29,7 @@ const LINK = 1000;
 /** Town streets: the grid spacing, and the street width. */
 const BLOCK = 26, STREET = 4;
 /** A town's grid is (2N + 1) blocks across: 5 for a town, 7 for a castle city. */
-const gridN = (k: SettlementKind) => (k === 'city' ? 3 : 2);
+const gridN = (k: SettlementKind) => (k === 'city' || k === 'port' ? 3 : 2);
 /** How far out the outer street runs (to its outer edge). */
 const gridEdge = (k: SettlementKind) => (gridN(k) + 0.5) * BLOCK + STREET / 2;
 /** The street lines (in the grid's own frame), the same both ways. */
@@ -42,10 +42,17 @@ const gridLines = (k: SettlementKind) => { const n = gridN(k), out: number[] = [
 const T1_Z = -BLOCK / 2 + STREET / 2, T2_Z = BLOCK * 1.5 + STREET / 2, T2_END = 118, RAMP = 22;
 /** A castle city: its palisade (across, and on the castle side), and the castle (how far from the town's centre, its half-size). */
 const PAL_X = gridEdge('city') + 5, CASTLE_Z = 150, CASTLE_HALF = 22;
+/**
+ * A port: the town's grid faces the sea along its local +z. Beyond its last
+ * street a quayside (the apron, made ground at HARBOUR_TOP) runs out to a
+ * stone harbour wall; piers run out from that into deep water, PIER_LEN long,
+ * at these places along it.
+ */
+const APRON = 14, PIER_LEN = 30, PIERS = [-66, -22, 22, 66], HARBOUR_TOP = SEA + 1.2;
 const clampTo = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 const nearestOf = (list: number[], v: number) => list.reduce((a, b) => (Math.abs(b - v) < Math.abs(a - v) ? b : a));
 
-export type SettlementKind = 'village' | 'town' | 'city';
+export type SettlementKind = 'village' | 'town' | 'city' | 'port';
 export interface VPiece { type: string; x: number; y: number; z: number; yaw: number }
 /** A rectangle turned by `yaw` (the same turn as a piece's). */
 export interface Rect { x: number; z: number; yaw: number; hx: number; hz: number }
@@ -55,7 +62,7 @@ export interface Seg { ax: number; az: number; bx: number; bz: number; w: number
 /** What a house is for (the work of whoever comes to live there). */
 export type HouseRole = 'farmer' | 'shepherd' | 'woodcutter' | 'butcher' | 'smith' | 'elder' | 'villager'
   | 'priest' | 'mayor' | 'merchant' | 'baker' | 'carpenter'
-  | 'lord' | 'noble' | 'innkeeper' | 'guard' | 'performer';
+  | 'lord' | 'noble' | 'innkeeper' | 'guard' | 'performer' | 'dockhand';
 export interface House {
   x: number; z: number; yaw: number; y: number;
   /** Floor tiles along its length (2: a cottage, 3: a longhouse...). */
@@ -132,9 +139,18 @@ export interface Village {
   upper?: { x: number; z: number }[];
   /** The gates (in the town's palisade, and the castle's): where the guards stand. */
   gates: { x: number; z: number }[];
+  /**
+   * A port's harbour: its berths (where a ship lies alongside a pier: the
+   * pier's edge at its middle, which way is out from it, and the heading she
+   * lies at, bow to the sea), and where she comes in from the open water.
+   */
+  harbour?: { berths: Berth[]; top: number; seaward: { x: number; z: number } };
+  /** Where the dockhands work (by the cranes and the cargo), facing their work. */
+  docks?: { x: number; z: number; face: { x: number; z: number } }[];
   pieces: VPiece[];
 }
 
+export interface Berth { x: number; z: number; nx: number; nz: number; yaw: number; entry: { x: number; z: number } }
 export interface Venue extends Rect { kind: 'playhouse' | 'garden' | 'den' | 'bathhouse'; face: { x: number; z: number }; indoors?: boolean }
 
 /** Where a settlement will be (worked out before its layout, so roads can be planned between them). */
@@ -195,11 +211,12 @@ const smooth = (a: number, b: number, v: number) => { const t = Math.max(0, Math
 const FIRST = ['Ash', 'Oak', 'Thorn', 'Elder', 'Bram', 'Wil', 'Hart', 'Brook', 'Fen', 'Kings', 'Stan', 'Mar', 'Wyn', 'Hollow', 'Lang', 'Cold', 'Red', 'Wheat', 'Barrow', 'Brad', 'Hazel', 'Rush', 'Fox', 'Stone'];
 const LAST = ['by', 'ford', 'ham', 'ley', 'ton', 'stead', 'wick', 'field', 'dale', 'combe', 'thorpe', 'well', 'bury', 'mere', 'den', 'hurst'];
 const TOWN_LAST = ['bridge', 'minster', 'chester', 'borough', 'port', 'castle', 'haven', 'market'];
+const PORT_LAST = ['haven', 'port', 'mouth', 'quay', 'strand', 'wick', 'sea', 'bay'];
 function settlementName(rnd: () => number, kind: SettlementKind): string {
   const a = FIRST[Math.floor(rnd() * FIRST.length)];
   let b = LAST[Math.floor(rnd() * LAST.length)];
   // (A town takes a grander ending; the same number of draws either way.)
-  const t = TOWN_LAST[Math.floor(rnd() * TOWN_LAST.length)];
+  const tr = rnd(), t = (kind === 'port' ? PORT_LAST : TOWN_LAST)[Math.floor(tr * (kind === 'port' ? PORT_LAST : TOWN_LAST).length)];
   if (kind !== 'village') b = t;
   if (a.toLowerCase().endsWith(b[0])) b = b.slice(1);
   return a + b;
@@ -251,6 +268,22 @@ export class Villages {
   at(x: number, z: number, grow = 0): Village | null {
     const v = this.inCell(Math.floor(x / VCELL), Math.floor(z / VCELL));
     return v && Math.hypot(x - v.x, z - v.z) < v.r + grow ? v : null;
+  }
+
+  /**
+   * The settlements whose ground reaches a point (their plots, and a port's
+   * harbour out past its own square): the one in its own square first, then
+   * any port round about whose reach takes in the point.
+   */
+  shapersNear(x: number, z: number, grow = 0): Village[] {
+    const own = this.at(x, z, grow), out = own ? [own] : [];
+    const cx = Math.floor(x / VCELL), cz = Math.floor(z / VCELL);
+    for (let j = cz - 1; j <= cz + 1; j++) for (let i = cx - 1; i <= cx + 1; i++) {
+      if (i === cx && j === cz) continue;
+      const v = this.inCell(i, j);
+      if (v && v.kind === 'port' && Math.hypot(x - v.x, z - v.z) < v.r + grow) out.push(v);
+    }
+    return out;
   }
 
   /** Goes up each time another settlement is planned (the distant forests clear its ground when it does). */
@@ -361,8 +394,8 @@ export class Villages {
       if (Math.abs(lx) > Math.abs(lz) || lz > 0) { const sg = Math.sign(lx) || 1; return { inner: [P(B, 0), P(B, low), P(sg * E, low)], out: P(sg * (E + 18), low) }; }
       return { inner: [P(B, 0), P(B, -E)], out: P(B, -(E + 18)) };
     }
-    // A town: out along one of the four streets off the market square, to the edge of town.
-    const alongX = Math.abs(lx) > Math.abs(lz), sg = Math.sign(alongX ? lx : lz) || 1;
+    // A town: out along one of the four streets off the market square, to the edge of town (a port's never seaward).
+    const alongX = Math.abs(lx) > Math.abs(lz) || (s.kind === 'port' && lz > 0), sg = s.kind === 'port' && !alongX ? -1 : Math.sign(alongX ? lx : lz) || 1;
     const street = BLOCK / 2;
     const pt = (u: number, w: number) => (alongX ? P(u, w) : P(w, u));
     return { inner: [pt(sg * (BLOCK / 2 - 3), street), pt(sg * E, street)], out: pt(sg * (E + 18), street) };
@@ -479,6 +512,7 @@ export class Villages {
     if (v.grid) {
       const [lx, lz] = local(v.grid, x, z), e = v.edge! + 3;
       if (Math.abs(lx) < e && Math.abs(lz) < e) return true;
+      if (v.kind === 'port' && Math.abs(lx) < e + 18 && lz > -e && lz < e + APRON + PIER_LEN + 40) return true;
       // A city: everything inside the palisade, and the castle's hill.
       if (v.kind === 'city' && Math.abs(lx) < PAL_X + 3 && lz > -PAL_X - 3 && lz < CASTLE_Z + CASTLE_HALF + 16) return true;
     }
@@ -502,7 +536,11 @@ export class Villages {
     const v = this.at(x, z);
     if (!v) return false;
     // (A town's streets and yards are no place for things to grow or lie about either.)
-    if (v.grid) { const [lx, lz] = local(v.grid, x, z), e = v.edge! + 2; if (Math.abs(lx) < e && Math.abs(lz) < e) return true; }
+    if (v.grid) {
+      const [lx, lz] = local(v.grid, x, z), e = v.edge! + 2;
+      if (Math.abs(lx) < e && Math.abs(lz) < e) return true;
+      if (v.kind === 'port' && Math.abs(lx) < e + 16 && lz > -e && lz < e + APRON + PIER_LEN + 40) return true;
+    }
     for (const p of v.pads) if (outside(p, x, z) < 0.5) return true;
     for (const p of v.pens) if (outside(p, x, z) < 0.5) return true;
     return false;
@@ -526,8 +564,10 @@ export class Villages {
     if (s !== undefined) return s;
     s = null;
     const rnd = this.rng(cx, cz);
+    // On the coast, often a port: low land running down to deep water, for a harbour.
+    if (hash2(cx, cz, this.gen.seed ^ 0x9047) < 0.6) s = this.portSite(cx, cz);
     // Now and then a castle city, where there's a hill to build the castle on and level land below it for the town.
-    if (hash2(cx, cz, this.gen.seed ^ 0xc17e) < 0.1) s = this.citySite(cx, cz);
+    if (!s && hash2(cx, cz, this.gen.seed ^ 0xc17e) < 0.1) s = this.citySite(cx, cz);
     if (!s && rnd() <= 0.42) {
       // A few spots in the square: keep the best open, level farmland.
       let best: { x: number; z: number; score: number } | null = null;
@@ -610,6 +650,62 @@ export class Villages {
     return best?.s ?? null;
   }
 
+  /**
+   * A port's site: dry, gently sloping land for the town (its grid's local +z
+   * toward the sea), its seaward edge low by the water, the water off its
+   * quay deep enough to lie alongside, deeper still at the piers' ends, and
+   * open sea beyond. The site is the town's centre.
+   */
+  private portSite(cx: number, cz: number): Site | null {
+    const g = this.gen, E = gridEdge('port');
+    const sea = (x: number, z: number, below: number) => { const h = g.height(x, z); return h < SEA - below && Number.isNaN(g.water(x, z, h)); };
+    let best: { s: Site; score: number } | null = null;
+    // Candidates from the shore itself: points near sea level along a lattice over the square, the town set back
+    // from each (inland, uphill) with its grid facing straight down the slope to the sea.
+    const cands: { x: number; z: number; yaw: number }[] = [];
+    for (let j = 1; j < 12; j++) for (let i = 1; i < 12; i++) {
+      const sx = cx * VCELL + (i / 12) * VCELL, sz = cz * VCELL + (j / 12) * VCELL, h = g.height(sx, sz);
+      if (Math.abs(h - SEA) > 1.5) continue;
+      const gx = g.height(sx + 10, sz) - g.height(sx - 10, sz), gz = g.height(sx, sz + 10) - g.height(sx, sz - 10), gl = Math.hypot(gx, gz);
+      if (gl < 0.4) continue;
+      const nx = -gx / gl, nz = -gz / gl, yaw = Math.atan2(nx, nz);
+      for (const off of [E + 4, E + 9, E + 14]) cands.push({ x: sx - nx * off, z: sz - nz * off, yaw });
+    }
+    for (const c of cands) {
+      const { x, z } = c;
+      if (this.avoid.some((a) => Math.hypot(a.x - x, a.z - z) < AVOID + 60)) continue;
+      const h0 = g.height(x, z);
+      if (h0 < SEA + 1.5 || h0 > SEA + 26) continue;
+      for (const turn of [0, -0.2, 0.2]) {
+        const yaw = c.yaw + turn, F = { x, z, yaw };
+        const P = (lx: number, lz: number) => world(F, lx, lz);
+        // The town in the square (its quayside and harbour may reach out past it: they're found from the squares round about).
+        const ok = [[-E - 4, -E - 4], [E + 4, -E - 4], [-E - 4, E + 4], [E + 4, E + 4]]
+          .every(([lx, lz]) => { const [px, pz] = P(lx, lz); return px > cx * VCELL + 6 && px < (cx + 1) * VCELL - 6 && pz > cz * VCELL + 6 && pz < (cz + 1) * VCELL - 6; });
+        if (!ok) continue;
+        // The harbour basin is dredged (see layoutHarbour): what it needs is open sea just past it, and beyond.
+        let chan = 0;
+        for (const lx of [-40, 0, 40]) { const [px, pz] = P(lx, E + APRON + PIER_LEN + 30); if (sea(px, pz, 3)) chan++; }
+        if (chan < 2) continue;
+        { const [ox, oz] = P(0, E + APRON + PIER_LEN + 90); if (!sea(ox, oz, 5)) continue; }
+        // The town: dry land, not too high nor too rough (its waterfront may be shore or shallows: it's made ground).
+        let dry = true, lo = Infinity, hi = -Infinity;
+        for (const lz of [-E, -E / 2, 0, E / 2]) for (const lx of [-E, -E / 2, 0, E / 2, E]) {
+          const [px, pz] = P(lx, lz), h = g.height(px, pz);
+          if (h < SEA + 0.8 || h > SEA + 34 || !Number.isNaN(g.water(px, pz, h))) { dry = false; break; }
+          lo = Math.min(lo, h); hi = Math.max(hi, h);
+        }
+        if (!dry || hi - lo > 24) continue;
+        const [fx, fz] = P(0, E - 8), front = g.height(fx, fz);
+        const rv = g.river(x, z);
+        if (rv && rv.d < rv.r + 30) continue;
+        const score = Math.abs(front - (SEA + 3)) + (hi - lo) * 0.3 + Math.abs(turn) * 4;
+        if (!best || score < best.score) best = { s: { cx, cz, x, z, kind: 'port', yaw }, score };
+      }
+    }
+    return best?.s ?? null;
+  }
+
   /** Is the land level and dry enough, wide enough, for a town's streets? */
   private townOk(x: number, z: number, kind: SettlementKind): boolean {
     const g = this.gen, h = g.height(x, z);
@@ -636,11 +732,14 @@ export class Villages {
     const links = this.siteLinks(s);
     if (s.kind === 'town') this.layoutGrid(v, s, links, rnd);
     else if (s.kind === 'city') { this.layoutGrid(v, s, links, rnd); this.layoutCity(v, rnd); }
+    else if (s.kind === 'port') { this.layoutGrid(v, s, links, rnd); this.layoutHarbour(v, rnd); }
     else this.layoutVillage(v, s, links, rnd);
     // How far it all reaches.
     let reach = v.square.r;
     for (const r of [...v.pads, ...v.pens, ...v.fields, ...v.paved]) for (const [qx, qz] of corners(r)) reach = Math.max(reach, Math.hypot(qx - v.x, qz - v.z));
     for (const sg of v.paths) reach = Math.max(reach, Math.hypot(sg.bx - v.x, sg.bz - v.z) + sg.w);
+    // (A port's piers and mole reach out past its ground.)
+    if (v.harbour) for (const p of v.pieces) reach = Math.max(reach, Math.hypot(p.x - v.x, p.z - v.z) + 4);
     v.r = reach + FALL;
     return v;
   }
@@ -841,6 +940,22 @@ export class Villages {
       };
       tier(-E, T1_Z, L0, 8); tier(T1_Z, T2_Z, L1, 6); tier(T2_Z, T2_END, L2, 10);
       levelAt = (_bi, bj) => (bj <= -1 ? L0 : bj <= 1 ? L1 : L2);
+    } else if (s.kind === 'port') {
+      // A port steps down to the sea: the waterfront blocks just above the quayside, each row inland no more than
+      // a step above the one below it (cut into the slope where the land climbs faster); the quayside itself made
+      // ground at the harbour's level, out over the old shore to the harbour wall.
+      const lv = new Map<string, number>();
+      for (let bj = N; bj >= -N; bj--) for (let bi = -N; bi <= N; bi++) {
+        const m = mean(bi * BLOCK - IN, bj * BLOCK - IN, bi * BLOCK + IN, bj * BLOCK + IN);
+        const level = bj === N ? clampTo(m, HARBOUR_TOP + 0.5, HARBOUR_TOP + 1.4) : clampTo(m, HARBOUR_TOP + 0.5, lv.get(`${bi},${bj + 1}`)! + 2.4);
+        const [x, z] = at(bi * BLOCK, bj * BLOCK);
+        v.pads.push({ x, z, yaw: F.yaw, hx: IN, hz: IN, level });
+        lv.set(`${bi},${bj}`, level);
+      }
+      const c = pt(0, E - STREET + (APRON - 2 + STREET) / 2);
+      v.pads.push({ x: c.x, z: c.z, yaw: F.yaw, hx: E + 4, hz: (APRON - 2 + STREET) / 2, level: HARBOUR_TOP, fall: 1.5 });
+      v.paved.push({ x: c.x, z: c.z, yaw: F.yaw, hx: E + 4, hz: (APRON - 2 + STREET) / 2 });
+      levelAt = (bi, bj) => lv.get(`${bi},${bj}`)!;
     } else {
       const lv = new Map<string, number>();
       for (let bj = -N; bj <= N; bj++) for (let bi = -N; bi <= N; bi++) {
@@ -1100,6 +1215,30 @@ export class Villages {
       for (const sx of [-1, 1]) { put('bench', cx + sx * 6, cz + 5, y, Math.PI); put('bench', cx + sx * 6, cz - 5, y); put('potted_plant', cx + sx * 9, cz + 9, y); put('potted_plant', cx + sx * 9, cz - 9, y); }
     };
 
+    if (s.kind === 'port') {
+      // ---- a port: the market square and the great buildings inland, the sailors' taverns and the merchants'
+      // warehouses along the waterfront, the dockhands living just behind it.
+      square(0, -1, false);
+      cathedral(0, -2); fill(0, -2, { sides: 'N' });
+      merchantsHall(1, -1); fill(1, -1, { sides: 'NSE' });
+      mayorVilla(-1, -1); fill(-1, -1, { sides: 'NS' });
+      marketHall(0, 1);
+      inn(-2, 3, 'N', 3); fill(-2, 3, { sides: 'SEW' });
+      inn(2, 3, 'N', 2); fill(2, 3, { sides: 'SEW' });
+      venueHouse(1, 2, 'N', 'den'); fill(1, 2, { sides: 'SEW', roles: ['dockhand'], homes: 1 });
+      fill(-1, 2, { roles: ['dockhand', 'dockhand'], homes: 1 });
+      fill(0, 2, { roles: ['dockhand', 'merchant'] });
+      fill(-2, 2, { roles: ['carpenter', 'dockhand'] });
+      fill(2, 2, { roles: ['smith', 'dockhand'] });
+      fill(-1, 0, { roles: ['baker', 'merchant'] });
+      fill(1, 0, { roles: ['merchant'], homes: 1, tall: 0.5 });
+      // The warehouses: deep, tall, of stone, wall to wall along the waterfront.
+      for (const bi of [-3, -1, 0, 1, 3]) fill(bi, 3, { deep: true, stone: 0.6, tall: 0.8 });
+      for (let bj = -N; bj <= N; bj++) for (let bi = -N; bi <= N; bi++) {
+        if (!used.has(`${bi},${bj}`)) fill(bi, bj, { homes: (bi + bj) & 1 ? 0 : 1, tall: 0.35 });
+      }
+      return;
+    }
     if (!city) {
       // ---- a town: the market square in the middle, the great buildings round it
       square(0, 0, false);
@@ -1325,6 +1464,115 @@ export class Villages {
         v.gates.push(p);
       }
     });
+  }
+
+  /**
+   * A port's harbour: the stone harbour wall along the quayside's edge
+   * (blocks stacked down to the bed where it's deep), piers on piles out into
+   * deep water with bollards and lanterns, a stone mole running out at its
+   * east end to the lighthouse, treadwheel cranes over the water, cargo
+   * stacked on the quay, the fish market at its west end, and the shipyard
+   * just beyond the town with a great slip. Ships lie alongside the piers
+   * (the berths) and come in from the sea beyond them.
+   */
+  private layoutHarbour(v: Village, rnd: () => number) {
+    const F = v.grid!, E = v.edge!, A = HARBOUR_TOP;
+    const at = (lx: number, lz: number) => world(F, lx, lz);
+    const wallZ = E + APRON - 1;
+    // The harbour basin, dredged out in front of the wall (or built up, where the sea's deeper) to a good depth for
+    // ships to lie alongside, its edges sloping back to the natural bed.
+    {
+      const z0 = wallZ + 0.6, z1 = wallZ + PIER_LEN + 6, [bx, bz] = at(-2, (z0 + z1) / 2);
+      v.pads.push({ x: bx, z: bz, yaw: F.yaw, hx: E + 14, hz: (z1 - z0) / 2, level: SEA - 4.6, fall: 10 });
+    }
+    // (The bed as the harbour leaves it.)
+    const bed = (lx: number, lz: number) => { const [x, z] = at(lx, lz); return this.ground(v, x, z); };
+    const put = (type: string, lx: number, lz: number, y: number, yawRel = 0) => {
+      const [x, z] = at(lx, lz);
+      v.pieces.push({ type, x, y, z, yaw: F.yaw + yawRel });
+      return { x, z };
+    };
+    /** A column of quay blocks with its top at the harbour's level, as deep as the bed needs. */
+    const quayColumn = (lx: number, lz: number, type = 'quay') => {
+      const b = bed(lx, lz);
+      if (b > A - 0.4) return false;
+      for (let k = 0; k < 4; k++) {
+        put(type, lx, lz, A - 5 * (k + 1));
+        if (A - 5 * (k + 1) <= b + 0.3) break;
+      }
+      return true;
+    };
+    // The harbour wall.
+    for (let lx = -(E + 3); lx <= E + 3; lx += 2) quayColumn(lx, wallZ);
+    // The piers, each two jetties wide, as far out as their piles reach the bed.
+    const berths: Berth[] = [];
+    for (const px of PIERS) {
+      let len = 0;
+      for (let r = 0; r < PIER_LEN / 2; r++) {
+        const lz = E + APRON + 1 + 2 * r;
+        if (A - bed(px, lz) > 7.6) break;
+        for (const sx of [-1, 1]) put('jetty', px + sx, lz, A - 7);
+        len = 2 * (r + 1);
+      }
+      if (len < 10) continue;
+      const z0 = E + APRON, z1 = z0 + len, mid = (z0 + z1) / 2;
+      for (const sx of [-1, 1]) {
+        for (let lz = z0 + 3; lz < z1 - 1; lz += 8) put('bollard', px + sx * 1.65, lz, A);
+        put('lantern_post', px + sx * 1.6, z1 - 0.6, A);
+        // A berth down each side: a ship lies along the pier, bow to the sea.
+        const [ex, ez] = at(px + sx * 2, mid), [nx2, nz2] = at(px + sx * 3, mid), [ix, iz] = at(px + sx * 14, z1 + 30);
+        berths.push({ x: ex, z: ez, nx: nx2 - ex, nz: nz2 - ez, yaw: F.yaw, entry: { x: ix, z: iz } });
+      }
+      put('cargo_pile', px, z0 + 2.5, A, 0);
+    }
+    // The mole out to the lighthouse, at the east end.
+    {
+      const mx = E + 7;
+      let last = -1;
+      for (let lz = wallZ; lz < wallZ + 40; lz += 2) {
+        if (A - bed(mx, lz) > 19) break;
+        for (const sx of [-1, 1]) quayColumn(mx + sx, lz);
+        last = lz;
+      }
+      if (last > wallZ + 8) put('harbour_beacon', mx, last, A);
+      for (let lz = wallZ + 6; lz < last - 3; lz += 10) put('lantern_post', mx - 1.4, lz, A);
+    }
+    // Cranes at the wall's edge, their jibs out over the water; the dockhands' work about them and the cargo.
+    const docks: { x: number; z: number; face: { x: number; z: number } }[] = [];
+    const spot = (lx: number, lz: number, fx: number, fz: number) => { const [x, z] = at(lx, lz), [qx, qz] = at(fx, fz); docks.push({ x, z, face: { x: qx, z: qz } }); };
+    for (const cx of [-44, 0, 44]) {
+      put('harbour_crane', cx, wallZ - 2.6, A);
+      spot(cx + 2.2, wallZ - 3.4, cx, wallZ);
+    }
+    const cargo = ['cargo_pile', 'crate', 'barrel', 'sack_pile', 'keg', 'crate', 'barrel'];
+    for (let k = 0; k < 18; k++) {
+      const lx = -E + 30 + rnd() * (2 * E - 30), lz = E + 1.5 + rnd() * (APRON - 7);
+      if (PIERS.some((p) => Math.abs(lx - p) < 4) || [-44, 0, 44].some((c) => Math.abs(lx - c) < 4)) continue;
+      const type = cargo[k % cargo.length];
+      put(type, lx, lz, A, Math.floor(rnd() * 4) * (Math.PI / 2));
+      if (k % 3 === 0) spot(lx + 1.4, lz, lx, lz);
+    }
+    for (let lx = -E + 6; lx <= E; lx += 16) put('lantern_post', lx, wallZ - 1.4, A);
+    // The fish market at the west end: stalls facing the quay, nets and racks drying.
+    for (const [lx, lz, ry] of [[-E + 4, E + 3.5, 0], [-E + 10, E + 3.5, 0], [-E + 16, E + 3.5, 0], [-E + 7, E + 9, Math.PI], [-E + 13, E + 9, Math.PI]] as const) {
+      const p = put('market_stall', lx, lz, A, ry);
+      v.stalls.push({ ...p, yaw: F.yaw + ry });
+    }
+    put('net_rack', -E - 1, E + 6, A, Math.PI / 2);
+    put('drying_rack', -E + 22, E + 8, A);
+    // The shipyard: a great slip just past the west end of the quay, running down into the harbour.
+    {
+      const sx = -E - 12, sz = wallZ - 10;
+      if (bed(sx, sz + 30) < SEA - 2.2) {
+        const y = Math.max(A - 0.4, bed(sx, sz) - 0.2);
+        put('great_slipway', sx, sz, y);
+        put('woodpile', sx - 5, sz - 3, y);
+        put('sawhorse', sx + 4.5, sz - 4, y);
+        spot(sx + 3.5, sz, sx, sz);
+      }
+    }
+    v.harbour = { berths, top: A, seaward: (() => { const [x, z] = at(0, E + APRON + PIER_LEN + 90); return { x, z }; })() };
+    v.docks = docks;
   }
 
   // ---------- buildings

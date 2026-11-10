@@ -107,6 +107,8 @@ export interface ShipBuild {
   speed?: number;
   /** Hands aboard besides you (not yet hired: none given means she's taken to be fully manned; see data/ships: shipHands). */
   crew?: number;
+  /** A merchant ship (game/shipping): which one. She sails herself, and isn't saved with the world (her voyage is). */
+  npc?: number;
 }
 
 /** How much each vessel holds (kg). */
@@ -790,7 +792,7 @@ export class World {
       crops: [...this.crops.entries()].map(([k, c]) => [k, { planted: c.planted, ql: c.ql, tended: c.tended }]),
       animals: this.animals.map((a) => ({ species: a.species, x: a.x, z: a.z, hp: a.hp, rot: a.rot, tamed: a.tamed, pen: a.pen, penKey: a.penKey, wool: a.wool })),
       // (A hitched cart is saved with the index of its ox: animals get new ids when loaded.)
-      carts: this.carts.map((c) => ({ ...c, hitched: c.hitched === undefined ? undefined : this.animals.findIndex((a) => a.id === c.hitched) })),
+      carts: this.carts.filter((c) => c.ship?.npc === undefined).map((c) => ({ ...c, hitched: c.hitched === undefined ? undefined : this.animals.findIndex((a) => a.id === c.hitched) })),
       time: this.time,
       spawn: this.spawn,
       origin: this.origin,

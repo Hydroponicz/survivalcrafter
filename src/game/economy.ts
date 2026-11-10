@@ -90,6 +90,8 @@ export interface Ledger {
   goods: Item[];
   /** The traders based here have set out. */
   traders?: boolean;
+  /** A port: its merchant ships have been fitted out. */
+  ships?: boolean;
 }
 
 /** Something the village wants brought in: so many of an item, paid each, plus a bonus when done. */

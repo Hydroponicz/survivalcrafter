@@ -153,8 +153,10 @@ export class Terrain {
     for (let k = 0; k < n; k++) h[k] = g.height(x0 + (k % CI), z0 + Math.floor(k / CI));
     // A village here levels its plots (and, below, lays its paths and fields).
     const mx = cx * CH + CH / 2, mz = cz * CH + CH / 2;
-    const vil = this.villages.at(mx, mz, CH);
-    if (vil) for (let k = 0; k < n; k++) h[k] = this.villages.shape(vil, x0 + (k % CI), z0 + Math.floor(k / CI), h[k]);
+    // (Usually the settlement of this chunk's own square; a port's harbour basin and quays reach out past its square too.)
+    const vils = this.villages.shapersNear(mx, mz, CH);
+    const vil = vils[0] ?? null;
+    for (const sv of vils) for (let k = 0; k < n; k++) h[k] = this.villages.shape(sv, x0 + (k % CI), z0 + Math.floor(k / CI), h[k]);
     // And the roads between settlements running through.
     const roads = this.villages.roadsNear(mx, mz, CH * 0.75 + 2);
     const water = new Float32Array(n), soil = new Float32Array(n), fold = new Float32Array(n);
@@ -169,9 +171,10 @@ export class Terrain {
       const s = g.soil(x, z, h[k], slope, water[k]);
       soil[k] = s.soil;
       top[k] = TOP_MAT[s.top];
-      if ((vil || roads.length) && s.top === 'grass') {
+      if ((vil || roads.length) && (s.top === 'grass' || (vil?.kind === 'port' && s.top === 'sand'))) {
         const v = this.villages.surface(vil, x, z, roads);
-        if (v) { top[k] = v === 'path' ? Mat.Dirt : v === 'street' ? Mat.Gravel : Mat.Field; soil[k] = Math.max(soil[k], 1.2); }
+        // (A port's quayside is paved right down to the old beach.)
+        if (v && (s.top === 'grass' || v === 'street')) { top[k] = v === 'path' ? Mat.Dirt : v === 'street' ? Mat.Gravel : Mat.Field; soil[k] = Math.max(soil[k], 1.2); }
       }
       under[k] = s.top === 'sand' || s.top === 'clay' || s.top === 'gravel' ? top[k] : Mat.Dirt;
       fold[k] = this.strata.foldAt(x, z);

@@ -90,7 +90,7 @@ export class Traders {
       const l = eco.ledger(v);
       if (l.traders) continue;
       l.traders = true;
-      for (let k = 0, n = v.kind === 'city' ? 3 : v.kind === 'town' ? 2 : 1; k < n; k++) {
+      for (let k = 0, n = v.kind === 'city' || v.kind === 'port' ? 3 : v.kind === 'town' ? 2 : 1; k < n; k++) {
         const t: Trader = { id: this.nextId++, name: NAMES[Math.floor(Math.random() * NAMES.length)], from: keyOf(v), to: keyOf(v), d: 0, rest: 10 + Math.random() * 60, cargo: [], coins: 80 };
         this.list.push(t);
       }

@@ -29,7 +29,7 @@ const JOB_WORDS: Record<HouseRole, string> = {
   farmer: 'farmer\'s work', shepherd: 'shepherd\'s work', woodcutter: 'woodcutter\'s work', butcher: 'butcher\'s work',
   smith: 'smith\'s work', elder: 'odd jobs', villager: 'gathering about the land',
   priest: 'the church\'s needs', mayor: 'the town\'s needs', merchant: 'trade goods', baker: 'baker\'s work', carpenter: 'carpenter\'s work',
-  lord: 'the castle\'s needs', noble: 'fine goods', innkeeper: 'the tavern\'s needs', guard: 'the garrison\'s needs', performer: 'the playhouse\'s needs',
+  lord: 'the castle\'s needs', noble: 'fine goods', innkeeper: 'the tavern\'s needs', guard: 'the garrison\'s needs', performer: 'the playhouse\'s needs', dockhand: 'the harbour\'s needs',
 };
 const fmtCoins = (n: number) => (Number.isInteger(n) ? `${n}` : n.toFixed(1));
 
@@ -485,7 +485,7 @@ export class UI {
       case 'water': return 'Water';
       case 'animal': return ANIMALS[t.animal.species].name;
       case 'rock': return t.rock.sc < 0.6 ? 'Small boulder' : t.rock.sc < 1.1 ? 'Boulder' : 'Large boulder';
-      case 'cart': return vesselOf(t.cart).name;
+      case 'cart': { const m = g.shipping.of(t.cart); return m ? `The ${m.name} (${m.design.type.toLowerCase()})` : vesselOf(t.cart).name; }
       case 'villager': return t.villager.lying ? `${t.villager.name} (asleep)` : `${t.villager.name}, ${t.villager.roleName}`;
       case 'trader': return `${t.trader.name}, travelling trader`;
       case 'stump': return `${t.stump.species[0].toUpperCase()}${t.stump.species.slice(1)} stump`;
@@ -1405,6 +1405,7 @@ export class UI {
       this.devButton('Teleport to village', () => devCommands.teleportVillage(g)),
       this.devButton('Teleport to town', () => devCommands.teleportVillage(g, 'town')),
       this.devButton('Teleport to castle', () => devCommands.teleportVillage(g, 'city')),
+      this.devButton('Teleport to port', () => devCommands.teleportVillage(g, 'port')),
       this.devButton('Grow everything', () => devCommands.growEverything(g)),
       this.devButton('Spawn deer', () => devCommands.spawnAnimal(g, 'deer')),
       this.devButton('Spawn boar', () => devCommands.spawnAnimal(g, 'boar')),

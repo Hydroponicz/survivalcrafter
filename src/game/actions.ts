@@ -1210,6 +1210,7 @@ export const ACTIONS: ActionDef[] = [
     show: (c) => c.t.kind === 'cart' && !!vesselOf(c.t.cart).move.water && !c.g.boat && !c.g.riding,
     check: (c) => {
       if (c.t.kind !== 'cart') return null;
+      if (c.t.cart.ship?.npc !== undefined) return 'She\'s a merchant ship, and her master won\'t hand you the helm.';
       if (c.t.cart.ship && (c.t.cart.ship.slipY !== undefined || nextStep(c.t.cart.ship.design, c.t.cart.ship.done))) return nextStep(c.t.cart.ship.design, c.t.cart.ship.done) ? 'She isn\'t finished yet.' : 'Launch her first.';
       if (c.t.cart.dmg >= 100) return `It's swamped: patch the hull first (${itemDef(vesselOf(c.t.cart).repair!.item).name.toLowerCase()}).`;
       return !c.g.world.afloat(c.t.cart) ? 'It\'s aground: drag it into deeper water first (grab it and walk it in).' : null;
@@ -1219,7 +1220,7 @@ export const ACTIONS: ActionDef[] = [
   },
   {
     id: 'open_cart', label: (c) => `Open ${c.t.kind === 'cart' ? vesselOf(c.t.cart).name.toLowerCase() : 'cart'}`,
-    show: (c) => c.t.kind === 'cart', time: 0,
+    show: (c) => c.t.kind === 'cart' && c.t.cart.ship?.npc === undefined, time: 0,
     run: (c) => { if (c.t.kind === 'cart') c.g.ui.openContainer(c.t.cart); },
   },
   {
@@ -1274,7 +1275,7 @@ export const ACTIONS: ActionDef[] = [
   },
   {
     id: 'repair_vessel', label: (c) => `Patch the hull (${c.t.kind === 'cart' ? itemDef(vesselOf(c.t.cart).repair!.item).name.toLowerCase() : ''})`,
-    show: (c) => c.t.kind === 'cart' && !!vesselOf(c.t.cart).repair && c.t.cart.dmg > 0.5 && c.g.boat !== c.t.cart,
+    show: (c) => c.t.kind === 'cart' && !!vesselOf(c.t.cart).repair && c.t.cart.dmg > 0.5 && c.g.boat !== c.t.cart && c.t.cart.ship?.npc === undefined,
     check: (c) => {
       if (c.t.kind !== 'cart') return null;
       const r = vesselOf(c.t.cart).repair!;
@@ -1297,6 +1298,8 @@ export const ACTIONS: ActionDef[] = [
     id: 'examine_cart', label: 'Examine', show: (c) => c.t.kind === 'cart', time: 0,
     run: (c) => {
       if (c.t.kind !== 'cart') return;
+      const merchant = c.g.shipping.of(c.t.cart);
+      if (merchant) { c.g.msg(c.g.shipping.describe(merchant), 'info'); return; }
       const k = c.t.cart, w = k.items.reduce((a, i) => a + itemDef(i.type).weight, 0);
       const def = vesselOf(k);
       if (k.ship && nextStep(k.ship.design, k.ship.done)) {

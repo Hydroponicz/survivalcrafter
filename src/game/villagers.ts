@@ -41,7 +41,7 @@ const WALK = 1.45;
 export const ROLE_NAMES: Record<HouseRole, string> = {
   farmer: 'farmer', shepherd: 'shepherd', woodcutter: 'woodcutter', butcher: 'butcher', smith: 'smith', elder: 'village elder', villager: 'villager',
   priest: 'priest', mayor: 'mayor', merchant: 'merchant', baker: 'baker', carpenter: 'carpenter',
-  lord: 'lord of the castle', noble: 'noble', innkeeper: 'innkeeper', guard: 'guard', performer: 'player',
+  lord: 'lord of the castle', noble: 'noble', innkeeper: 'innkeeper', guard: 'guard', performer: 'player', dockhand: 'dockhand',
 };
 
 const NAMES = ['Aldric', 'Edda', 'Osric', 'Maud', 'Wulfric', 'Hilde', 'Godwin', 'Agnes', 'Leofric', 'Bertha', 'Cedric', 'Elfrida', 'Hamon', 'Isolde',
@@ -67,14 +67,14 @@ const KIT: Record<HouseRole, [string, number][]> = {
   priest: [], mayor: [], merchant: [],
   baker: [['clay_jar', 2]],
   carpenter: [['iron_hammer', 1], ['saw', 1]],
-  lord: [], noble: [], innkeeper: [], guard: [['iron_sword', 1]], performer: [],
+  lord: [], noble: [], innkeeper: [], guard: [['iron_sword', 1]], performer: [], dockhand: [['iron_knife', 1]],
 };
 /** What each job is good at (skill levels). */
 const TRADE: Record<HouseRole, SkillId[]> = {
   farmer: ['farming'], shepherd: ['taming'], woodcutter: ['woodcutting', 'carpentry'], butcher: ['butchering'],
   smith: ['smithing', 'firemaking'], elder: ['firemaking'], villager: ['foraging'],
   priest: ['herbalism'], mayor: ['firemaking', 'cooking'], merchant: [], baker: ['cooking', 'firemaking'], carpenter: ['carpentry'],
-  lord: [], noble: [], innkeeper: ['cooking', 'firemaking'], guard: ['fighting'], performer: [],
+  lord: [], noble: [], innkeeper: ['cooking', 'firemaking'], guard: ['fighting'], performer: [], dockhand: ['ropemaking'],
 };
 /** What the carpenter makes, in turn. */
 const CARPENTRY = ['stool', 'chair', 'bench', 'table'];
@@ -397,6 +397,7 @@ export class VillageLife {
       case 'innkeeper': this.innkeeper(v); break;
       case 'guard': this.guard(v); break;
       case 'performer': this.perform(v, false); break;
+      case 'dockhand': this.dockwork(v); break;
       default: this.gather(v); break;
     }
     if (!v.steps.length) this.loiter(v);
@@ -866,6 +867,15 @@ export class VillageLife {
   }
 
   /** A merchant: minds a stall on the market square. */
+  /** A dockhand: at work on the quays, hauling cargo by the cranes and the stacks, a spot at a time. */
+  private dockwork(v: Villager) {
+    const docks = v.village.docks ?? [];
+    const d = docks[(v.id * 3 + Math.floor(this.g.world.time / 240)) % Math.max(1, docks.length)];
+    if (!d) { this.gather(v); return; }
+    this.walkTo(v, { x: d.x, z: d.z }, 'down at the quays');
+    v.steps.push({ kind: 'pose', clip: Math.random() < 0.6 ? 'interact' : 'idle', time: 40, face: d.face, doing: Math.random() < 0.5 ? 'hauling cargo on the quay' : 'loading a ship' });
+  }
+
   private merchant(v: Villager) {
     const st = v.village.stalls[(v.id + Math.floor(this.g.world.time / 300)) % Math.max(1, v.village.stalls.length)];
     if (!st) { this.loiter(v); return; }
