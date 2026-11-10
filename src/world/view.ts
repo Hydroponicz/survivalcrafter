@@ -11,8 +11,9 @@ import { WOOD_BUCKET } from './models/wood_bucket';
 import type { ViewCull } from './cull';
 import { cylinderUV, surfaceMat, worldUV, type Surface } from './surfaces';
 import { builtShare, fillPlanes } from './pieceFill';
+import { ASSEMBLIES, assembled, toCome } from './assembly';
 import { furnitureMesh } from './furnitureMesh';
-import { STRUCTURES } from '../data/structures';
+import { STRUCTURES, totalMaterials } from '../data/structures';
 import type { VesselId } from '../data/vessels';
 import { morePieceMesh } from './morePieces';
 import { morePieceMesh2 } from './morePieces2';
@@ -674,6 +675,28 @@ export class WorldView implements WorldListener {
   }
 
   private structureMesh(o: StructureObj): THREE.Object3D {
+    // Put together from real parts (a campfire, a dugout): the parts set so far, and the rest a blueprint.
+    if (!o.built && ASSEMBLIES[o.type]) {
+      const g = new THREE.Group();
+      g.position.set(o.x, o.y, o.z);
+      g.rotation.y = o.yaw;
+      const done = Math.round(builtShare(o) * totalMaterials(STRUCTURES[o.type]));
+      g.add(assembled(o.type, done));
+      const ghost = toCome(o.type, done);
+      ghost.traverse((c) => {
+        if (c instanceof THREE.Mesh) {
+          const was = c.material as THREE.MeshStandardMaterial, m = was.clone();
+          was.dispose();
+          m.userData.owned = true;
+          m.transparent = true; m.opacity = 0.32; m.depthWrite = false;
+          m.color.lerp(new THREE.Color(0x9ec4ff), 0.55);
+          c.material = m;
+          c.castShadow = false;
+        }
+      });
+      g.add(ghost);
+      return g;
+    }
     const g = buildPieceMesh(o.type, { lit: o.lit, open: o.open, water: o.water });
     g.position.set(o.x, o.y, o.z);
     g.rotation.y = o.yaw;

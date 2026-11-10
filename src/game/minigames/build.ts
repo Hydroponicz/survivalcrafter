@@ -3,6 +3,7 @@ import { STRUCTURES, totalMaterials, type StructureDef } from '../../data/struct
 import { itemDef } from '../../data/items';
 import type { StructureObj } from '../../world/world';
 import { builtShare, fillDir, pieceBounds } from '../../world/pieceFill';
+import { ASSEMBLIES } from '../../world/assembly';
 import { surfaceMat, type Surface } from '../../world/surfaces';
 import { clamp01, Minigame, type Meter, type MgInput } from './core';
 import { buildToolMesh } from '../tools';
@@ -143,6 +144,8 @@ export class BuildGame extends Minigame {
   private strikeQ: number[] = [];
   private setFrom = new THREE.Vector3();
   private bits: { mesh: THREE.Mesh; vel: THREE.Vector3; life: number }[] = [];
+  /** A piece put together from real parts: the step's parts glowing where they go. */
+  private ghostMat: THREE.MeshBasicMaterial | null = null;
 
   constructor(ease: number, s: StructureObj, private material: string, private toolType: string | undefined, from: THREE.Camera) {
     super(ease);
@@ -169,11 +172,19 @@ export class BuildGame extends Minigame {
     this.slot.min[fd] = min[fd] + (max[fd] - min[fd]) * a;
     this.slot.max[fd] = min[fd] + (max[fd] - min[fd]) * b;
     // Thin pieces still get a slot you can see.
+    // A piece put together from real parts (a campfire, a dugout): this step's parts, where they go.
+    const step = ASSEMBLIES[s.type]?.[done];
+    const parts = step?.carry();
+    if (parts) {
+      parts.updateMatrixWorld(true);
+      const bb = new THREE.Box3().setFromObject(parts);
+      this.slot = { min: bb.min.clone(), max: bb.max.clone() };
+    }
     for (const ax of ['x', 'z'] as const) if (this.slot.max[ax] - this.slot.min[ax] < 0.08) { this.slot.min[ax] -= 0.03; this.slot.max[ax] += 0.03; }
     const size = this.slot.max.clone().sub(this.slot.min), centre = this.slot.min.clone().add(this.slot.max).multiplyScalar(0.5);
     // Its face: a layer laid flat is worked from above; a course up a wall from its thin side.
     // (A piece filled across its length, a floor, a raft, a slipway, is always laid from above.)
-    this.across = fd !== 'y';
+    this.across = fd !== 'y' || !!parts;
     if (this.flatSlot()) { this.n = 'y'; this.u = 'x'; this.v = 'z'; }
     else { this.n = size.x < size.z ? 'x' : 'z'; this.u = this.n === 'x' ? 'z' : 'x'; this.v = 'y'; }
     const box = new THREE.BoxGeometry(size.x, size.y, size.z);
@@ -183,10 +194,24 @@ export class BuildGame extends Minigame {
     this.slotFill = new THREE.Mesh(box, new THREE.MeshBasicMaterial({ color: 0xffd36a, transparent: true, opacity: 0.18, depthWrite: false, fog: false }));
     this.slotFill.position.copy(centre);
     this.piece.add(this.slotGlow, this.slotFill);
+    if (parts && step) {
+      // Its parts glow where they go (no box: the stones, the sticks themselves).
+      this.slotGlow.visible = this.slotFill.visible = false;
+      this.ghostMat = new THREE.MeshBasicMaterial({ color: 0xffd36a, transparent: true, opacity: 0.35, depthWrite: false, fog: false });
+      const ghost = step.carry();
+      ghost.traverse((o) => { if (o instanceof THREE.Mesh) { (o.material as THREE.Material).dispose(); o.material = this.ghostMat!; o.castShadow = false; } });
+      this.piece.add(ghost);
+      this.instructions = `${step.label}. ${this.instructions}`;
+    }
 
     // What you carry in.
     // (Lengthways along the slot: a long course down a boat's side is a long timber, not a short one across it.)
-    if (size.z > size.x * 1.2) {
+    if (parts) {
+      // The parts themselves, held about their middle.
+      this.carried = new THREE.Group();
+      parts.position.sub(centre);
+      this.carried.add(parts);
+    } else if (size.z > size.x * 1.2) {
       this.carried = new THREE.Group();
       const m = materialMesh(material, size.z, size.y, size.x);
       m.rotation.y = Math.PI / 2;
@@ -230,13 +255,17 @@ export class BuildGame extends Minigame {
     // Where to look from: square on to the slot's face (or down at a flat layer across its length),
     // on your side of the piece, far enough back to take in the whole slot and a little round it.
     const flat = this.n === 'y';
-    const worldCentre = this.piece.localToWorld(centre.clone());
+    // (Put together from parts: the view takes in the whole piece, not just the bit going in.)
+    const whole = parts ? pieceBounds(this.def) : null;
+    const viewCentre = whole ? whole.min.clone().add(whole.max).multiplyScalar(0.5) : centre;
+    const viewSize = whole ? whole.max.clone().sub(whole.min) : size;
+    const worldCentre = this.piece.localToWorld(viewCentre.clone());
     const pq = this.piece.getWorldQuaternion(new THREE.Quaternion());
     const look = (flat ? unit(size.x >= size.z ? 'z' : 'x') : unit(this.n)).applyQuaternion(pq);
     look.y = 0; look.normalize();
     if (look.dot(from.position.clone().sub(worldCentre)) < 0) look.negate();
     const fov = ((from as THREE.PerspectiveCamera).fov ?? 70) * Math.PI / 180;
-    const radius = Math.max(0.7, Math.min(8, size.length() / 2 + 0.35));
+    const radius = Math.max(0.7, Math.min(8, viewSize.length() / 2 + 0.35));
     this.autoView = {
       yaw: Math.atan2(look.x, look.z), pitch: flat ? 0.72 : 0.22,
       dist: Math.max(1.6, Math.min(45, radius / Math.tan(fov * 0.42))), focus: worldCentre.clone(),
@@ -251,7 +280,7 @@ export class BuildGame extends Minigame {
     if ((from as THREE.PerspectiveCamera).fov) this.camera.fov = (from as THREE.PerspectiveCamera).fov;
     this.camera.updateProjectionMatrix();
     // You stand beside the slot on that side (just clear of it).
-    const half = flat ? Math.abs(look.dot(unit(size.x >= size.z ? 'z' : 'x').applyQuaternion(pq))) * (size.x >= size.z ? size.z : size.x) / 2 : size[this.n] / 2;
+    const half = whole ? Math.max(viewSize.x, viewSize.z) / 2 : flat ? Math.abs(look.dot(unit(size.x >= size.z ? 'z' : 'x').applyQuaternion(pq))) * (size.x >= size.z ? size.z : size.x) / 2 : size[this.n] / 2;
     const standAt = new THREE.Vector3(worldCentre.x, 0, worldCentre.z).addScaledVector(look, half + (flat ? 0.9 : 1.1));
     this.stand = { x: standAt.x, z: standAt.z, yaw: Math.atan2(look.x, look.z) };
     this.placeCarried(0.8);
@@ -363,6 +392,7 @@ export class BuildGame extends Minigame {
     const pulse = 0.5 + Math.sin(this.time * 6) * 0.5;
     (this.slotGlow.material as THREE.LineBasicMaterial).opacity = this.phase === 'place' || this.phase === 'arrive' ? 0.55 + pulse * 0.45 : 0.25;
     (this.slotFill.material as THREE.MeshBasicMaterial).opacity = this.phase === 'place' ? 0.1 + pulse * 0.15 : 0;
+    if (this.ghostMat) this.ghostMat.opacity = this.phase === 'place' || this.phase === 'arrive' ? 0.22 + pulse * 0.22 : 0;
     switch (this.phase) {
       case 'arrive': {
         // Glide to the piece.
@@ -419,6 +449,7 @@ export class BuildGame extends Minigame {
         // The outline warms from gold to green as you close in.
         (this.slotGlow.material as THREE.LineBasicMaterial).color.copy(GOLD).lerp(GREEN, q);
         (this.slotFill.material as THREE.MeshBasicMaterial).color.copy(GOLD).lerp(GREEN, q);
+        this.ghostMat?.color.copy(GOLD).lerp(GREEN, q);
         if (i.pressed) {
           if (off > tol * 3) { this.say('Line it up with the outline.', false, 0.8); return; }
           this.placeQ = q;
