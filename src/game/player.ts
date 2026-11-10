@@ -777,6 +777,9 @@ export class Player {
     cam.rotateZ((Math.random() - 0.5) * a * 0.6);
   }
 
+  /** The view is of the work from outside you (building by hand): you're drawn whole, whatever the camera mode. */
+  workView = false;
+
   /** Where the eyes are in the animated body (smoothed), for the first-person view. */
   private bodyEye = new THREE.Vector3(NaN, NaN, NaN);
 
@@ -784,11 +787,13 @@ export class Player {
     const first = this.cameraMode === 'first';
     // In first person you're in your own body: you see your arms at work and
     // your feet when you look down (but not the inside of your own head).
-    this.model.visible = !first || !!this.rig;
+    // Building by hand, the work has its own view from outside you: there you're seen whole, head, arms and tool.
+    const inBody = first && !this.workView;
+    this.model.visible = !inBody || !!this.rig;
     if (this.rig) {
       // In first person the head would be in the way, and the arms are drawn on their own (see ViewModel).
-      this.rig.head.scale.setScalar(first ? 0.001 : 1);
-      for (const a of this.rig.arms) a.scale.setScalar(first ? 0.001 : 1);
+      this.rig.head.scale.setScalar(inBody ? 0.001 : 1);
+      for (const a of this.rig.arms) a.scale.setScalar(inBody ? 0.001 : 1);
     }
     let eye = this.eye;
     if (first && this.rig) eye = this.eyeInBody(this.rig, eye);

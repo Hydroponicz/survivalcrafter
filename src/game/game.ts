@@ -2369,6 +2369,7 @@ export class Game {
     const p = this.player;
     this.selfHeal();
     this.ui.root.classList.toggle('working', !!this.working);
+    if (!this.working) p.workView = false;
 
     if (this.working) {
       // Hands-on work: the mouse drives the minigame; you stand still.
@@ -2391,9 +2392,10 @@ export class Game {
         p.faceYaw = Math.atan2(st.face.x - p.pos.x, st.face.z - p.pos.z);
       }
       p.update(dt, inp, this.world, true, 0, false, false);
-      p.updateCamera(this.camera, this.world.terrain);
-      // Work in the world (building) is seen through its own view of the piece.
+      // Work in the world (building) is seen through its own view of the piece, from outside you: you're drawn whole.
       const wc = this.working?.session.worldCamera;
+      p.workView = !!wc;
+      p.updateCamera(this.camera, this.world.terrain);
       if (wc) { this.camera.position.copy(wc.position); this.camera.quaternion.copy(wc.quaternion); }
       // At the chopping block the view looks past where you stand: keep your own body out of the way.
       if (wc && (this.working?.session.mg as { hidesPlayer?: boolean }).hidesPlayer) p.model.visible = false;
@@ -2735,10 +2737,10 @@ export class Game {
       const g = characterLoaded();
       if (p.rig && g && !this.viewModel.hasArms) this.viewModel.useArms(new CharacterRig(g, true));
       if (this.viewModel.hasArms) {
-        const show = p.cameraMode === 'first' && !this.ui.anyWindowOpen();
+        const show = p.cameraMode === 'first' && !p.workView && !this.ui.anyWindowOpen();
         this.viewModel.updateArms(this.renderDt, show, p.pose, p.poseBlend, p.model, this.camera.position, p.pitch, this.camera, { kind, type: it?.type }, p.wornColours, light);
       } else {
-        const show = p.cameraMode === 'first' && (!!kind || !!p.swingAnim) && !this.ui.anyWindowOpen();
+        const show = p.cameraMode === 'first' && !p.workView && (!!kind || !!p.swingAnim) && !this.ui.anyWindowOpen();
         this.viewModel.update(this.renderDt, show, p.swingAnim, speed, light);
       }
       this.viewModel.render(this.renderer);
