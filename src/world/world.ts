@@ -9,7 +9,7 @@ import type { WorldGen } from './worldgen';
 import { segDist } from './villages';
 
 export type { Species } from './trees';
-export type AnimalSpecies = 'deer' | 'boar' | 'horse' | 'ox' | 'sheep';
+export type AnimalSpecies = 'deer' | 'boar' | 'horse' | 'ox' | 'sheep' | 'wolf';
 
 export interface TreeObj {
   kind: 'tree'; id: number; species: Species; x: number; z: number;
@@ -78,6 +78,8 @@ export interface AnimalObj {
   penKey?: string;
   /** A sheep's fleece: grown back (1) or just shorn (0). */
   wool?: number;
+  /** A wolf of a pack (game/wolves): which den's. The pack keeps it, not the world (it isn't saved with the animals). */
+  pack?: number;
 }
 
 /** A vessel in the world (a cart, a boat: see data/vessels): it holds things, and you can move it. */
@@ -155,12 +157,13 @@ export const ANIMALS: Record<AnimalSpecies, { name: string; hp: number; speed: n
   horse: { name: 'Wild horse', hp: 70, speed: 7, aggressive: false, meat: 6, damage: 0 },
   ox: { name: 'Wild ox', hp: 110, speed: 3.4, aggressive: false, meat: 9, damage: 0 },
   sheep: { name: 'Sheep', hp: 30, speed: 3.2, aggressive: false, meat: 3, damage: 0 },
+  wolf: { name: 'Wolf', hp: 42, speed: 6.4, aggressive: true, meat: 2, damage: 6 },
 };
 
 /** Which animal a corpse was (from its label, e.g. "sheep corpse"). */
 export function corpseSpecies(label?: string): AnimalSpecies {
   const l = label ?? '';
-  for (const s of ['boar', 'horse', 'ox', 'sheep'] as const) if (l.includes(s)) return s;
+  for (const s of ['boar', 'horse', 'ox', 'sheep', 'wolf'] as const) if (l.includes(s)) return s;
   return 'deer';
 }
 
@@ -634,9 +637,9 @@ export class World {
   keepAnimals(px: number, pz: number, want = 24) {
     // (Your own animals stay where you left them, however far you go.)
     // (And villages keep their flocks.)
-    this.animals = this.animals.filter((a) => a.tamed || a.pen || Math.hypot(a.x - px, a.z - pz) < 320);
+    this.animals = this.animals.filter((a) => a.tamed || a.pen || a.pack !== undefined || Math.hypot(a.x - px, a.z - pz) < 320);
     const g = this.terrain.gen;
-    const wild = () => this.animals.filter((a) => !a.tamed && !a.pen).length;
+    const wild = () => this.animals.filter((a) => !a.tamed && !a.pen && a.pack === undefined).length;
     for (let tries = 0; tries < 6 && wild() < want; tries++) {
       const a = Math.random() * Math.PI * 2, r = 70 + Math.random() * 150;
       const x = px + Math.cos(a) * r, z = pz + Math.sin(a) * r;
@@ -790,7 +793,7 @@ export class World {
         .filter(([, st]) => st.removed.size || st.changed.size)
         .map(([r, st]) => [r, [...st.removed], [...st.changed.values()]] as [number, number[], WorldObj[]]),
       crops: [...this.crops.entries()].map(([k, c]) => [k, { planted: c.planted, ql: c.ql, tended: c.tended }]),
-      animals: this.animals.map((a) => ({ species: a.species, x: a.x, z: a.z, hp: a.hp, rot: a.rot, tamed: a.tamed, pen: a.pen, penKey: a.penKey, wool: a.wool })),
+      animals: this.animals.filter((a) => a.pack === undefined).map((a) => ({ species: a.species, x: a.x, z: a.z, hp: a.hp, rot: a.rot, tamed: a.tamed, pen: a.pen, penKey: a.penKey, wool: a.wool })),
       // (A hitched cart is saved with the index of its ox: animals get new ids when loaded.)
       carts: this.carts.filter((c) => c.ship?.npc === undefined).map((c) => ({ ...c, hitched: c.hitched === undefined ? undefined : this.animals.findIndex((a) => a.id === c.hitched) })),
       time: this.time,

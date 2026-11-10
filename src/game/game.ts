@@ -57,6 +57,7 @@ import { VillageLife } from './villagers';
 import { Economy } from './economy';
 import { Traders } from './traders';
 import { Shipping } from './shipping';
+import { Wolves } from './wolves';
 
 const REACH = 4.5;
 /** Skill above a task's difficulty needed to do it the quick way. */
@@ -117,6 +118,8 @@ export class Game {
   traders = new Traders(this);
   /** The merchant ships sailing between the ports. */
   shipping = new Shipping(this);
+  /** The wolf packs: their dens, and where they range by night. */
+  wolves = new Wolves(this);
   player = new Player();
   inv = new Inventory();
   skills = new Skills();
@@ -242,6 +245,7 @@ export class Game {
     this.life = new VillageLife(this);
     this.scene.add(this.life.group);
     this.scene.add(this.traders.group);
+    this.scene.add(this.wolves.group);
     this.scene.add(this.player.model);
     // The light of a torch in your hand (always in the scene, dark when unused,
     // so lighting one doesn't make every material rebuild its shader).
@@ -1245,12 +1249,13 @@ export class Game {
 
   // ---------- combat & animals
   provoke(a: AnimalObj) {
-    if (ANIMALS[a.species].aggressive && !this.dev.on('peaceful')) { a.state = 'attack'; a.timer = 25; }
+    if (ANIMALS[a.species].aggressive && !this.dev.on('peaceful')) { a.state = 'attack'; a.timer = 25; if (a.pack !== undefined) this.wolves.provoked(a); }
     else { a.state = 'flee'; a.timer = 5; }
   }
 
   killAnimal(a: AnimalObj) {
     this.world.animals = this.world.animals.filter((x) => x !== a);
+    if (a.pack !== undefined) this.wolves.killed(a);
     const d = ANIMALS[a.species];
     this.dropToGround([makeItem('corpse', 50, `${d.name.toLowerCase()} corpse`)], a.x, this.world.terrain.heightAt(a.x, a.z), a.z);
     this.msg(`You killed the ${d.name.toLowerCase()}! Butcher it with a knife for meat and hide.`, 'good');
@@ -1643,7 +1648,8 @@ export class Game {
       }
       // Far off (out of sight), wild animals wait where they are: their wanderings there would only make the
       // ground be worked out for nothing.
-      if (toP > 150 && a.state !== 'flee' && a.state !== 'attack') { a.speed = 0; continue; }
+      // (A wolf on the hunt keeps coming: see game/wolves.)
+      if (toP > 150 && a.state !== 'flee' && a.state !== 'attack' && a.pack === undefined) { a.speed = 0; continue; }
       // Wild horses are calm: you can walk right up to them. They only bolt when hurt
       // (see provoke) or when you keep sprinting about close by.
       if (a.species === 'horse' && a.state !== 'flee' && toP < 6 && this.sprintNear > 1.2) { a.state = 'flee'; a.timer = 3; }
@@ -1655,7 +1661,9 @@ export class Game {
       if (a.state === 'attack' && this.dev.on('peaceful')) { a.state = 'idle'; a.timer = 2; }
       // Deer are skittish: they bolt when you sprint nearby.
       if (a.species === 'deer' && a.state !== 'flee' && toP < 8 && this.player.sprinting) { a.state = 'flee'; a.timer = 4; }
-      switch (a.state) {
+      // A wolf hunts by night, keeps to its den by day, and fears the light (it chooses its own way; see game/wolves).
+      const steered = a.species === 'wolf' && this.wolves.steer(a, dt, toP);
+      if (!steered) switch (a.state) {
         case 'idle':
           a.speed = 0;
           if (a.timer <= 0) {
@@ -1682,7 +1690,7 @@ export class Game {
           if ((a.windup ?? 0) > 0) {
             // Head down, it gathers itself... and lunges. Whoever's still in front of it gets the tusks.
             a.windup! -= dt;
-            a.speed = a.windup! < 0.15 ? d.speed * 1.8 : 0;
+            a.speed = a.windup! < 0.15 && toP > 0.9 ? d.speed * (a.species === 'wolf' ? 1.2 : 1.8) : 0;
             if (a.windup! <= 0) {
               a.windup = 0;
               a.attackCooldown = 1.6 + Math.random() * 0.8;
@@ -1693,7 +1701,7 @@ export class Game {
                   const armor = this.armor();
                   const dmg = d.damage * (0.75 + Math.random() * 0.5) * (1 - armor);
                   this.player.health -= dmg;
-                  this.msg(`The ${d.name.toLowerCase()} gores you! (${Math.round(dmg)}${armor > 0.02 ? `, your clothing took ${Math.round(armor * 100)}%` : ''})`, 'warn');
+                  this.msg(`The ${d.name.toLowerCase()} ${a.species === 'wolf' ? 'bites' : 'gores'} you! (${Math.round(dmg)}${armor > 0.02 ? `, your clothing took ${Math.round(armor * 100)}%` : ''})`, 'warn');
                   this.ui?.flashDamage();
                   this.player.shake(0.5);
                   if (this.action?.def.id === 'apply_bandage') this.cancelAction('The blow knocks the bandage out of your hands.');
@@ -1704,7 +1712,8 @@ export class Game {
             a.dirX = (p.x - a.x) / l; a.dirZ = (p.z - a.z) / l;
             a.speed = toP > 1.4 ? d.speed * 0.9 : 0;
             // Close enough: it lowers its head to charge (you have a moment to get out of the way).
-            if (toP < 2.0 && a.attackCooldown <= 0) a.windup = 0.6;
+            // (A wolf darts in quicker than a boar lowers its head.)
+            if (toP < 2.0 && a.attackCooldown <= 0) a.windup = a.species === 'wolf' ? 0.35 : 0.6;
           }
           if (a.timer <= 0 || toP > 30) { a.state = 'idle'; a.timer = 3; }
           break;
@@ -2638,7 +2647,7 @@ export class Game {
     if (!this.quests && !this.tour) this.quests = new QuestLog(this.markerTex);
     if (this.quests && !this.quests.onChange) this.quests.onChange = () => this.ui.refresh();
     this.quests?.update(this, dt);
-    perf.time('animals', () => { this.updateAnimals(dt); this.updateCarts(dt); this.updateLaunches(dt); });
+    perf.time('animals', () => { this.wolves.update(dt); this.updateAnimals(dt); this.updateCarts(dt); this.updateLaunches(dt); });
     perf.time('villagers', () => { this.life.update(dt); this.traders.update(dt); });
     perf.time('map', () => this.map.update(dt, p.pos.x, p.pos.z, this.ui.isOpen('map')));
     perf.time('terrain', () => this.world.terrain.update(p.pos.x, p.pos.y, p.pos.z, 6));
@@ -2775,6 +2784,7 @@ export class Game {
         economy: this.economy.serialize(),
         traders: this.traders.serialize(),
         shipping: this.shipping.serialize(),
+        wolves: this.wolves.serialize(),
         coins: this.coins,
       };
       await writeSave(SAVE_KEY, data);
@@ -2930,6 +2940,7 @@ export class Game {
       g.economy.load(data.economy);
       g.traders.load(data.traders);
       g.shipping.load(data.shipping);
+      g.wolves.load(data.wolves);
       g.coins = data.coins ?? 20;
       const quests = data.quests ?? data.onboarding;
       if (quests) g.quests = QuestLog.load(g.markerTex, quests);

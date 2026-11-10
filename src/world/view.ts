@@ -885,10 +885,10 @@ const animalGeos = new Map<string, { body: THREE.BufferGeometry; legs: { geo: TH
  * model the first time each kind is asked for; colours become vertex colours.
  */
 export function animalModel(species: AnimalSpecies, seed = 0, tamed = false): THREE.Group {
-  const key = species === 'horse' ? `horse:${Math.abs(seed) % HORSE_COATS.length}:${tamed ? 1 : 0}` : species === 'ox' ? `ox:${Math.abs(seed) % OX_COATS.length}:${tamed ? 1 : 0}` : species;
+  const key = species === 'horse' ? `horse:${Math.abs(seed) % HORSE_COATS.length}:${tamed ? 1 : 0}` : species === 'ox' ? `ox:${Math.abs(seed) % OX_COATS.length}:${tamed ? 1 : 0}` : species === 'wolf' ? `wolf:${Math.abs(seed) % 3}` : species;
   let geos = animalGeos.get(key);
   if (!geos) {
-    const raw = species === 'horse' ? horseModel(seed, tamed) : species === 'ox' ? oxModel(seed, tamed) : species === 'sheep' ? sheepModel() : partsModel(species);
+    const raw = species === 'horse' ? horseModel(seed, tamed) : species === 'ox' ? oxModel(seed, tamed) : species === 'sheep' ? sheepModel() : species === 'wolf' ? wolfModel(seed) : partsModel(species);
     raw.updateMatrixWorld(true);
     const legs = raw.userData.legs as THREE.Mesh[];
     const bake = (o: THREE.Object3D, root: THREE.Matrix4): THREE.BufferGeometry[] => {
@@ -1479,6 +1479,44 @@ function sheepModel(): THREE.Group {
   for (const [x, z] of [[-0.18, 0.38], [0.18, 0.38], [-0.18, -0.38], [0.18, -0.38]]) {
     const leg = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.42, 0.09).translate(0, -0.21, 0), dark);
     leg.position.set(x, 0.42, z);
+    legs.push(leg);
+    g.add(leg);
+  }
+  g.userData.legs = legs;
+  return g;
+}
+
+/** A wolf: a long lean grey body on long legs, a deep chest, a narrow muzzle, pricked ears, a bushy tail. */
+function wolfModel(seed: number): THREE.Group {
+  const g = new THREE.Group();
+  const coats = [[0x4e4a46, 0x262320, 0x8a8478], [0x3e3a36, 0x1c1a18, 0x7a7468], [0x5a4e42, 0x2e261e, 0x968a76]];
+  const [coat, dark, pale] = coats[Math.abs(seed) % coats.length];
+  const fur = mat(coat, { flatShading: true }), back = mat(dark, { flatShading: true }), belly = mat(pale, { flatShading: true });
+  const part = (geo: THREE.BufferGeometry, m: THREE.Material, x: number, y: number, z: number, rx = 0) => {
+    const o = new THREE.Mesh(geo, m); o.position.set(x, y, z); o.rotation.x = rx; o.castShadow = true; g.add(o); return o;
+  };
+  part(new THREE.IcosahedronGeometry(0.5, 1).scale(0.34, 0.4, 1.2), fur, 0, 0.8, -0.05);
+  part(new THREE.IcosahedronGeometry(0.5, 1).scale(0.3, 0.16, 1.0), back, 0, 0.96, -0.08);
+  part(new THREE.IcosahedronGeometry(0.3, 1).scale(0.85, 1.1, 0.95), fur, 0, 0.86, 0.4);
+  part(new THREE.IcosahedronGeometry(0.24, 1).scale(0.8, 0.6, 0.8), belly, 0, 0.7, 0.48);
+  // The neck up to the head, held low and forward; the muzzle, nose and ears.
+  part(new THREE.CylinderGeometry(0.13, 0.17, 0.4, 7), fur, 0, 0.98, 0.62, -0.9);
+  part(new THREE.IcosahedronGeometry(0.18, 1).scale(1, 0.9, 1.1), fur, 0, 1.07, 0.82);
+  part(new THREE.BoxGeometry(0.13, 0.12, 0.26), fur, 0, 1.0, 1.0);
+  part(new THREE.BoxGeometry(0.12, 0.05, 0.22), belly, 0, 0.94, 1.0);
+  part(new THREE.BoxGeometry(0.06, 0.05, 0.05), mat(0x141210), 0, 1.04, 1.13);
+  for (const x of [-0.08, 0.08]) {
+    part(new THREE.ConeGeometry(0.05, 0.13, 4), back, x, 1.24, 0.76);
+    part(new THREE.SphereGeometry(0.022, 6, 4), mat(0xd8b040, { emissive: 0x6a5010 }), x * 0.85, 1.11, 0.97);
+  }
+  // The tail, hanging in a curve.
+  const tail = part(new THREE.CylinderGeometry(0.03, 0.09, 0.62, 7), fur, 0, 0.7, -0.68, -0.6);
+  tail.scale.set(1, 1, 1.2);
+  const legs: THREE.Mesh[] = [];
+  for (const [x, z] of [[-0.12, 0.42], [0.12, 0.42], [-0.12, -0.42], [0.12, -0.42]]) {
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.6, 0.09).translate(0, -0.3, 0), back);
+    leg.position.set(x, 0.62, z);
+    leg.castShadow = true;
     legs.push(leg);
     g.add(leg);
   }
