@@ -1355,11 +1355,16 @@ export class UI {
   }
 
   // ---------- the build menu: categories down the side, a search, the pieces as pictures, the chosen one in detail
-  private buildCat = 'All';
+  /** (Opens on the camp essentials: what you need first.) */
+  private buildCat = 'Camp essentials';
   private buildQuery = '';
   private buildReady = false;
   private buildSel: string | null = null;
   private buildShell: { root: HTMLElement; side: HTMLElement; tiles: HTMLElement; detail: HTMLElement; count: HTMLElement; search: HTMLInputElement } | null = null;
+
+  /** A tab of the pieces you'll want first, setting up camp (each is in its own category too): those in the make-camp picture, and then a workbench, a chest and a bed. */
+  private static readonly CAMP = 'Camp essentials';
+  private static readonly CAMP_PIECES = ['campfire', 'chopping_block', 'lean_to', 'hide_tent', 'woodpile', 'drying_rack', 'workbench', 'chest', 'bed'];
 
   /** The order the categories are listed in (any others after). */
   private static readonly BUILD_ORDER = ['Foundations', 'Walls', 'Roofs & stairs', 'Doors & fences', 'Furniture', 'Crafting', 'Decor', 'Garden & paths', 'Farm & mill', 'Defences', 'Waterside', 'Boats', 'Smithy'];
@@ -1434,7 +1439,7 @@ export class UI {
       const ia = UI.BUILD_ORDER.indexOf(a), ib = UI.BUILD_ORDER.indexOf(b);
       return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
     });
-    if (this.buildCat !== 'All' && !cats.includes(this.buildCat as never)) this.buildCat = 'All';
+    if (this.buildCat !== 'All' && this.buildCat !== UI.CAMP && !cats.includes(this.buildCat as never)) this.buildCat = 'All';
     // Every word of the search somewhere in its name, category, description or materials.
     const words = this.buildQuery.toLowerCase().split(/\s+/).filter(Boolean);
     const matches = (d: (typeof BUILDABLE)[number]) => {
@@ -1446,11 +1451,13 @@ export class UI {
     // (Those with the words in their name first.)
     const named = (d: (typeof BUILDABLE)[number]) => words.every((wd) => d.name.toLowerCase().includes(wd)) ? 0 : 1;
     const hits = BUILDABLE.filter(matches).sort((a, b) => named(a) - named(b));
-    const inCat = (c: string) => hits.filter((d) => c === 'All' || d.category === c);
+    const inCat = (c: string) => c === UI.CAMP
+      ? UI.CAMP_PIECES.map((id) => hits.find((d) => d.id === id)).filter((d): d is (typeof BUILDABLE)[number] => !!d)
+      : hits.filter((d) => c === 'All' || d.category === c);
     // The categories, each with how many match.
-    const sideHtml = ['All', ...cats].map((c) => {
+    const sideHtml = [UI.CAMP, 'All', ...cats].map((c) => {
       const n = inCat(c).length;
-      return `<button class="build-cat${c === this.buildCat ? ' on' : ''}${n ? '' : ' empty'}" data-cat="${escAttr(c)}"><span>${esc(c)}</span><b>${n}</b></button>`;
+      return `<button class="build-cat${c === this.buildCat ? ' on' : ''}${n ? '' : ' empty'}${c === UI.CAMP ? ' camp' : ''}" data-cat="${escAttr(c)}"><span>${c === UI.CAMP ? '⛺ ' : ''}${esc(c)}</span><b>${n}</b></button>`;
     }).join('');
     setHTML(sh.side, sideHtml);
     sh.search.placeholder = this.buildCat === 'All' ? 'Search everything…' : `Search ${this.buildCat.toLowerCase()}…`;
@@ -1470,6 +1477,7 @@ export class UI {
       }
     } else {
       tilesHtml = `<div class="build-tilegrid">${shown.map(tile).join('')}</div>`;
+      if (this.buildCat === UI.CAMP) tilesHtml = `<div class="build-camp-note">The basics for a first camp: a <b>campfire</b> and a <b>chopping block</b> first, then shelter, a woodpile, a drying rack, a workbench, a chest and a bed. <b>Torches</b> aren't built here: craft them (C → Primitive), hold one, aim at the ground and choose <b>Plant torch here</b> (or aim at a wall to mount it).</div>` + tilesHtml;
       const more = hits.length - shown.length;
       if (words.length && more > 0) tilesHtml += `<div class="build-none"><button class="link" data-cat="All">${more} more in other categories</button></div>`;
     }

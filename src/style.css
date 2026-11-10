@@ -690,3 +690,5 @@ button.dev-on { background: #6b5530; border-color: var(--accent); color: #fff3d6
 #ui.working .controls, #ui.no-hud .controls { display: none; }
 .ctl-row:not(.good):not(.bad) .ctl-keys:empty::before { content: '•'; color: var(--muted); }
 .controls.quiet { opacity: 0.6; }
+.build-cat.camp { border-color: rgba(232, 181, 98, 0.25); margin-bottom: 6px; }
+.build-camp-note { margin: 0 0 10px; padding: 8px 10px; border-radius: 8px; background: rgba(232, 181, 98, 0.08); border: 1px solid rgba(232, 181, 98, 0.18); font-size: 13px; color: var(--ink); line-height: 1.4; }
