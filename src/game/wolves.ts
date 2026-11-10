@@ -333,8 +333,8 @@ export class Wolves {
           g.tips.add('wolves');
           g.ui.showNotice('Wolves!',
             `<p>A pack of <b>wolves</b> is hunting you. Wolves den in the forests at the foot of the mountains and lie up there by day, but <b>after sunset</b> they range far across the country, and they'll follow your scent.</p>
-            <p>They're <b>afraid of fire</b>. Hold a lit <b>torch</b>, or stand in the light of a lit <b>campfire</b>, torch, brazier or lantern, and they'll keep off at the edge of the light, and if you hold them off long enough they give up and slink home to their den for the night. Ring your camp with torches and keep the fire going through the night.</p>
-            <p>You can fight them: they're quick, and they bite hard, and when you strike one, its pack turns on you. They'll do the same by day if you attack them at the den.</p>`,
+            <p>They're <b>afraid of fire</b>. Hold a lit <b>torch</b>, or stand in the light of a lit <b>campfire</b>, torch, brazier or lantern, and they'll keep off at the edge of the light. Hold them off for about <b>ten seconds</b> and they <b>give up</b>: the pack slinks back to its den and stays there for the rest of the night. Ring your camp with torches and keep the fire going through the night.</p>
+            <p>You can fight them: they're quick, and they bite hard, and when you strike one, its pack turns on you (even one slinking home). They'll do the same by day if you attack them at the den.</p>`,
             'Stay in the light', () => {}, { kind: 'lesson' });
         }
         return false;
