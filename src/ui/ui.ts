@@ -1278,71 +1278,163 @@ export class UI {
     this.frame('store', `${esc(v.name)} storehouse`, body);
   }
 
-  private recipeRow(r: Recipe): HTMLElement {
-    const g = this.g;
-    const tool = g.toolFor(r.tool);
-    const problem = craftProblem(g, r, tool);
-    const row = el('div', `recipe${problem ? ' blocked' : ''}`);
-    const out = itemDef(r.output.item);
-    const inputs = r.inputs.map((i) => {
-      const have = g.usableCount(i.item);
-      return `<span class="${have >= i.count ? 'ok' : 'no'}">${itemDef(i.item).icon} ${i.count} ${esc(itemDef(i.item).name.toLowerCase())} (${have})</span>`;
-    }).join(' ');
-    const reqs: string[] = [];
-    if (r.tool) reqs.push(`<span class="${tool ? 'ok' : 'no'}">tool: ${r.tool}${tool ? ` (${esc(itemName(tool))})` : ''}</span>`);
-    for (const s of r.stations ?? []) reqs.push(`<span class="${g.stationNear(s) ? 'ok' : 'no'}">near ${STATION_NAMES[s]}</span>`);
-    for (const k of r.needs ?? []) {
-      const t = g.toolFor(k);
-      reqs.push(`<span class="${t ? 'ok' : 'no'}">in pack: ${TOOL_NAMES[k]}${t ? ` (${esc(itemName(t))})` : ''}</span>`);
-    }
-    row.dataset.tip = `<b>${esc(r.name)}</b><br>${esc(out.desc)}<br><span class="tip-facts">${SKILLS[r.skill]}: ${esc(SKILL_INFO[r.skill])}${problem ? `<br>${esc(problem)}` : ''}</span>`;
-    const lvl = g.skills.get(r.skill);
-    const chance = Math.round(g.skills.successChance(r.skill, r.difficulty, tool?.ql ?? 0) * 100);
-    row.innerHTML = `
-      <div class="recipe-head"><span class="icon">${itemIcon(r.output.item)}</span><b>${esc(r.name)}</b>${r.output.count > 1 ? ` ×${r.output.count}` : ''}
-        <small>${SKILLS[r.skill]} ${lvl.toFixed(1)} · difficulty ${r.difficulty}${RECIPE_MINIGAMES[r.id] ? ` · hands-on: ${minigameVerb(RECIPE_MINIGAMES[r.id])}` : ` · ~${chance}% success`}</small></div>
-      <div class="recipe-in">${inputs}</div>
-      ${reqs.length ? `<div class="recipe-req">${reqs.join(' · ')}</div>` : ''}`;
-    const btns = el('div', 'btns');
-    for (const n of [1, 5]) {
-      const b = el('button', '', `Craft ×${n}`);
-      b.disabled = !!problem;
-      b.addEventListener('click', () => g.craft(r, n));
-      btns.appendChild(b);
-    }
-    // Once you've mastered it, skip the hands-on work at a quality cost.
-    if (RECIPE_MINIGAMES[r.id]) {
-      const quick = el('button', 'quick', 'Quick ×5');
-      const ok = g.canQuick(r.skill, r.difficulty);
-      quick.disabled = !!problem || !ok;
-      quick.title = ok ? 'Skip the hands-on work. Lower quality.' : `Unlocks at ${SKILLS[r.skill]} ${r.difficulty + QUICK_MARGIN}`;
-      quick.addEventListener('click', () => g.craft(r, 5, true));
-      btns.appendChild(quick);
-    }
-    row.appendChild(btns);
-    if (problem) row.title = problem;
-    return row;
-  }
+  // ---------- the crafting menu: smart tabs and categories down the side, a search, the recipes as pictures, the chosen one in detail
+  private craftShell: { root: HTMLElement; side: HTMLElement; tiles: HTMLElement; detail: HTMLElement; count: HTMLElement; search: HTMLInputElement } | null = null;
+  private craftQuery = '';
+  private craftSel: string | null = null;
+  private static readonly CRAFT_READY = '★ Ready to make';
+  private static readonly CRAFT_HERE = '⌂ Here';
 
   private renderCrafting() {
-    const body = el('div');
-    const cats = [...new Set(RECIPES.map((r) => r.category))];
-    const tabs = el('div', 'tabs');
-    for (const c of cats) {
-      const b = el('button', c === this.craftCategory ? 'on' : '', c);
-      b.addEventListener('click', () => { this.craftCategory = c; this.renderCrafting(); });
-      tabs.appendChild(b);
+    const w = this.windows.get('crafting')!;
+    if (!this.craftShell || !w.contains(this.craftShell.root)) {
+      const root = el('div', 'build-ui craft-ui');
+      root.innerHTML = `
+        <div class="build-side"></div>
+        <div class="build-main">
+          <div class="build-top">
+            <input class="build-search" type="search" placeholder="Search everything…" spellcheck="false" autocomplete="off">
+            <span class="craft-howto" data-tip="Crafting is hands-on: the work is set down where you stand and you do it yourself with the mouse. How well you do sets most of the quality; your skill and tools help. Right-click stops. Once you're skilled, Quick skips the hands-on part for slightly lower quality.">How crafting works</span>
+            <span class="build-count"></span>
+          </div>
+          <div class="build-tiles"></div>
+        </div>
+        <div class="build-detail"></div>`;
+      this.lastHtml.delete('crafting');
+      this.frame('crafting', 'Crafting', root);
+      const search = root.querySelector('.build-search') as HTMLInputElement;
+      search.value = this.craftQuery;
+      search.addEventListener('input', () => { this.craftQuery = search.value; this.fillCrafting(); });
+      search.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') { if (search.value) { search.value = ''; this.craftQuery = ''; this.fillCrafting(); } else search.blur(); e.stopPropagation(); }
+        if (e.key === 'Enter' && this.craftSel) { const r = RECIPES.find((x) => x.id === this.craftSel); if (r && !craftProblem(this.g, r, this.g.toolFor(r.tool))) this.g.craft(r, 1); }
+      });
+      // (Clicks are handled once here: the lists inside are redrawn as you search.)
+      root.addEventListener('click', (e) => {
+        const t = e.target as HTMLElement;
+        const cat = t.closest('[data-cat]') as HTMLElement | null;
+        if (cat) { this.craftCategory = cat.dataset.cat!; this.fillCrafting(); return; }
+        const act = t.closest('[data-craft]') as HTMLElement | null;
+        if (act) {
+          const r = RECIPES.find((x) => x.id === act.dataset.recipe);
+          if (r && !(act as HTMLButtonElement).disabled) this.g.craft(r, Number(act.dataset.craft), act.dataset.quick === '1');
+          return;
+        }
+        // A recipe named in the details (what makes a missing material, what this is used for): go to it.
+        const jump = t.closest('[data-goto]') as HTMLElement | null;
+        if (jump) { this.craftSel = jump.dataset.goto!; this.craftCategory = 'All'; this.craftQuery = ''; search.value = ''; this.fillCrafting(); return; }
+        const tile = t.closest('.build-tile') as HTMLElement | null;
+        if (tile?.dataset.recipe) { this.craftSel = tile.dataset.recipe; this.fillCrafting(); }
+      });
+      this.craftShell = { root, side: root.querySelector('.build-side')!, tiles: root.querySelector('.build-tiles')!, detail: root.querySelector('.build-detail')!, count: root.querySelector('.build-count')!, search };
+      // Opens on what you can make now (or everything, if that's nothing yet).
+      const anyReady = RECIPES.some((r) => !craftProblem(this.g, r, this.g.toolFor(r.tool)));
+      if (!this.craftOpened) { this.craftCategory = anyReady ? UI.CRAFT_READY : 'All'; this.craftOpened = true; }
     }
-    body.appendChild(tabs);
-    body.appendChild(el('div', 'craft-intro', `
-      <b>Crafting is hands-on.</b> When you craft, the view moves to the workstation and you do the job yourself with the mouse — sawing, hammering, twisting, stirring.
-      <ul>
-        <li>The first time you try each kind of work you get a short guide and an extra-forgiving practice run.</li>
-        <li><b>How well you do</b> sets most of the quality. Your <b>skill</b> makes the work easier and limits how good the result can be; better <b>tools and materials</b> help too.</li>
-        <li><b>Right-click</b> stops working. Once you're skilled at something, <b>Quick ×5</b> skips the hands-on part for slightly lower quality.</li>
-      </ul>`));
-    for (const r of RECIPES.filter((r) => r.category === this.craftCategory)) body.appendChild(this.recipeRow(r));
-    this.frame('crafting', 'Crafting', body);
+    this.fillCrafting();
+  }
+  private craftOpened = false;
+
+  /** How many times over you could make it with what you have (0 if something else is missing). */
+  private craftable(r: Recipe): number {
+    const g = this.g;
+    if (craftProblem(g, r, g.toolFor(r.tool))) return 0;
+    return Math.max(0, Math.min(...r.inputs.map((i) => Math.floor(g.usableCount(i.item) / i.count))));
+  }
+
+  /** Redraw the lists for the tab and search chosen (only what's changed). */
+  private fillCrafting() {
+    const sh = this.craftShell;
+    if (!sh) return;
+    if (this.pressedWindow === 'crafting') { this.pendingRender.add('crafting'); return; }
+    const g = this.g;
+    const cats = [...new Set(RECIPES.map((r) => r.category))];
+    const ready = new Set(RECIPES.filter((r) => !craftProblem(g, r, g.toolFor(r.tool))).map((r) => r.id));
+    // Stations you're standing at, and what they let you make.
+    const here = [...new Set(RECIPES.flatMap((r) => r.stations ?? []))].filter((st) => g.stationNear(st));
+    const hereName = here.length ? `⌂ At the ${here.map((st) => STATION_NAMES[st].replace(/^an? /, '')).join(', ')}` : UI.CRAFT_HERE;
+    const valid = [UI.CRAFT_READY, UI.CRAFT_HERE, 'All', ...cats];
+    if (!valid.includes(this.craftCategory)) this.craftCategory = 'All';
+    // Every word of the search in its name, what it makes, what it's made from, where or with what.
+    const words = this.craftQuery.toLowerCase().split(/\s+/).filter(Boolean);
+    const hay = (r: Recipe) => `${r.name} ${itemDef(r.output.item).name} ${r.category} ${r.inputs.map((i) => itemDef(i.item).name).join(' ')} ${(r.stations ?? []).map((st) => STATION_NAMES[st]).join(' ')} ${r.tool ?? ''} ${SKILLS[r.skill]}`.toLowerCase();
+    const named = (r: Recipe) => (words.every((wd) => r.name.toLowerCase().includes(wd)) ? 0 : 1);
+    const hits = RECIPES.filter((r) => !words.length || words.every((wd) => hay(r).includes(wd)))
+      .sort((a, b) => named(a) - named(b) || (ready.has(a.id) ? 0 : 1) - (ready.has(b.id) ? 0 : 1));
+    const inCat = (c: string) => hits.filter((r) => c === 'All' || (c === UI.CRAFT_READY ? ready.has(r.id) : c === UI.CRAFT_HERE ? (r.stations ?? []).some((st) => here.includes(st)) : r.category === c));
+    const sideHtml = valid.map((c) => {
+      const n = inCat(c).length;
+      if (c === UI.CRAFT_HERE && !here.length) return '';
+      const label = c === UI.CRAFT_HERE ? hereName : c;
+      return `<button class="build-cat${c === this.craftCategory ? ' on' : ''}${n ? '' : ' empty'}${c === UI.CRAFT_READY || c === UI.CRAFT_HERE ? ' camp' : ''}" data-cat="${escAttr(c)}"><span>${esc(label)}</span><b>${n}</b></button>`;
+    }).join('');
+    setHTML(sh.side, sideHtml);
+    sh.search.placeholder = this.craftCategory === 'All' ? 'Search everything… (name, material, station)' : `Search ${this.craftCategory.replace(/^[★⌂] /, '').toLowerCase()}…`;
+    const shown = inCat(this.craftCategory);
+    if (!this.craftSel || !shown.some((r) => r.id === this.craftSel)) this.craftSel = shown[0]?.id ?? null;
+    const tile = (r: Recipe) => `<div class="build-tile${r.id === this.craftSel ? ' sel' : ''}${ready.has(r.id) ? ' ready' : ' blocked'}" data-recipe="${r.id}">
+        <div class="bt-pic">${itemIcon(r.output.item, 'craft-pic')}</div><div class="bt-name">${esc(r.name)}${r.output.count > 1 ? ` <small>×${r.output.count}</small>` : ''}</div></div>`;
+    let tilesHtml = '';
+    if (!shown.length) {
+      const elsewhere = this.craftCategory !== 'All' ? hits.length : 0;
+      tilesHtml = `<div class="build-none">${this.craftCategory === UI.CRAFT_READY && !words.length ? 'Nothing you can make right now: look in All for what you\'re missing.' : `Nothing here matches${words.length ? ` “${esc(this.craftQuery)}”` : ''}.`}${elsewhere ? ` <button class="link" data-cat="All">${elsewhere} found elsewhere</button>` : ''}</div>`;
+    } else if (this.craftCategory === 'All' && !words.length) {
+      for (const c of cats) {
+        const list = shown.filter((r) => r.category === c);
+        if (list.length) tilesHtml += `<h4 class="build-group">${esc(c)}</h4><div class="build-tilegrid">${list.map(tile).join('')}</div>`;
+      }
+    } else {
+      tilesHtml = `<div class="build-tilegrid">${shown.map(tile).join('')}</div>`;
+      const more = hits.length - shown.length;
+      if (words.length && more > 0) tilesHtml += `<div class="build-none"><button class="link" data-cat="All">${more} more elsewhere</button></div>`;
+    }
+    setHTML(sh.tiles, tilesHtml);
+    setText(sh.count, `${shown.length} recipe${shown.length === 1 ? '' : 's'}`);
+    // The chosen recipe in full.
+    const r = RECIPES.find((x) => x.id === this.craftSel);
+    if (!r) { setHTML(sh.detail, '<div class="build-none">Choose a recipe.</div>'); return; }
+    const out = itemDef(r.output.item);
+    const tool = g.toolFor(r.tool);
+    const problem = craftProblem(g, r, tool);
+    const makers = (item: string) => RECIPES.filter((x) => x.output.item === item && x.id !== r.id);
+    const mats = r.inputs.map((i) => {
+      const have = g.usableCount(i.item), ok = have >= i.count;
+      const how = ok ? '' : makers(i.item).slice(0, 2).map((m) => `<button class="link" data-goto="${m.id}">make it: ${esc(m.name)}</button>`).join(' ');
+      return `<div class="craft-mat ${ok ? 'ok' : 'no'}"><span class="mat-chip ${ok ? 'ok' : 'no'}">${itemIcon(i.item, 'chip-img')}<b>${i.count}</b> ${esc(itemDef(i.item).name.toLowerCase())}</span><small>you have ${have}</small>${how ? `<div class="craft-how">${how}</div>` : ''}</div>`;
+    }).join('');
+    const reqs: string[] = [];
+    if (r.tool) {
+      const maker = RECIPES.find((x) => itemDef(x.output.item).tool === r.tool);
+      reqs.push(`<div class="craft-req ${tool ? 'ok' : 'no'}">${tool ? '✓' : '✕'} A ${TOOL_NAMES[r.tool]} in your pack${tool ? ` (${esc(itemName(tool))})` : maker ? ` — <button class="link" data-goto="${maker.id}">make one: ${esc(maker.name)}</button>` : ''}</div>`);
+    }
+    for (const st of r.stations ?? []) {
+      const near = g.stationNear(st), piece = BUILDABLE.find((d) => d.station === st);
+      reqs.push(`<div class="craft-req ${near ? 'ok' : 'no'}">${near ? '✓' : '✕'} Stand near ${STATION_NAMES[st]}${near ? '' : piece ? ` — build one (B: ${esc(piece.name)})` : ''}</div>`);
+    }
+    for (const k of r.needs ?? []) {
+      const t = g.toolFor(k);
+      reqs.push(`<div class="craft-req ${t ? 'ok' : 'no'}">${t ? '✓' : '✕'} ${esc(TOOL_NAMES[k])} in your pack${t ? ` (${esc(itemName(t))})` : ''}</div>`);
+    }
+    const uses = RECIPES.filter((x) => x.inputs.some((i) => i.item === r.output.item)).slice(0, 8);
+    const lvl = g.skills.get(r.skill), mg = RECIPE_MINIGAMES[r.id];
+    const can = this.craftable(r);
+    const btn = (n: number, label: string, quick = false, off = false, tip = '') => `<button data-craft="${n}" data-recipe="${r.id}"${quick ? ' data-quick="1"' : ''}${off ? ' disabled' : ''}${tip ? ` data-tip="${escAttr(tip)}"` : ''}>${label}</button>`;
+    const quickOk = !!mg && g.canQuick(r.skill, r.difficulty);
+    setHTML(sh.detail, `
+      <div class="craft-big">${itemIcon(r.output.item, 'craft-big-img')}</div>
+      <h3>${esc(r.name)}${r.output.count > 1 ? ` <small>makes ${r.output.count}</small>` : ''} ${problem ? '' : '<span class="ready-tag">Ready to make</span>'}</h3>
+      <div class="build-sub">${esc(r.category)} · ${SKILLS[r.skill]} ${lvl.toFixed(1)} · difficulty ${r.difficulty}${mg ? ` · hands-on: ${esc(minigameVerb(mg))}` : ''}</div>
+      <div class="build-desc">${esc(out.desc)}</div>
+      <h4>Made from</h4><div class="craft-mats">${mats}</div>
+      ${reqs.length ? `<h4>Needs</h4>${reqs.join('')}` : '<div class="craft-req ok">✓ No tool or station needed</div>'}
+      ${problem ? `<div class="craft-problem">${esc(problem)}</div>` : ''}
+      <div class="craft-btns">
+        ${btn(1, 'Craft', false, !!problem)}
+        ${btn(5, '×5', false, !!problem || can < 2, 'Make up to five, one after another')}
+        ${can > 1 ? btn(can, `All (${can})`, false, false, 'Make as many as your materials allow') : ''}
+        ${mg ? btn(5, 'Quick ×5', true, !!problem || !quickOk, quickOk ? 'Skip the hands-on work: lower quality.' : `Unlocks at ${SKILLS[r.skill]} ${r.difficulty + QUICK_MARGIN}`) : ''}
+      </div>
+      ${uses.length ? `<h4>Used to make</h4><div class="craft-uses">${uses.map((u) => `<button class="link" data-goto="${u.id}">${itemIcon(u.output.item, 'chip-img')} ${esc(u.name)}</button>`).join('')}</div>` : ''}`);
   }
 
   private renderSkills() {
