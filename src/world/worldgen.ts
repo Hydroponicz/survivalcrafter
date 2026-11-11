@@ -624,7 +624,10 @@ class Tile {
   /** Stretches not drawn: this tile's version of a stream above where a neighbour's version joins it. */
   hidden?: Uint8Array;
   lastUsed = 0;
+  /** Its key in the tile map. */
+  readonly key: string;
   constructor(readonly d: TileData) {
+    this.key = `${d.tx},${d.tz}`;
     this.ox = d.tx * TILE - PAD;
     this.oz = d.tz * TILE - PAD;
     const R = d.reaches;
@@ -793,6 +796,7 @@ export interface TileSource {
 
 export class WorldGen {
   /** Tiles made on the spot (holding everything up) rather than in the background, and the time it took. */
+  static blockLog: string[] = [];
   static blocking = { tiles: 0, ms: 0 };
   readonly seed: number;
   readonly base: BaseLand;
@@ -879,16 +883,23 @@ export class WorldGen {
   }
 
   /** The tile, made right now if it hasn't arrived yet. */
+  /** The last few tiles looked up (most lookups land on the same tile as the one before). */
+  private recent: Tile[] = [];
   private tile(tx: number, tz: number): Tile {
+    for (const r of this.recent) if (r.d.tx === tx && r.d.tz === tz && this.tiles.get(r.key) === r) { r.lastUsed = this.clock; return r; }
     const key = `${tx},${tz}`;
     let t = this.tiles.get(key);
     if (!t) {
       const t0 = performance.now();
       this.addTile(buildTile(this.seed, tx, tz, this.base));
       WorldGen.blocking.tiles++; WorldGen.blocking.ms += performance.now() - t0;
+      // (Which tiles were made on the page, and who asked: for chasing stalls.)
+      if (WorldGen.blockLog.length < 40) WorldGen.blockLog.push(`${key} ${Math.round(performance.now() - t0)}ms ${(new Error().stack ?? '').split('\n').slice(3, 9).map((l) => l.trim().replace(/^at /, '').replace(/\(.*\/([^/]+)\)$/, '$1')).join(' < ')}`);
       t = this.tiles.get(key)!;
     }
     t.lastUsed = this.clock;
+    this.recent.unshift(t);
+    if (this.recent.length > 4) this.recent.pop();
     return t;
   }
 

@@ -14,7 +14,7 @@
 // take apart or build onto.
 
 import { hash2, mulberry32 } from './noise';
-import { BLEND, SEA, TILE, type WorldGen } from './worldgen';
+import { BLEND, PAD, SEA, TILE, type WorldGen } from './worldgen';
 
 /** Settlements are planned one (at most) per square of this size. */
 export const VCELL = 512;
@@ -248,6 +248,51 @@ export class Villages {
     this.roads.clear();
     this.roadBuckets.clear();
     this.linked.clear();
+  }
+
+  /**
+   * Have the map tiles made (in the background, side by side) that planning
+   * the settlements and roads reaching a point needs, before any of it is
+   * asked for: otherwise each missing tile is made on the spot, on the page,
+   * and the page freezes. `r` widens it to every settlement within r of the
+   * point. Works outward in rounds: the squares round the point, then the
+   * squares round each settlement found (its roads run to their settlements).
+   */
+  async prepare(x: number, z: number, r = 0): Promise<void> {
+    if (!this.ready || !this.gen.tileSource) return;
+    const cx = Math.floor(x / VCELL), cz = Math.floor(z / VCELL);
+    // ensureRoads' reach (or r's, if wider), and siteLinks' from each settlement.
+    const r1 = Math.max(Math.ceil(LINK / VCELL / 2) + 1, Math.ceil(r / VCELL)), r2 = Math.ceil(LINK / VCELL);
+    for (let round = 0; round < 6; round++) {
+      const need = new Map<string, [number, number]>();
+      const found: Site[] = [];
+      for (let j = cz - r1; j <= cz + r1; j++) for (let i = cx - r1; i <= cx + r1; i++) {
+        if (!this.cellTiles(i, j, need)) continue;
+        const s = this.site(i, j);
+        if (s) found.push(s);
+      }
+      for (const s of found) for (let j = s.cz - r2; j <= s.cz + r2; j++) for (let i = s.cx - r2; i <= s.cx + r2; i++) {
+        if (this.cellTiles(i, j, need)) this.site(i, j);
+      }
+      if (!need.size) return;
+      await this.gen.whenTiles([...need.values()]);
+    }
+  }
+
+  /** Whether the tiles a square's planning reads are made: those missing are added to `need`. */
+  private cellTiles(cx: number, cz: number, need: Map<string, [number, number]>): boolean {
+    if (this.sites.has(cellKey(cx, cz))) return true;
+    // The square, a port's harbour reaching out past it, and the blending and lakes of the tiles round it.
+    const m = 320 + PAD + BLEND;
+    const tx0 = Math.floor((cx * VCELL - m) / TILE), tx1 = Math.floor(((cx + 1) * VCELL + m) / TILE);
+    const tz0 = Math.floor((cz * VCELL - m) / TILE), tz1 = Math.floor(((cz + 1) * VCELL + m) / TILE);
+    let ok = true;
+    for (let tz = tz0; tz <= tz1; tz++) for (let tx = tx0; tx <= tx1; tx++) {
+      if (this.gen.hasTile(tx, tz)) continue;
+      ok = false;
+      need.set(`${tx},${tz}`, [tx, tz]);
+    }
+    return ok;
   }
 
   /** The settlement planned in a grid square (or null), planning it if need be. */

@@ -69,6 +69,9 @@ export const QUICK_MARGIN = 10;
 const BUILD_REACH = 8;
 const SAVE_KEY = 'survivalcrafter.save.v5';
 /** Saves from older world generators, which can't be loaded into the current one, and why. */
+/** How far from the start a trade looks for its village (main.ts has the land for it made first). */
+export const TRADE_SEARCH = 1800;
+
 export const OLD_SAVES: [string, string][] = [
   ['survivalcrafter.save.v4', 'The world now goes on forever, so worlds from before can no longer be loaded. Start a new world to play.'],
   ['survivalcrafter.save.v3', 'The world is now a vast open continent that streams in as you explore, so worlds from before can no longer be loaded. Start a new world to play.'],
@@ -365,10 +368,10 @@ export class Game {
    */
   private startInTrade(prof: Profession, rank: Rank): boolean {
     const s = this.world.spawn, t = this.world.terrain;
-    const villages = t.villages.around(s.x, s.z, 3000).filter((v) => v.houses.length).sort((a, b) => Math.hypot(a.x - s.x, a.z - s.z) - Math.hypot(b.x - s.x, b.z - s.z));
+    const villages = t.villages.around(s.x, s.z, TRADE_SEARCH).filter((v) => v.houses.length).sort((a, b) => Math.hypot(a.x - s.x, a.z - s.z) - Math.hypot(b.x - s.x, b.z - s.z));
     const v = villages[0];
     if (!v) return false;
-    // Where you begin: beside a house of your trade, else by the village fire; a master just outside the village, at his workshop.
+    // Where you begin: beside a house of your trade, else by the village fire; a master just outside the village, at their workshop.
     const house = prof.house ? v.houses.find((h) => h.role === prof.house) : undefined;
     let at = house ? house.door : v.fire;
     if (rank.id === 'master') {
@@ -3219,6 +3222,7 @@ export class Game {
       const gen = new WorldGen(data.world.terrain.seed);
       await prepareTiles(gen, data.player.pos[0], data.player.pos[2]);
       const world = World.load(data.world, gen);
+      await world.terrain.villages.prepare(data.player.pos[0], data.player.pos[2]);
       const g = new Game(canvas, world);
       const p = g.player;
       p.pos.set(data.player.pos[0], data.player.pos[1], data.player.pos[2]);

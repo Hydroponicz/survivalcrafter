@@ -7,7 +7,7 @@ import { RECIPES } from './data/recipes';
 import { ACTION_MAP } from './game/actions';
 import { createMinigame } from './game/minigames';
 import { STRUCTURES } from './data/structures';
-import { Game, OLD_SAVES } from './game/game';
+import { Game, OLD_SAVES, TRADE_SEARCH } from './game/game';
 import { pickFile, UI } from './ui/ui';
 import { GUIDE_HTML } from './ui/guide';
 import { GraphicsSettings } from './game/graphics';
@@ -80,12 +80,14 @@ function seedFrom(text: string): number {
 }
 
 /** A new world, with the land around the start made in the background first (so the page never stalls). */
-async function makeWorld(seed: number): Promise<World> {
+async function makeWorld(seed: number, reach = 0): Promise<World> {
   const gen = new WorldGen(seed);
   const s = World.roughSpawn(gen);
   await prepareTiles(gen, s.x, s.z);
   const world = new World(seed);
   world.generate(gen);
+  // The settlements and roads round the start (and, for a trade, the villages within reach), planned from land made in the background.
+  await world.terrain.villages.prepare(world.origin.x, world.origin.z, reach);
   return world;
 }
 
@@ -103,6 +105,7 @@ function launch(make: () => Game | null | Promise<Game | null>) {
     fade.remove();
     game.start();
     loadDone();
+
     canvas.addEventListener('click', () => {
       if (!game.ui.anyWindowOpen()) game.input.lock();
     });
@@ -121,7 +124,7 @@ function startGame(l: Launch) {
   } else {
     loadStep('Shaping the land…', 0.15);
     launch(async () => {
-      const world = await makeWorld(l.seed);
+      const world = await makeWorld(l.seed, l.profession && l.profession !== 'wanderer' ? TRADE_SEARCH : 0);
       loadStep('Planting the forests…', 0.6);
       await paint();
       const g = new Game(canvas, world);
@@ -221,6 +224,9 @@ $('exit').addEventListener('click', () => {
     document.body.appendChild(bye);
   }, 200);
 });
+
+// (For chasing load stalls from the console: which tiles were made on the page, and why.)
+Object.assign(window, { __WorldGen: WorldGen });
 
 const pending = takeLaunch();
 if (pending) startGame(pending);
