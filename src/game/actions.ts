@@ -1649,6 +1649,32 @@ export const ACTIONS: ActionDef[] = [
   });
 }
 
+// At a built chopping block, splitting is a plain click (no hunting through the crafting menu):
+// logs into rough planks first, then planks into kindling.
+{
+  const split = (id: string, recipeId: string, label: string): ActionDef => {
+    const r = RECIPES.find((x) => x.id === recipeId)!;
+    return {
+      id, label,
+      show: (c) => { const s = obj(c, 'structure'); return !!s && s.type === 'chopping_block' && s.built; },
+      check: (c) => {
+        const need = r.inputs[0];
+        if (c.g.inv.count(need.item) < need.count) return need.item === 'log' ? 'You have no logs. Fell a tree and pick up its logs.' : 'You have no rough planks. Split a log into planks first.';
+        if (!c.g.toolFor('hatchet')) return 'You need a hatchet in your pack.';
+        return craftProblem(c.g, r, c.g.toolFor('hatchet'));
+      },
+      time: 0,
+      run: (c) => c.g.craft(r, 1),
+    };
+  };
+  // (While a quest is teaching kindling, a plain click splits kindling.)
+  const onKindling = (c: Ctx) => !!c.g.quests?.quests.some((q) => q.status === 'active' && c.g.quests!.def(q).steps[q.step]?.id === 'kindling');
+  ACTIONS.unshift(
+    { ...split('block_planks', 'split_planks', 'Split a log into 2 rough planks'), notDefault: (c) => onKindling(c) && c.g.inv.count('plank') > 0 },
+    split('block_kindling', 'kindling_plank', 'Split a rough plank into 4 kindling'),
+  );
+}
+
 export const ACTION_MAP: Record<string, ActionDef> = Object.fromEntries(ACTIONS.map((a) => [a.id, a]));
 
 
