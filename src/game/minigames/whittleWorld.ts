@@ -5,8 +5,9 @@ import { clamp01, clearView, Minigame, workTool, type Blocked, type Meter, type 
 import { sfx } from './sfx';
 import type { Gesture } from './tutorials';
 
-// Whittling, out in the world: wherever you start it, you kneel and lay the
-// branch across a log on the ground before you, and draw your knife along it.
+// Whittling, out in the world: wherever you start it, you kneel, and the view
+// comes down to your own hands: the branch held in your left, the knife in
+// your right, and you draw the knife along it, away from the holding hand.
 // The branch is one piece of wood, bark and all: each clean stroke peels the
 // bark off the stretch it passes, a ribbon of shaving curling up in front of
 // the blade until it breaks off and drops to the ground; a second pass pares
@@ -22,8 +23,9 @@ type Phase = 'arrive' | 'work' | 'reveal' | 'done';
 /** Along the branch (metres), its rings, and the knife's reach along it. */
 const LEN = 0.66, RINGS = 120, AROUND = 18;
 const BARK = new THREE.Color(0x4e3420), BARK2 = new THREE.Color(0x6b4a2c), PARED = new THREE.Color(0xdcb880), SMOOTH = new THREE.Color(0xecd4a2), GOUGE = new THREE.Color(0x3a2414);
-/** The branch lies across the log at this height (work frame), slightly raised toward its far end. */
-const REST_Y = 0.135;
+/** You hold the work this high off the ground, kneeling. */
+const HOLD_Y = 0.6;
+const SKIN = 0xd9a982, SLEEVE = 0x6b5a3e;
 
 /** A tiny repeatable random. */
 const rnd = (i: number) => { const s = Math.sin(i * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s); };
@@ -34,7 +36,8 @@ export class WhittleGame extends Minigame {
   readonly title: string;
   readonly instructions = 'Hold the left button and draw the knife along the branch, left to right, keeping to the line. Steady strokes peel the bark off in long curls; a second pass shaves it smooth.';
   readonly inWorld = true;
-  readonly hidesPlayer = false;
+  /** Seen through your own eyes: your hands are drawn, not the rest of you. */
+  readonly hidesPlayer = true;
   /** You kneel at it. */
   readonly bodyClip = 'crouch_idle' as const;
   readonly overlay = new THREE.Group();
@@ -60,7 +63,17 @@ export class WhittleGame extends Minigame {
   private gouged: Uint8Array;
   private readonly r0 = 0.021;
   private knife = new THREE.Group();
-  private guide: THREE.Line;
+  /** The line to cut along: a glowing strip on the wood (dim where you've cut). */
+  private guide: THREE.Mesh;
+  private guideMat: THREE.MeshBasicMaterial;
+  /** Round the branch where the blade is: green on the line, amber close, red off it. */
+  private marker: THREE.Mesh;
+  private markerMat: THREE.MeshBasicMaterial;
+  /** From the blade back to the line when you've wandered off. */
+  private pull: THREE.Line;
+  /** Your right forearm, stretched each frame from the elbow to the knife hand. */
+  private rightArm!: THREE.Mesh;
+  private readonly elbowR = new THREE.Vector3(0.28, -0.3, 0.42);
   private path: THREE.Vector3[] = [];
   private reached = 0;
   private pass = 0;
@@ -90,23 +103,15 @@ export class WhittleGame extends Minigame {
     if (toYou.lengthSq() < 1e-4) toYou.set(0, 0, 1);
     toYou.normalize();
     const yaw = Math.atan2(toYou.x, toYou.z);
-    this.work.position.set(spot.x, spot.y, spot.z);
+    // Held up before you as you kneel.
+    this.work.position.set(spot.x, spot.y + HOLD_Y, spot.z);
     this.work.rotation.y = yaw;
     this.overlay.add(this.work);
-    const standAt = new THREE.Vector3(spot.x, 0, spot.z).addScaledVector(toYou, 0.5);
+    const standAt = new THREE.Vector3(spot.x, 0, spot.z).addScaledVector(toYou, 0.42);
     this.stand = { x: standAt.x, z: standAt.z, yaw };
     const own = <T extends THREE.Material>(m: T) => { this.owned.push(m); return m; };
 
-    // A patch of trodden earth; a short log lying across, and a stone, to rest the branch on.
-    const earth = new THREE.Mesh(new THREE.CircleGeometry(0.42, 24).rotateX(-Math.PI / 2), own(new THREE.MeshStandardMaterial({ color: 0x5a4632, roughness: 1, transparent: true, opacity: 0.3, depthWrite: false })));
-    earth.position.y = 0.004; earth.receiveShadow = true;
-    this.work.add(earth);
-    this.work.add(this.restLog(own));
-    const stone = new THREE.Mesh(new THREE.DodecahedronGeometry(0.06, 1).scale(1.3, 0.75, 1), own(new THREE.MeshStandardMaterial({ color: 0x77736c, roughness: 0.95, flatShading: true })));
-    stone.position.set(-0.27, 0.03, 0.02); stone.rotation.y = 0.7; stone.castShadow = stone.receiveShadow = true;
-    this.work.add(stone);
-
-    // The branch, from the stone up across the log.
+    // The branch, held across in front of you.
     this.woodMat = own(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95 }));
     const geo = new THREE.CylinderGeometry(this.r0, this.r0, LEN, AROUND, RINGS, false).rotateZ(Math.PI / 2);
     const pos = geo.attributes.position as THREE.BufferAttribute, n = pos.count;
@@ -130,27 +135,54 @@ export class WhittleGame extends Minigame {
     this.branch = new THREE.Mesh(geo, this.woodMat);
     this.branch.castShadow = this.branch.receiveShadow = true;
     this.stick.add(this.branch);
-    // Resting on the stone and the log: a little tilt up toward the far end.
-    this.stick.position.set(0, REST_Y - 0.02, 0);
-    this.stick.rotation.z = 0.06;
+    // Angled a little away from you, its far end a touch higher.
+    this.stick.rotation.set(0, 0.18, 0.05);
     this.work.add(this.stick);
     this.reshape(0, RINGS);
+    // Your hands: the left gripping the branch's near end, the right on the knife.
+    const skin = own(new THREE.MeshStandardMaterial({ color: SKIN, roughness: 0.75 }));
+    const sleeve = own(new THREE.MeshStandardMaterial({ color: SLEEVE, roughness: 0.9 }));
+    const left = this.hand(skin, true);
+    left.position.set(-LEN / 2 + 0.05, 0, 0);
+    this.stick.add(left);
+    const leftArm = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.027, 1, 10).translate(0, 0.5, 0), sleeve);
+    this.work.updateMatrixWorld(true);
+    const lw = this.work.worldToLocal(left.localToWorld(new THREE.Vector3(0, 0.006, 0.07))), le = new THREE.Vector3(-0.26, -0.3, 0.42);
+    leftArm.position.copy(lw);
+    leftArm.scale.y = lw.distanceTo(le);
+    leftArm.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), le.clone().sub(lw).normalize());
+    this.work.add(leftArm);
+    this.rightArm = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.027, 1, 10).translate(0, 0.5, 0), sleeve);
+    this.work.add(this.rightArm);
 
     const kn = workTool(toolType, 'grip');
     if (kn) this.knife.add(kn);
-    this.knife.rotation.y = 0.35;
+    const fist = this.hand(skin, false);
+    fist.position.set(0.05, 0.0, 0);
+    fist.rotation.y = Math.PI;
+    this.knife.add(fist);
+    this.knife.rotation.y = Math.PI - 0.3;
     this.work.add(this.knife);
-    this.guide = new THREE.Line(new THREE.BufferGeometry(), own(new THREE.LineDashedMaterial({ color: 0xffd54a, dashSize: 0.016, gapSize: 0.009, depthTest: false, transparent: true, opacity: 0.85 })));
+    this.guideMat = own(new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.95, depthTest: false, toneMapped: false }));
+    this.guide = new THREE.Mesh(new THREE.BufferGeometry(), this.guideMat);
     this.guide.renderOrder = 10;
     this.work.add(this.guide);
+    this.markerMat = own(new THREE.MeshBasicMaterial({ color: 0x7dff6a, transparent: true, opacity: 0.95, depthTest: false, toneMapped: false }));
+    this.marker = new THREE.Mesh(new THREE.TorusGeometry(this.r0 * 1.4, 0.0034, 6, 24).rotateY(Math.PI / 2), this.markerMat);
+    this.marker.renderOrder = 11;
+    this.stick.add(this.marker);
+    this.pull = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]), own(new THREE.LineBasicMaterial({ color: 0xff6a4a, depthTest: false, transparent: true })));
+    this.pull.renderOrder = 11;
+    this.pull.visible = false;
+    this.work.add(this.pull);
     this.makePath();
 
     // Glide down from your own view to the work.
     this.camFrom.pos.copy(from.position);
     this.camFrom.quat.copy(from.quaternion);
-    // (From across the branch, a little to one side: you, kneeling, and the work between.)
-    this.camTo.copy(this.work.localToWorld(new THREE.Vector3(-0.42, 0.78, -0.5)));
-    this.lookAt.copy(this.work.localToWorld(new THREE.Vector3(0.04, REST_Y + 0.08, 0.14)));
+    // (Through your own eyes, looking down at your hands.)
+    this.camTo.copy(this.work.localToWorld(new THREE.Vector3(0.03, 0.34, 0.44)));
+    this.lookAt.copy(this.work.localToWorld(new THREE.Vector3(0.05, -0.02, -0.03)));
     this.camera.position.copy(from.position);
     this.camera.quaternion.copy(from.quaternion);
     if ((from as THREE.PerspectiveCamera).fov) this.camera.fov = (from as THREE.PerspectiveCamera).fov;
@@ -159,32 +191,35 @@ export class WhittleGame extends Minigame {
     this.workLight.copy(this.work.localToWorld(new THREE.Vector3(0.2, 0.5, 0.4)));
   }
 
-  /** A short length of log lying across, under the branch's far half. */
-  private restLog(own: <T extends THREE.Material>(m: T) => T): THREE.Group {
-    const g = new THREE.Group();
-    const geo = new THREE.CylinderGeometry(0.058, 0.062, 0.22, 14, 4).rotateX(Math.PI / 2);
-    const pos = geo.attributes.position as THREE.BufferAttribute, col = new Float32Array(pos.count * 3), c = new THREE.Color();
-    for (let i = 0; i < pos.count; i++) {
-      const a = Math.atan2(pos.getY(i), pos.getX(i));
-      c.copy(BARK).lerp(BARK2, 0.5 + 0.5 * Math.sin(a * 9 + pos.getZ(i) * 20)).multiplyScalar(0.85 + rnd(i) * 0.25);
-      col.set([c.r, c.g, c.b], i * 3);
+  /**
+   * A hand closed round something running left-right through its middle (the
+   * branch, or the knife's grip): seen from above, the back of the hand and a
+   * row of knuckles on top, the thumb laid along the far side, the wrist toward you.
+   */
+  private hand(skin: THREE.Material, small: boolean): THREE.Group {
+    const g = new THREE.Group(), k = small ? 0.85 : 1;
+    // The back of the hand, over and behind what's held.
+    const back = new THREE.Mesh(new THREE.SphereGeometry(0.03 * k, 12, 9).scale(1.25, 0.75, 1.0), skin);
+    back.position.set(0, 0.016 * k, 0.018 * k);
+    g.add(back);
+    // Fingers wrapped round: four knuckles over the top, curling down the far side.
+    for (let i = 0; i < 4; i++) {
+      const x = (-0.024 + i * 0.016) * k;
+      const knuckle = new THREE.Mesh(new THREE.SphereGeometry(0.0095 * k, 8, 6), skin);
+      knuckle.position.set(x, 0.026 * k, -0.002 * k);
+      const tip = new THREE.Mesh(new THREE.CapsuleGeometry(0.0085 * k, 0.012 * k, 3, 6), skin);
+      tip.position.set(x, 0.008 * k, -0.02 * k); tip.rotation.x = 0.4;
+      g.add(knuckle, tip);
     }
-    geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
-    const log = new THREE.Mesh(geo, own(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1 })));
-    log.castShadow = log.receiveShadow = true;
-    g.add(log);
-    // Its sawn ends: pale wood with rings.
-    for (const s of [-1, 1]) {
-      const end = new THREE.Mesh(new THREE.CircleGeometry(0.057, 16), own(new THREE.MeshStandardMaterial({ color: 0xc8a272, roughness: 0.9 })));
-      end.position.z = s * 0.1105; end.rotation.y = s > 0 ? 0 : Math.PI;
-      g.add(end);
-      for (const rr of [0.018, 0.033, 0.047]) {
-        const ring = new THREE.Mesh(new THREE.RingGeometry(rr, rr + 0.003, 18), own(new THREE.MeshStandardMaterial({ color: 0x9a7448, roughness: 0.9 })));
-        ring.position.z = s * 0.1112; ring.rotation.y = s > 0 ? 0 : Math.PI;
-        g.add(ring);
-      }
-    }
-    g.position.set(0.17, 0.058, 0);
+    // The thumb along the near side, its tip forward.
+    const thumb = new THREE.Mesh(new THREE.CapsuleGeometry(0.009 * k, 0.026 * k, 3, 6).rotateZ(Math.PI / 2), skin);
+    thumb.position.set(0.014 * k, -0.004 * k, 0.026 * k);
+    g.add(thumb);
+    // The wrist, toward you.
+    const wrist = new THREE.Mesh(new THREE.CylinderGeometry(0.022 * k, 0.024 * k, 0.04, 10).rotateX(Math.PI / 2), skin);
+    wrist.position.set(0, 0.006 * k, 0.05 * k);
+    g.add(wrist);
+    g.traverse((o) => { o.castShadow = true; });
     return g;
   }
 
@@ -244,10 +279,8 @@ export class WhittleGame extends Minigame {
       const t = this.ringShare(k / 40);
       this.path.push(this.onTop(t, 0.003).add(new THREE.Vector3(0, 0, Math.sin(t * 9 + ph) * amp)));
     }
-    this.guide.geometry.dispose();
-    this.guide.geometry = new THREE.BufferGeometry().setFromPoints(this.path);
-    this.guide.computeLineDistances();
     this.reached = 0;
+    this.drawGuide();
   }
 
   /** The point a share of the way along this pass (work frame). */
@@ -256,7 +289,7 @@ export class WhittleGame extends Minigame {
     return this.path[i].clone().lerp(this.path[i + 1], f - i);
   }
   /** The share of the branch (0..1, ring space) a share along this pass is at. */
-  private ringShare(t: number) { return 0.96 - clamp01(t) * 0.92; }
+  private ringShare(t: number) { return 0.15 + clamp01(t) * 0.81; }
 
   hint(): { x: number; y: number; text: string; gesture?: Gesture } | null {
     if (this.phase !== 'work') return null;
@@ -284,6 +317,7 @@ export class WhittleGame extends Minigame {
         this.camera.quaternion.slerpQuaternions(this.camFrom.quat, look.quaternion, e);
         this.camera.updateMatrixWorld();
         this.knife.position.copy(this.at(0)).add(new THREE.Vector3(0, 0.03, 0.04));
+        this.showAim(this.knife.position.clone(), { t: 0, off: 0 }, 1);
         if (k >= 1) { this.phase = 'work'; this.t = 0; }
         return;
       }
@@ -304,7 +338,6 @@ export class WhittleGame extends Minigame {
     this.knife.rotation.z = i.down ? -0.3 : -0.1;
     this.speedShown += ((this.lastLocal && i.down ? this.lastLocal.distanceTo(p) / Math.max(dt, 1e-3) / 0.4 : 0) - this.speedShown) * Math.min(1, dt * 8);
     this.lastLocal = p.clone();
-    if (!i.down) { this.dropCurl(); return; }
     const tol = 0.007 + 0.016 * this.ease;
     // Nearest point of the line just ahead of where you've got to.
     let best = { t: this.reached, off: Infinity };
@@ -313,6 +346,8 @@ export class WhittleGame extends Minigame {
       const q = this.at(t), off = Math.hypot(q.x - p.x, q.z - p.z);
       if (off < best.off) best = { t, off };
     }
+    this.showAim(p, best, tol);
+    if (!i.down) { this.dropCurl(); return; }
     if (best.t <= this.reached) return;
     if (best.off > tol * 2.6) { this.say('Bring the knife back to the line.', false, 0.6); this.dropCurl(); return; }
     // A steady pace: rushing doesn't cut faster.
@@ -325,7 +360,7 @@ export class WhittleGame extends Minigame {
     const from = this.reached;
     this.reached = to;
     // The wood the blade passed over.
-    const r0 = Math.floor(this.ringShare(to) * RINGS), r1 = Math.ceil(this.ringShare(from) * RINGS);
+    const r0 = Math.floor(this.ringShare(from) * RINGS), r1 = Math.ceil(this.ringShare(to) * RINGS);
     for (let r = r0; r <= r1; r++) {
       if (this.stage[r] > this.pass) continue;
       this.stage[r] = this.pass + 1;
@@ -347,7 +382,53 @@ export class WhittleGame extends Minigame {
       this.say('Too deep: the blade dug in!', false, 0.6);
     }
     this.progress = (this.pass + this.reached) / this.passes;
+    if (Math.floor(this.reached * 40) !== Math.floor(from * 40)) this.drawGuide();
     if (this.reached >= 0.995) this.finishPass();
+  }
+
+  /** Where the blade is against the line: a ring round the wood under it (green on, amber close, red off), and a line back to it when off. */
+  private showAim(p: THREE.Vector3, best: { t: number; off: number }, tol: number) {
+    const q = this.at(best.t);
+    const local = this.stick.worldToLocal(this.work.localToWorld(q.clone()));
+    this.marker.position.set(local.x, 0, 0);
+    const col = best.off <= tol ? 0x7dff6a : best.off <= tol * 2.6 ? 0xffc23a : 0xff5a3a;
+    this.markerMat.color.setHex(col);
+    const off = best.off > tol;
+    this.pull.visible = off;
+    if (off) {
+      const pos = this.pull.geometry.attributes.position as THREE.BufferAttribute;
+      pos.setXYZ(0, p.x, q.y + 0.002, p.z); pos.setXYZ(1, q.x, q.y + 0.002, q.z);
+      pos.needsUpdate = true;
+      (this.pull.material as THREE.LineBasicMaterial).color.setHex(col);
+    }
+    // Your right forearm follows the knife hand.
+    this.work.updateMatrixWorld(true);
+    const hand = this.work.worldToLocal(this.knife.localToWorld(new THREE.Vector3(0.05, 0.005, -0.05)));
+    this.rightArm.position.copy(hand);
+    this.rightArm.scale.y = hand.distanceTo(this.elbowR);
+    this.rightArm.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), this.elbowR.clone().sub(hand).normalize());
+  }
+
+  /** The line as a strip laid along the top of the wood: bright ahead of you, faint where you've cut. */
+  private drawGuide() {
+    const n = this.path.length, w = 0.0042;
+    const pos = new Float32Array(n * 2 * 3), col = new Float32Array(n * 2 * 3), idx: number[] = [];
+    for (let k = 0; k < n; k++) {
+      const a = this.path[k], t = k / (n - 1);
+      const done = t < this.reached;
+      const c = done ? [0.45, 0.32, 0.12] : [1, 0.78, 0.12];
+      for (let s = 0; s < 2; s++) {
+        pos.set([a.x, a.y + 0.0015, a.z + (s ? w : -w)], (k * 2 + s) * 3);
+        col.set(c, (k * 2 + s) * 3);
+      }
+      if (k < n - 1) { const b = k * 2; idx.push(b, b + 1, b + 2, b + 1, b + 3, b + 2); }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    g.setIndex(idx);
+    this.guide.geometry.dispose();
+    this.guide.geometry = g;
   }
 
   // ---------- shavings
@@ -391,8 +472,8 @@ export class WhittleGame extends Minigame {
     c.mesh.geometry.dispose();
     c.mesh.geometry = this.ribbon(Math.max(0.004, len), 0.016 + 0.006 * this.ease, c.colour, SMOOTH);
     // Standing up just ahead of the blade, rolling back toward you.
-    c.mesh.position.copy(this.at(to)).add(new THREE.Vector3(-0.004, -0.001, 0));
-    c.mesh.rotation.set(c.mesh.userData.tilt ?? 0, 0, 0);
+    c.mesh.position.copy(this.at(to)).add(new THREE.Vector3(0.004, -0.001, 0));
+    c.mesh.rotation.set(c.mesh.userData.tilt ?? 0, Math.PI, 0);
     if (len > (this.product === 'kindling' ? 0.045 : 0.07)) this.dropCurl();
   }
 
@@ -428,9 +509,8 @@ export class WhittleGame extends Minigame {
       s.mesh.rotation.x += s.spin.x * dt;
       s.mesh.rotation.y += s.spin.y * dt;
       s.mesh.rotation.z += s.spin.z * dt;
-      // (Onto the log, if it lands on it; else the ground.)
-      const onLog = Math.abs(s.mesh.position.x - 0.17) < 0.055 && Math.abs(s.mesh.position.z) < 0.11;
-      const floor = onLog ? 0.115 : 0.006;
+      // (Down onto the ground at your knees.)
+      const floor = -HOLD_Y + 0.006;
       if (s.mesh.position.y <= floor) { s.mesh.position.y = floor; s.rest = true; s.mesh.rotation.x = (Math.random() - 0.5) * 0.6; s.mesh.rotation.z = (Math.random() - 0.5) * 0.6; }
     }
   }
@@ -446,7 +526,8 @@ export class WhittleGame extends Minigame {
     }
     // Done: lift up what you've made.
     this.guide.visible = false;
-    this.knife.visible = false;
+    this.marker.visible = false;
+    this.pull.visible = false;
     if (this.product === 'wooden_tongs') {
       const tongs = buildToolMesh('tongs', 'wooden_tongs');
       tongs.rotation.z = Math.PI / 2;
@@ -468,7 +549,7 @@ export class WhittleGame extends Minigame {
     this.reveal += dt;
     const k = Math.min(1, this.reveal / 1.2), lift = k * k * (3 - 2 * k);
     const f = this.finished!;
-    f.position.y = REST_Y - 0.02 + lift * 0.14;
+    f.position.y = lift * 0.1;
     f.rotation.x = lift * 0.5;
     f.rotation.y = lift * 0.35;
     if (this.reveal > 1.7) { this.phase = 'done'; this.done = true; }
