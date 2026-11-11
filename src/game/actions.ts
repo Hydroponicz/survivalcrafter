@@ -81,6 +81,13 @@ export interface ActionDef {
   qualityCap?: (c: Ctx) => number | undefined;
   /** Done at once with a quick reach (no progress bar): picking things up off the ground. */
   instant?: boolean;
+  /**
+   * Swung by hand: each click is one swing (no progress bar, no auto-repeat).
+   * Click again as the tool comes back up to chain the next blow on the beat.
+   */
+  byHand?: boolean;
+  /** Swung by hand: how far through the whole job is (0..1), shown round the crosshair. */
+  handProgress?: (c: Ctx) => number;
   /** Re-queue automatically after completing, while still valid. */
   repeat?: boolean | ((c: Ctx) => boolean);
   run(c: Ctx, o: Outcome): void;
@@ -708,10 +715,10 @@ export const ACTIONS: ActionDef[] = [
       if (!c.g.world.objects.has(t.id)) return 'The tree is down.';
       return t.age < 0.2 ? 'It is only a sapling. Leave it to grow.' : null;
     },
-    // Each swing is one blow; it lands at the bottom of the stroke.
-    time: 1.35, fixedTime: true, impactAt: 0.62, swing: 'chop',
+    // Each click is one swing; the blow lands at the bottom of the stroke.
+    time: 1.0, fixedTime: true, impactAt: 0.5, swing: 'chop', byHand: true,
+    handProgress: (c) => obj(c, 'tree')?.chop ?? 0,
     skill: 'woodcutting', difficulty: (c) => TREES[obj(c, 'tree')!.species].difficulty, stamina: 3, toolWear: 0.05,
-    repeat: (c) => { const t = obj(c, 'tree'); return !!t && c.g.world.objects.has(t.id); },
     run: (c, o) => {
       const t = obj(c, 'tree')!;
       const g = c.g;
@@ -723,12 +730,15 @@ export const ACTIONS: ActionDef[] = [
       const hardness = TREES[t.species].hardness * (0.35 + 0.3 * treeScale(t).s);
       const bite = (0.13 + 0.08 * power + g.skills.get('woodcutting') / 300) / hardness;
       // A glancing blow still takes a little out.
-      const gained = o.success ? bite * (0.85 + Math.random() * 0.3) : bite * 0.45;
+      // A blow on the beat (clicked as the axe came back up) bites deeper, more so the longer the rhythm runs.
+      const beat = g.handBeat;
+      const rhythm = beat > 0 ? 1.2 + Math.min(4, beat - 1) * 0.06 : 1;
+      const gained = (o.success ? bite * (0.85 + Math.random() * 0.3) : bite * 0.45) * rhythm;
       const before = t.chop ?? 0;
       t.chop = Math.min(1, before + gained);
       // The logs' quality is the average quality of the blows that made them.
       t.chopQl = before > 0 ? ((t.chopQl ?? o.ql) * before + o.ql * gained) / t.chop : o.ql;
-      g.treeHit(t, Math.min(1, gained / 0.15), o.success);
+      g.treeHit(t, Math.min(1, gained / 0.15), o.success, undefined, beat);
       if (!o.success && Math.random() < 0.35) g.msg('Your hatchet glances off the trunk.', 'fail');
       if (t.chop < 1) return;
       const ql = t.chopQl ?? o.ql;

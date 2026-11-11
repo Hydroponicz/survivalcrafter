@@ -77,6 +77,20 @@ button { font: inherit; cursor: pointer; }
 .progress-label { font-size: 14px; text-shadow: 0 1px 3px #000; margin-bottom: 4px; }
 .progress-bar { height: 10px; background: rgba(0, 0, 0, 0.55); border: 1px solid var(--panel-edge); border-radius: 5px; overflow: hidden; }
 .progress-fill { height: 100%; background: linear-gradient(90deg, #b07a30, var(--accent)); }
+.hand-swing { position: absolute; left: 50%; top: 50%; width: 0; height: 0; display: none; pointer-events: none; }
+.hand-ring { --p: 0; position: absolute; left: -30px; top: -30px; width: 60px; height: 60px; border-radius: 50%;
+  background: conic-gradient(#f0c070 calc(var(--p) * 1turn), rgba(255, 255, 255, 0.16) 0);
+  -webkit-mask: radial-gradient(circle, transparent 23px, #000 24px, #000 29px, transparent 30px);
+  mask: radial-gradient(circle, transparent 23px, #000 24px, #000 29px, transparent 30px);
+  transition: transform 0.12s ease-out, filter 0.12s; }
+.hand-ring i { display: none; }
+.hand-ring.window { filter: drop-shadow(0 0 6px #9fe870) brightness(1.25); background: conic-gradient(#b8f080 calc(var(--p) * 1turn), rgba(160, 240, 120, 0.45) 0); }
+.hand-ring.locked { background: conic-gradient(#b8f080 calc(var(--p) * 1turn), rgba(160, 240, 120, 0.8) 0); }
+.hand-ring.hit { transform: scale(1.12); }
+.hand-ring.hit.beat { transform: scale(1.28); filter: drop-shadow(0 0 10px #ffd27a) brightness(1.5); }
+.hand-label { position: absolute; left: -200px; width: 400px; bottom: 38px; text-align: center; font-size: 13px; text-shadow: 0 1px 3px #000; opacity: 0.92; }
+.hand-label b { color: var(--accent); }
+#ui.working .hand-swing { display: none !important; }
 .perf-line { position: absolute; top: 44px; right: 16px; font-size: 12px; text-shadow: 0 1px 3px #000; background: rgba(0,0,0,0.3); padding: 2px 8px; border-radius: 4px; opacity: 0.9; }
 .clock { position: absolute; top: 12px; right: 16px; font-size: 15px; text-shadow: 0 1px 3px #000; background: rgba(0,0,0,0.3); padding: 4px 10px; border-radius: 4px; }
 .status { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); font-size: 14px; text-shadow: 0 1px 3px #000; text-align: center; max-width: 70vw; }

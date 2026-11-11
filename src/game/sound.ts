@@ -54,15 +54,15 @@ export class Sound {
   }
 
   /** Axe biting into wood. `strength` 0..1. */
-  chop(strength = 1, vol = 1) {
+  chop(strength = 1, vol = 1, rate = 1) {
     const ctx = this.ensure();
     if (!ctx) return;
-    if (this.playFile('chop', vol * (0.6 + 0.4 * strength))) return;
+    if (this.playFile('chop', vol * (0.6 + 0.4 * strength), rate)) return;
     const t = ctx.currentTime;
     // Woody knock: a quick low sine drop…
     const o = ctx.createOscillator();
     o.type = 'sine';
-    o.frequency.setValueAtTime(190 + Math.random() * 40, t);
+    o.frequency.setValueAtTime((190 + Math.random() * 40) * rate, t);
     o.frequency.exponentialRampToValueAtTime(70, t + 0.12);
     o.connect(this.env(ctx, vol, 0.9 * strength, 0.16));
     o.start(t);
@@ -202,13 +202,13 @@ export class Sound {
   }
 
   /** Play a recording if there is one; returns false so the caller can fall back. */
-  private playFile(name: string, vol: number): boolean {
+  private playFile(name: string, vol: number, rate = 1): boolean {
     const ctx = this.ctx;
     const list = this.bank.get(name);
     if (!ctx || !list?.length) return false;
     const src = ctx.createBufferSource();
     src.buffer = list[Math.floor(Math.random() * list.length)];
-    src.playbackRate.value = 0.94 + Math.random() * 0.12; // a little variety
+    src.playbackRate.value = (0.94 + Math.random() * 0.12) * rate; // a little variety
     const g = ctx.createGain();
     g.gain.value = vol;
     src.connect(g);

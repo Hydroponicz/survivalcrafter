@@ -93,9 +93,23 @@ export interface RunningAction {
   resolved?: boolean;
   /** For long looping swings: which swing last landed. */
   lastBlow?: number;
+  /** Swung by hand: the next swing, clicked for while this one was under way (on the beat, or not). */
+  next?: 'beat' | 'off';
+  /** Hit-stop: the swing hangs this long at the moment of impact. */
+  hold?: number;
 }
 
+/** Swung by hand: a click from this far through the swing (as the tool comes back up) is on the beat; before EARLY it's ignored. */
+const BEAT_FROM = 0.68, EARLY = 0.35;
+
 interface QueuedAction { def: ActionDef; ctx: Ctx }
+
+/** Do two actions aim at the same thing? */
+function sameTarget(a: Ctx, b: Ctx): boolean {
+  if (a.t.kind !== b.t.kind) return false;
+  if (a.t.kind === 'object' && b.t.kind === 'object') return a.t.obj === b.t.obj;
+  return true;
+}
 
 interface PendingDrop { left: number; done: boolean; at: { x: number; z: number }; land: (x: number, z: number) => void }
 
@@ -1016,7 +1030,25 @@ export class Game {
     return out;
   }
 
+  /** Swung by hand: how many blows in a row have landed on the beat (0: this one didn't). */
+  handBeat = 0;
+  /** Swung by hand: a moment after a swing ends in which a click still counts as on the beat. */
+  handGrace: { left: number; def: ActionDef; ctx: Ctx } | null = null;
+
   request(def: ActionDef, ctx: Ctx) {
+    // Swung by hand: every click is a swing of its own.
+    if (def.byHand && !this.working) {
+      const a = this.action;
+      if (a && a.def.id === def.id) { this.pressSwing(a); return; }
+      if (!a) {
+        const gr = this.handGrace;
+        const same = !!gr && gr.def.id === def.id && sameTarget(gr.ctx, ctx);
+        this.handBeat = same ? this.handBeat + 1 : 0;
+        this.handGrace = null;
+        this.begin(def, ctx);
+        return;
+      }
+    }
     if (this.action || this.working) {
       if (this.queue.length >= 5) return this.msg('Your action queue is full.', 'fail');
       this.queue.push({ def, ctx });
@@ -1024,6 +1056,32 @@ export class Game {
       return;
     }
     this.begin(def, ctx);
+  }
+
+  /**
+   * Swung by hand, for the HUD: how far through the job is, whether a click
+   * now lands on the beat (and whether one already has), and the rhythm.
+   */
+  handState(): { progress: number; window: boolean; locked: boolean; beat: number; impact: boolean } | null {
+    const a = this.action, gr = this.handGrace;
+    const def = a?.def.byHand ? a.def : !a ? gr?.def : undefined;
+    if (!def) return null;
+    const ctx = a ? a.ctx : gr!.ctx;
+    const phase = a ? a.elapsed / a.total : 1;
+    return {
+      progress: def.handProgress?.(ctx) ?? 0,
+      window: !a || (!!a.resolved && phase >= BEAT_FROM),
+      locked: a?.next === 'beat',
+      beat: this.handBeat,
+      impact: !!a && !!a.hold && a.hold > 0,
+    };
+  }
+
+  /** A click while a hand swing is under way: line up the next swing (too soon, and it's ignored). */
+  private pressSwing(a: RunningAction) {
+    const phase = a.elapsed / a.total;
+    if (phase < EARLY || a.next) return;
+    a.next = phase >= BEAT_FROM ? 'beat' : 'off';
   }
 
   craft(r: Recipe, count: number, quick = false) {
@@ -1337,14 +1395,18 @@ export class Game {
   }
 
   /** A blow lands on a tree: notch, shake, chips, thunk. */
-  treeHit(t: TreeObj, strength: number, clean: boolean, from?: { x: number; z: number }) {
+  /** A blow into a tree. `beat`: how many blows in a row have landed on the rhythm (yours only). */
+  treeHit(t: TreeObj, strength: number, clean: boolean, from?: { x: number; z: number }, beat = 0) {
     const p = from ?? this.player.pos;
     this.world.changed(t); // swaps the instanced tree for its own notched model
-    this.view.treeFx.hit(t, p.x, p.z, strength, clean);
+    this.view.treeFx.hit(t, p.x, p.z, strength, clean, beat);
     // (Someone else chopping: heard from where you are.)
     const vol = from ? distVol(Math.hypot(from.x - this.player.pos.x, from.z - this.player.pos.z)) : 1;
-    if (vol > 0.02) { if (clean) this.sound.chop((0.6 + strength * 0.4) * vol); else this.sound.glance(vol); }
-    if (!from) this.player.shake(clean ? 0.3 + strength * 0.25 : 0.15);
+    // On the beat, each blow rings a little higher.
+    if (vol > 0.02) { if (clean) this.sound.chop(Math.min(1, 0.6 + strength * 0.4 + (beat ? 0.15 : 0)) * vol, 1, 1 + Math.min(5, beat) * 0.035); else this.sound.glance(vol); }
+    // Deep into the cut, the trunk starts to groan.
+    if (!from && (t.chop ?? 0) > 0.72 && Math.random() < 0.6) this.sound.creak(0.25 + (t.chop ?? 0) * 0.3);
+    if (!from) this.player.shake(clean ? 0.32 + strength * 0.25 + (beat ? 0.12 : 0) : 0.15);
   }
 
   /**
@@ -2686,9 +2748,11 @@ export class Game {
     p.swingAnim = null;
     p.faceYaw = null;
     p.work = null;
+    if (this.handGrace && (this.handGrace.left -= dt) <= 0) this.handGrace = null;
     if (this.action) {
       const a = this.action;
-      a.elapsed += dt;
+      // (A hand swing hangs for a moment as the blow lands.)
+      if (a.hold && a.hold > 0) a.hold -= dt; else a.elapsed += dt;
       const swing = typeof a.def.swing === 'function' ? a.def.swing(a.ctx) : a.def.swing;
       p.swing = swing ? 0 : (a.elapsed * 1.2) % 1;
       p.faceYaw = this.faceToward(a.ctx.t);
@@ -2698,6 +2762,7 @@ export class Game {
           p.swingAnim = { kind: swing, phase: a.elapsed / a.total, impactAt: a.def.impactAt };
           if (!a.resolved && a.elapsed >= a.total * a.def.impactAt) {
             a.resolved = true;
+            if (a.def.byHand) a.hold = this.handBeat > 0 ? 0.09 : 0.06;
             this.complete(a.def, a.ctx, a.total, undefined, true);
           }
         } else {
@@ -2717,7 +2782,20 @@ export class Game {
         p.work = sw ? { clip, phase: sw.phase % 1, impactAt: sw.impactAt }
           : seg ? { clip, phase: Math.min(1, a.elapsed / Math.max(0.3, a.total)), impactAt: 0.55 } : { clip };
       }
-      if (this.action === a && a.elapsed >= a.total) {
+      if (this.action === a && a.elapsed >= a.total && a.def.byHand && a.resolved) {
+        // A hand swing is done: the next one clicked for, else a moment to click on the beat.
+        this.action = null;
+        const c = { ...a.ctx, tool: a.ctx.tool && this.inv.find(a.ctx.tool.uid) ? a.ctx.tool : this.activeItem() };
+        // (Holding the button down keeps swinging, steadily, off the beat.)
+        if (!a.next && this.input.locked && this.input.held.has(0)) a.next = 'off';
+        if (a.next && !this.queue.length && !this.targetGone(c) && !a.def.check?.(c)) {
+          this.handBeat = a.next === 'beat' ? this.handBeat + 1 : 0;
+          this.begin(a.def, c);
+        } else {
+          if (!this.targetGone(c)) this.handGrace = { left: 0.24, def: a.def, ctx: c };
+          this.afterAction(a.def, a.ctx, false);
+        }
+      } else if (this.action === a && a.elapsed >= a.total) {
         if (a.resolved) { this.action = null; this.afterAction(a.def, a.ctx); }
         else this.finish(a);
       }

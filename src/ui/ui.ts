@@ -63,6 +63,11 @@ export class UI {
   private hintEl: HTMLElement;
   private progress: HTMLElement;
   private progressFill: HTMLElement;
+  /** Swinging by hand (chopping): a ring round the crosshair instead of the bar. */
+  private handEl: HTMLElement;
+  private handRing: HTMLElement;
+  private handLabel: HTMLElement;
+  private handKey = '';
   private progressLabel: HTMLElement;
   private hotbarEl: HTMLElement;
   private clockEl: HTMLElement;
@@ -127,6 +132,7 @@ export class UI {
     hud.innerHTML = `
       <div class="crosshair"></div>
       <div class="target"><div class="target-name"></div><div class="target-hint"></div></div>
+      <div class="hand-swing"><div class="hand-ring"><i></i></div><div class="hand-label"></div></div>
       <div class="progress"><div class="progress-label"></div><div class="progress-bar"><div class="progress-fill"></div></div></div>
       <div class="clock"></div>
       <div class="perf-line"></div>
@@ -144,6 +150,9 @@ export class UI {
     this.targetEl = hud.querySelector('.target-name')!;
     this.hintEl = hud.querySelector('.target-hint')!;
     this.progress = hud.querySelector('.progress')!;
+    this.handEl = hud.querySelector('.hand-swing')!;
+    this.handRing = hud.querySelector('.hand-ring')!;
+    this.handLabel = hud.querySelector('.hand-label')!;
     this.progressFill = hud.querySelector('.progress-fill')!;
     this.progressLabel = hud.querySelector('.progress-label')!;
     this.hotbarEl = hud.querySelector('.hotbar')!;
@@ -646,7 +655,17 @@ export class UI {
     }
 
     const a = g.action;
-    if (a) {
+    const hand = g.handState();
+    if (hand) {
+      setStyle(this.handEl, 'display', 'block');
+      this.handRing.style.setProperty('--p', hand.progress.toFixed(3));
+      const cls = `hand-ring${hand.window ? ' window' : ''}${hand.locked ? ' locked' : ''}${hand.impact ? (hand.beat ? ' hit beat' : ' hit') : ''}`;
+      if (cls !== this.handKey) { this.handRing.className = cls; this.handKey = cls; }
+      setHTML(this.handLabel, hand.beat > 0
+        ? `<b>Rhythm ×${hand.beat + 1}</b>`
+        : hand.window ? '<b>Now!</b>' : '');
+    } else setStyle(this.handEl, 'display', 'none');
+    if (a && !a.def.byHand) {
       setStyle(this.progress, 'display', 'block');
       const label = typeof a.def.label === 'function' ? a.def.label(a.ctx) : a.def.label;
       setText(this.progressLabel, `${label}${g.queue.length ? ` (+${g.queue.length} queued)` : ''}`);

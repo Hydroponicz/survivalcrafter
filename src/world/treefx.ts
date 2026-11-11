@@ -96,6 +96,8 @@ interface Actor {
   shakeAmp: number;
   shakeAxis: THREE.Vector3;
   yawQ: THREE.Quaternion;
+  /** How far it leans away from the cut (radians): more as the notch deepens. */
+  lean: number;
 }
 
 interface Faller {
@@ -153,7 +155,7 @@ export class TreeFx {
     this.group.add(group);
     a = {
       tree: t, group, trunk, leaves, base: Float32Array.from(geo.attributes.position.array as Float32Array),
-      shakeT: 99, shakeAmp: 0, shakeAxis: new THREE.Vector3(1, 0, 0), yawQ: new THREE.Quaternion(),
+      shakeT: 99, shakeAmp: 0, shakeAxis: new THREE.Vector3(1, 0, 0), yawQ: new THREE.Quaternion(), lean: 0,
     };
     this.actors.set(t.id, a);
     this.place(a);
@@ -226,7 +228,7 @@ export class TreeFx {
   }
 
   /** A blow lands: deepen the notch, shake the tree, throw chips and shake leaves loose. */
-  hit(t: TreeObj, fromX: number, fromZ: number, strength: number, clean: boolean) {
+  hit(t: TreeObj, fromX: number, fromZ: number, strength: number, clean: boolean, beat = 0) {
     const a = this.ensure(t);
     this.carve(a);
     const dx = t.x - fromX, dz = t.z - fromZ;
@@ -234,10 +236,13 @@ export class TreeFx {
     // Tilt away from the blow.
     a.shakeAxis.set(dz / len, 0, -dx / len);
     a.shakeT = 0;
-    a.shakeAmp = (clean ? 0.035 : 0.015) * (0.6 + strength);
+    a.shakeAmp = (clean ? 0.035 : 0.015) * (0.6 + strength) * (beat ? 1.35 : 1);
+    // Deep into the cut, the trunk starts to give: it leans away, a little more with every blow.
+    const c = t.chop ?? 0;
+    a.lean = 0.07 * Math.max(0, (c - 0.5) / 0.5) ** 2;
     const at = this.notchPoint(t);
     const toward = new THREE.Vector3(-dx / len, 0, -dz / len);
-    const n = clean ? 10 + Math.round(strength * 8) : 4;
+    const n = clean ? 10 + Math.round(strength * 8) + (beat ? 8 : 0) : 4;
     for (let k = 0; k < n; k++) {
       const v = toward.clone().multiplyScalar(1.5 + Math.random() * 2.5)
         .add(new THREE.Vector3((Math.random() - 0.5) * 2.2, 1 + Math.random() * 2.2, (Math.random() - 0.5) * 2.2));
@@ -339,7 +344,7 @@ export class TreeFx {
     for (const a of this.actors.values()) {
       if (a.shakeT > 3) continue;
       a.shakeT += dt;
-      const ang = a.shakeAmp * Math.sin(a.shakeT * 26) * Math.exp(-a.shakeT * 4.5);
+      const ang = a.lean + a.shakeAmp * Math.sin(a.shakeT * 26) * Math.exp(-a.shakeT * 4.5);
       q.setFromAxisAngle(a.shakeAxis, ang);
       a.group.quaternion.copy(q).multiply(a.yawQ);
     }

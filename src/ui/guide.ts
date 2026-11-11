@@ -17,6 +17,7 @@ export const GUIDE_HTML = `
         <tr><td>H · Esc</td><td>This guide · free the mouse / close windows</td></tr>
         <tr><td>G · J · M</td><td>Survey for nearby finds · Field journal · World map</td></tr>
         <tr><td>L</td><td>Quest log: accept quests, track one (its objectives are marked), pin the ones you want on screen</td></tr>
+        <tr><td>Hatchet in hand + Left click on a tree</td><td>Swing the axe: each click is one blow. Click again just as the axe comes back up (the ring round the crosshair lights green) for a rhythm blow that bites deeper; keep the rhythm going and every blow bites harder. Hold the button to keep swinging steadily</td></tr>
         <tr><td>Weapon in hand + Left click</td><td>Attack what's in front of you (any tool, or your fists, hits an animal you aim at)</td></tr>
         <tr><td>Bow in hand + hold Left click</td><td>Draw the bow, release to shoot (needs arrows; a full draw shoots further and harder)</td></tr>
         <tr><td>Bandage (hotbar or pack → Apply)</td><td>Heal 25 health over time (takes a few seconds; not during a fight)</td></tr>

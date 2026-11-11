@@ -80,6 +80,14 @@ export function controlsFor(g: Game): Controls | null {
   }
 
   // ---------- busy at something
+  if (g.handState()) {
+    return { title: 'Chopping', rows: [
+      { keys: ['LMB'], text: 'Swing the axe (each click is one blow)' },
+      { keys: ['LMB'], text: 'Click again just as the axe comes back up (the ring lights green): a rhythm blow bites deeper' },
+      { keys: ['Hold LMB'], text: 'Keep swinging at a steady pace' },
+      { keys: ['X'], text: 'Stop' },
+    ] };
+  }
   if (g.action) {
     const label = typeof g.action.def.label === 'function' ? g.action.def.label(g.action.ctx) : g.action.def.label;
     return { title: label, rows: [
