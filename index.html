@@ -15,8 +15,11 @@
       <div class="load-bar"><i id="load-fill"></i></div>
       <p id="load-text">Loading…</p>
     </div>
-    <div id="menu" class="main-menu waiting">
-      <h1 class="game-title">Survivalcrafter</h1>
+    <div id="menu" class="main-menu waiting" data-panel="main">
+      <header class="menu-brand">
+        <h1 class="game-title">Survivalcrafter</h1>
+        <p class="menu-tagline">A life of your own in the old country</p>
+      </header>
       <div class="menu-panel" data-panel="main">
         <button id="continue" disabled>Continue</button>
         <button data-go="new">New game</button>
@@ -38,7 +41,7 @@
         <div class="life-foot">
           <label class="menu-field">World seed<input id="seed" placeholder="Random" autocomplete="off" /></label>
           <p class="menu-note">Leave it empty for a random world, or enter a seed (a number or any words) to make that world again.</p>
-          <button id="create">Create world</button>
+          <button id="create" class="primary">Create world</button>
           <button data-go="main">Back</button>
         </div>
       </div>

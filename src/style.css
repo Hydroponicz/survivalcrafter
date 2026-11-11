@@ -930,3 +930,85 @@ button.dev-on { background: #6b5530; border-color: var(--accent); color: var(--i
 .place-facts { font-size: 12px; color: var(--muted); }
 .place-facts b { color: var(--ink); }
 .status { top: 96px; }
+
+/* ================= The main menu: a parchment list over the world going by ================= */
+.main-menu {
+  align-items: flex-start; justify-content: center; gap: 16px; padding-left: max(6vw, 24px);
+  background: linear-gradient(90deg, rgba(12, 8, 4, 0.78) 0%, rgba(12, 8, 4, 0.5) 30%, rgba(0, 0, 0, 0) 58%),
+    radial-gradient(ellipse at 60% 50%, rgba(0, 0, 0, 0) 45%, rgba(0, 0, 0, 0.4) 100%);
+  transition: background 0.4s;
+}
+/* The bigger pages (a new life, the wiki) come to the middle, the world dimmed behind. */
+.main-menu[data-panel="new"], .main-menu[data-panel="wiki"] { align-items: center; padding-left: 0; background: rgba(12, 8, 4, 0.55); }
+.main-menu[data-panel="new"] .menu-brand, .main-menu[data-panel="wiki"] .menu-brand { display: none; }
+.menu-brand { display: flex; flex-direction: column; gap: 2px; }
+.main-menu .game-title {
+  font-size: clamp(48px, 7vw, 94px); letter-spacing: 2px; font-variant: small-caps; line-height: 1;
+  background: linear-gradient(180deg, #fbe7b0 0%, #e8b562 45%, #a06a26 100%); -webkit-background-clip: text; background-clip: text; color: transparent;
+  text-shadow: none; filter: drop-shadow(0 3px 0 #2a1a0c) drop-shadow(0 0 24px rgba(0, 0, 0, 0.65));
+}
+.menu-tagline { margin: 0 0 0 4px; display: flex; align-items: center; gap: 10px; color: #e9d6a8; font-style: italic; font-size: 16px; text-shadow: 0 1px 4px #000; }
+.menu-tagline::before { content: ''; width: 42px; height: 1px; background: linear-gradient(90deg, transparent, var(--gilt)); }
+.menu-tagline::after { content: '❦'; color: var(--gilt); font-style: normal; }
+
+/* Every menu page: parchment in a wooden frame, inked. */
+.main-menu .menu-panel {
+  --ink: #2b1d0e; --muted: #6e5638; --accent: #8a3a10; --good: #2f6a1a; --bad: #a3301f; --panel-edge: #9a7a4a;
+  color: var(--ink); padding: 14px 14px 12px;
+  background: #e6d2a6 var(--paper) center / 512px 512px repeat; border: 2px solid var(--wood); border-radius: 6px;
+  box-shadow: inset 0 0 0 1px var(--gilt), inset 0 0 0 3px rgba(240, 222, 182, 0.7), inset 0 0 38px rgba(120, 75, 25, 0.42), 0 14px 40px rgba(0, 0, 0, 0.6);
+}
+.main-menu .menu-panel * { text-shadow: none; }
+.main-menu .menu-panel[data-panel="main"], .main-menu .menu-panel[data-panel="settings"] { width: 300px; gap: 0; padding: 10px 10px; }
+.main-menu .menu-panel h2 { color: var(--accent); font-variant: small-caps; letter-spacing: 0.8px; text-shadow: none; padding-bottom: 6px; margin-bottom: 8px; border-bottom: 1px solid var(--gilt); }
+/* The list: inked entries, a pointing hand of a flourish on the one you're over. */
+.main-menu .menu-panel[data-panel="main"] button, .main-menu .menu-panel[data-panel="settings"] button {
+  position: relative; text-align: left; padding: 9px 14px 9px 30px; font-size: 19px; font-variant: small-caps; letter-spacing: 0.6px;
+  background: none; border: none; border-bottom: 1px dotted rgba(90, 60, 25, 0.35); border-radius: 0; box-shadow: none; color: var(--ink);
+}
+.main-menu .menu-panel[data-panel="main"] button:last-child, .main-menu .menu-panel[data-panel="settings"] button:last-child { border-bottom: none; }
+.main-menu .menu-panel[data-panel="main"] button::before, .main-menu .menu-panel[data-panel="settings"] button::before {
+  content: '❧'; position: absolute; left: 8px; top: 50%; transform: translateY(-50%); color: var(--accent); opacity: 0; transition: opacity 0.15s, left 0.15s;
+}
+.main-menu .menu-panel[data-panel="main"] button:hover:not(:disabled), .main-menu .menu-panel[data-panel="settings"] button:hover:not(:disabled) {
+  background: linear-gradient(90deg, rgba(150, 70, 20, 0.2), rgba(150, 70, 20, 0)); color: var(--accent);
+}
+.main-menu .menu-panel button:hover:not(:disabled)::before { opacity: 1; left: 11px; }
+.main-menu .menu-panel button:disabled { color: rgba(43, 29, 14, 0.35); background: none; }
+/* Other pages' buttons: pressed paper cards; the one that matters, a wooden plaque. */
+.main-menu .menu-panel:not([data-panel="main"]):not([data-panel="settings"]) button {
+  background: linear-gradient(180deg, #f6e9c8, #dcc290); color: var(--ink); border: 1px solid #7a5a32; border-radius: 4px; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55), 0 1px 2px rgba(60, 35, 10, 0.35);
+}
+.main-menu .menu-panel:not([data-panel="main"]):not([data-panel="settings"]) button:hover:not(:disabled) { background: linear-gradient(180deg, #fff4da, #e8d0a0); }
+.main-menu .menu-panel button.primary { background: linear-gradient(180deg, var(--wood-hi), var(--wood)) !important; color: #f3e2b8 !important; border-color: var(--wood) !important; font-variant: small-caps; letter-spacing: 0.6px; font-size: 19px; }
+.main-menu .menu-panel button.primary:hover { filter: brightness(1.15); }
+.menu-field { color: var(--muted); text-shadow: none; }
+.main-menu .menu-field input { background: #f8eed6; color: var(--ink); border: 1px solid #9a7a4a; box-shadow: inset 0 1px 3px rgba(90, 60, 25, 0.3); }
+.menu-note { color: var(--muted); text-shadow: none; }
+.main-menu .status { color: #f2c14e; }
+
+/* A new life: the page of choices. */
+.menu-life { background-color: #e6d2a6; }
+.life-intro, .life-tip, .life-rank small { color: var(--ink); }
+.life-step { color: var(--accent); font-variant: small-caps; text-transform: none; font-size: 15px; letter-spacing: 0.6px; border-bottom: 1px solid rgba(90, 60, 25, 0.25); padding-bottom: 2px; }
+.main-menu .menu-panel .life-card, .main-menu .menu-panel .life-rank { background: rgba(255, 248, 228, 0.5) !important; border: 1px solid rgba(110, 75, 30, 0.35) !important; box-shadow: none !important; }
+.main-menu .menu-panel .life-card:hover, .main-menu .menu-panel .life-rank:hover { background: rgba(255, 244, 214, 0.85) !important; }
+.main-menu .menu-panel .life-card.on, .main-menu .menu-panel .life-rank.on { background: rgba(255, 232, 180, 0.95) !important; border-color: var(--accent) !important; box-shadow: inset 0 0 0 1px var(--accent), 0 2px 6px rgba(90, 50, 15, 0.3) !important; }
+.main-menu .menu-panel .life-card.wanderer { border-color: rgba(47, 106, 26, 0.55) !important; }
+.life-card em { color: var(--good); }
+.life-detail { background: rgba(255, 248, 228, 0.55); border: 1px solid rgba(110, 75, 30, 0.3); }
+.life-head b { color: var(--accent); }
+.life-rec { background: rgba(47, 106, 26, 0.12); color: var(--good); border-color: rgba(47, 106, 26, 0.4); }
+.menu-wiki .wiki-body { box-shadow: none; border: 1px solid rgba(110, 75, 30, 0.35) !important; background: rgba(255, 248, 228, 0.35); }
+.menu-wiki { width: min(820px, 94vw); }
+/* The loading screen: the title in gold over dark, a gilt bar. */
+.loading-screen .game-title { font-variant: small-caps; background: linear-gradient(180deg, #fbe7b0 0%, #e8b562 45%, #a06a26 100%); -webkit-background-clip: text; background-clip: text; color: transparent; text-shadow: none; filter: drop-shadow(0 3px 0 #2a1a0c); }
+.load-bar { border-color: var(--gilt); background: rgba(255, 240, 200, 0.06); }
+.load-bar i { background: linear-gradient(90deg, #a06a26, #e8b562); }
+/* The new game page's foot: the seed, then Back and Create, in one row (the note under it). */
+.main-menu .life-foot { flex-direction: row; flex-wrap: wrap; align-items: flex-end; width: 100%; gap: 10px; padding-top: 8px; border-top: 1px solid rgba(90, 60, 25, 0.25); }
+.main-menu .life-foot .menu-field { flex: 1 1 260px; }
+.main-menu .life-foot .menu-note { order: 5; flex-basis: 100%; }
+.main-menu .life-foot button { flex: 0 0 auto; padding: 10px 22px; }
+.main-menu .life-foot button.primary { order: 4; padding: 10px 34px; }
+.main-menu .menu-panel.menu-life { max-height: 90vh; }

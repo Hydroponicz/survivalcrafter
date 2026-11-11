@@ -8,6 +8,7 @@ import { ACTION_MAP } from './game/actions';
 import { createMinigame } from './game/minigames';
 import { STRUCTURES } from './data/structures';
 import { Game, OLD_SAVES, TRADE_SEARCH } from './game/game';
+import { paper } from './ui/mapview';
 import { pickFile, UI } from './ui/ui';
 import { GUIDE_HTML } from './ui/guide';
 import { GraphicsSettings } from './game/graphics';
@@ -26,6 +27,9 @@ const status = document.getElementById('menu-status')!;
 const cont = document.getElementById('continue') as HTMLButtonElement;
 const seedInput = document.getElementById('seed') as HTMLInputElement;
 const $ = (id: string) => document.getElementById(id) as HTMLButtonElement;
+
+// The menus are drawn on the same old parchment as the map and the game's windows.
+document.documentElement.style.setProperty('--paper', `url(${paper()})`);
 
 // ---------- the loading screen (until the menu's world, or a game, is ready)
 const loading = document.getElementById('loading')!;
@@ -169,6 +173,8 @@ renderLife();
 // ---------- the menu
 function menuShow(panel: string | null) {
   for (const p of menu.querySelectorAll<HTMLElement>('.menu-panel')) p.hidden = p.dataset.panel !== panel;
+  // (The main list sits to one side, over the world going by; the bigger pages come to the middle.)
+  menu.dataset.panel = panel ?? '';
   if (panel === 'new') { life.profession = 'wanderer'; life.rank = 'apprentice'; renderLife(); }
 }
 menu.addEventListener('click', (e) => {
