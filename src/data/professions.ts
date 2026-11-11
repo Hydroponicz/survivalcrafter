@@ -107,7 +107,7 @@ export const PROFESSIONS: Profession[] = [
     chain: 'Rod and line → fish → cooked fish',
     skills: ['fishing', 'cooking'], quests: ['fisher', 'cooking', 'boatwright'],
     kit: { all: BASIC, apprentice: [['fishing_rod', 1]], journeyman: [['fishing_rod', 1], ['paddle', 1]], master: [['fine_fishing_rod', 1], ['paddle', 1], ['cooked_fish', 4]] } },
-  { id: 'potter', name: 'Potter', icon: '⚱️',
+  { id: 'potter', name: 'Potter', icon: '⚱️', house: 'potter',
     blurb: 'Dig clay from the riverbanks, throw pots on the wheel and fire them hard.',
     chain: 'Clay → pots and jars → crucibles and mortar',
     skills: ['pottery', 'digging'], quests: ['potter', 'masonry'],

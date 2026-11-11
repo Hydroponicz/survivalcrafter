@@ -14,10 +14,13 @@
 // take apart or build onto.
 
 import { hash2, mulberry32 } from './noise';
+import { SIGNS } from '../data/tradePieces';
 import { BLEND, PAD, SEA, TILE, type WorldGen } from './worldgen';
 
 /** Settlements are planned one (at most) per square of this size. */
 export const VCELL = 512;
+/** Village trades that work in a yard beside the house (a wider plot for it). */
+const YARD_ROLES = new Set<HouseRole>(['woodcutter', 'butcher', 'farmer', 'shepherd', 'potter', 'baker', 'carpenter']);
 /** How far a settlement's centre keeps from its square's edges (so all of it lies inside). */
 const MARGIN = 110;
 /** No settlement this close to where the world began (your first camp). */
@@ -60,7 +63,7 @@ export interface Rect { x: number; z: number; yaw: number; hx: number; hz: numbe
 interface Pad extends Rect { level: number; fall?: number; rise?: number }
 export interface Seg { ax: number; az: number; bx: number; bz: number; w: number }
 /** What a house is for (the work of whoever comes to live there). */
-export type HouseRole = 'farmer' | 'shepherd' | 'woodcutter' | 'butcher' | 'smith' | 'elder' | 'villager'
+export type HouseRole = 'farmer' | 'shepherd' | 'woodcutter' | 'butcher' | 'smith' | 'potter' | 'elder' | 'villager'
   | 'priest' | 'mayor' | 'merchant' | 'baker' | 'carpenter'
   | 'lord' | 'noble' | 'innkeeper' | 'guard' | 'performer' | 'dockhand';
 export interface House {
@@ -834,12 +837,12 @@ export class Villages {
     }
 
     // Houses round the square, each facing it, a path from its door.
-    const roles: HouseRole[] = ['elder', 'farmer', 'shepherd', 'woodcutter', 'smith', 'butcher', 'farmer', 'shepherd', 'villager', 'farmer', 'villager', 'woodcutter'];
+    const roles: HouseRole[] = ['elder', 'farmer', 'shepherd', 'woodcutter', 'smith', 'butcher', 'farmer', 'potter', 'shepherd', 'villager', 'farmer', 'woodcutter'];
     for (let i = 0; i < n; i++) {
       const tiles = i === 0 || rnd() < 0.3 ? 3 : 2;
       const role = roles[i % roles.length];
-      // The smith works beside the house: a wider plot for the forge and anvil.
-      const extra = role === 'smith' ? 3.4 : 0;
+      // A trade works beside the house: a wider plot for its yard (the smith's forge and anvil, the woodcutter's logs...).
+      const extra = role === 'smith' ? 3.4 : YARD_ROLES.has(role) ? 2.6 : 0;
       for (let tries = 0; tries < 40; tries++) {
         const a = rnd() * Math.PI * 2, r = sq.r + 7 + rnd() * spread;
         const hx = x + Math.cos(a) * r, hz = z + Math.sin(a) * r;
@@ -1691,31 +1694,69 @@ export class Villages {
     put('stool', -n + 0.7 + (n === 3 ? 0.6 : 0), 0.3, 0);
   }
 
-  /** What stands outside a house for its trade: a chopping block, the smithy, the bakery's quern and oven, the carpenter's bench. */
+  /**
+   * What stands outside a house for its trade, so you can tell whose it is at
+   * a glance: its sign by the door, and its yard (the woodcutter's logs and
+   * block, the smithy, the bakery's oven, the butcher's hanging hams...).
+   */
   private yard(v: Village, h: House, rnd: () => number) {
     const n = h.tiles, y0 = h.y;
     const at = (lx: number, lz: number) => world(h, lx, lz);
     const put = (type: string, lx: number, lz: number, yaw: number) => { const [x, z] = at(lx, lz); v.pieces.push({ type, x, y: y0, z, yaw: h.yaw + yaw }); return { x, z }; };
-    if (h.role === 'woodcutter' || h.role === 'carpenter' || (h.kind === 'house' && v.kind === 'village' && rnd() < 0.15)) {
-      const [x, z] = at(h.role === 'smith' ? -n - 1.7 : n + 1.7, -1);
+    this.tradeSign(v, h);
+    if (h.role === 'woodcutter' || h.role === 'carpenter' || h.role === 'butcher' || (h.kind === 'house' && v.kind === 'village' && rnd() < 0.15)) {
+      const [x, z] = at(n + 1.7, h.role === 'butcher' ? -1.6 : -1);
       v.pieces.push({ type: 'chopping_block', x, y: this.ground(v, x, z), z, yaw: rnd() * 6 });
       h.block = { x, z };
     }
-    if (h.role === 'smith') {
-      const forge = put('forge', n + 2.8, -0.6, 0);
-      put('bellows', n + 2.8 + 1.05, -0.6, Math.PI / 2);
-      const anvil = put('anvil', n + 2.4, 1.5, Math.PI / 2);
-      put('quench_trough', n + 3.9, 1.5, 0);
-      h.smithy = { forge, anvil };
+    switch (h.role) {
+      case 'woodcutter':
+        put('log_stack', n + 2.0, 1.0, Math.PI / 2);
+        put('sawhorse', n + 1.2, -2.6, 0);
+        break;
+      case 'smith': {
+        const forge = put('forge', n + 2.8, -0.6, 0);
+        put('bellows', n + 2.8 + 1.05, -0.6, Math.PI / 2);
+        const anvil = put('anvil', n + 2.4, 1.5, Math.PI / 2);
+        put('quench_trough', n + 3.9, 1.5, 0);
+        put('tool_rack', n + 0.25, 0.2, Math.PI / 2);
+        put('charcoal_heap', n + 3.9, -2.2, 0);
+        h.smithy = { forge, anvil };
+        break;
+      }
+      case 'baker': {
+        const quern = put('quern', n + 2.5, 1.2, 0);
+        const oven = put('bread_oven', n + 2.4, -1.0, Math.PI / 2);
+        put('flour_sacks', n + 1.0, 1.5, 0);
+        h.bakery = { quern, oven };
+        break;
+      }
+      case 'carpenter':
+        h.bench = put('workbench', n + 2.4, 1.3, Math.PI / 2);
+        put('plank_stack', n + 2.1, -0.5, Math.PI / 2);
+        break;
+      case 'butcher':
+        put('meat_rack', n + 1.9, 0.6, Math.PI / 2);
+        break;
+      case 'farmer':
+        put('plough', n + 1.4, -0.2, 0.2);
+        put('haystack', n + 2.4, 1.6, 0);
+        break;
+      case 'shepherd':
+        put('wool_bales', n + 1.6, 0.2, Math.PI / 2);
+        break;
+      case 'potter':
+        put('pottery_kiln', n + 2.2, -0.6, Math.PI / 2);
+        put('pot_shelf', n + 0.3, 1.2, Math.PI / 2);
+        break;
     }
-    if (h.role === 'baker') {
-      const quern = put('quern', n + 2.5, 1.2, 0);
-      const oven = put('campfire', n + 2.6, -1.0, 0);
-      h.bakery = { quern, oven };
-    }
-    if (h.role === 'carpenter') {
-      h.bench = put('workbench', n + 2.4, 1.3, Math.PI / 2);
-    }
+  }
+
+  /** A trade's sign, hung on the front wall beside the door, out over the way (homes with no trade go without). */
+  private tradeSign(v: Village, h: House) {
+    if (!SIGNS[h.role]) return;
+    const [x, z] = world(h, h.doorX + 1.05, -h.nz - 0.04);
+    v.pieces.push({ type: `sign_${h.role}`, x, y: h.y + 2.05, z, yaw: h.yaw + Math.PI });
   }
 
   /** A fence round a rectangle (2 m panels), with a gate at the given panel. */

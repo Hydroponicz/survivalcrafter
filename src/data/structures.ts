@@ -2,6 +2,7 @@ import type { ToolKind } from './items';
 import type { StationKind } from './recipes';
 import type { SkillId } from './skills';
 import { FURNITURE } from './furniture';
+import { TRADE_PIECES } from './tradePieces';
 import type { VesselId } from './vessels';
 
 export type V3 = [number, number, number];
@@ -763,6 +764,9 @@ for (const f of FURNITURE) {
     boxes: [box(x, y, z, hx, hy, hz)], snaps: [], materials: [], skill: 'carpentry', difficulty: f.difficulty, stepTime: 0,
     comfort: f.comfort || undefined, container: f.container, bed: f.bed, desc: f.desc });
 }
+
+// The trades' signs and yards (villages and towns).
+defs.push(...TRADE_PIECES);
 
 export const STRUCTURES: Record<string, StructureDef> = Object.fromEntries(defs.map((d) => [d.id, d]));
 export const STRUCTURE_LIST = defs;

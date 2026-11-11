@@ -18,6 +18,7 @@ import { STRUCTURES, totalMaterials } from '../data/structures';
 import type { VesselId } from '../data/vessels';
 import { morePieceMesh } from './morePieces';
 import { morePieceMesh2 } from './morePieces2';
+import { tradePieceMesh } from './tradeMeshes';
 import { mastRig, shipSolids, windAngle, shipStats, stageProgress, type ShipDesign } from '../data/ships';
 import {
   APPLE_AGE, APPLES, CROP_STAGES, corpseSpecies, cropPos, type AnimalObj, type AnimalSpecies, type BushObj, type ForageObj, type PileObj, type Species, type StructureObj,
@@ -2035,7 +2036,7 @@ export function buildPieceMesh(type: string, state: { lit?: boolean; open?: bool
       break;
     }
     default:
-      if (morePieceMesh(type, g, tex, add, state) || morePieceMesh2(type, g, tex, add, state)) break;
+      if (morePieceMesh(type, g, tex, add, state) || morePieceMesh2(type, g, tex, add, state) || tradePieceMesh(type, g, tex, add, state)) break;
       if (type.startsWith('th_')) townhouseMesh(type, tex, add);
       else furnitureMesh(type, g, tex, add);
   }

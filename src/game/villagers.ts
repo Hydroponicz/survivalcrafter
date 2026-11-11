@@ -44,7 +44,7 @@ const ACTIVE_R = 170, DROP_R = 280;
 const WALK = 1.45;
 
 export const ROLE_NAMES: Record<HouseRole, string> = {
-  farmer: 'farmer', shepherd: 'shepherd', woodcutter: 'woodcutter', butcher: 'butcher', smith: 'smith', elder: 'village elder', villager: 'villager',
+  farmer: 'farmer', shepherd: 'shepherd', woodcutter: 'woodcutter', butcher: 'butcher', smith: 'smith', potter: 'potter', elder: 'village elder', villager: 'villager',
   priest: 'priest', mayor: 'mayor', merchant: 'merchant', baker: 'baker', carpenter: 'carpenter',
   lord: 'lord of the castle', noble: 'noble', innkeeper: 'innkeeper', guard: 'guard', performer: 'player', dockhand: 'dockhand',
 };
@@ -67,6 +67,7 @@ const KIT: Record<HouseRole, [string, number][]> = {
   woodcutter: [['iron_hatchet', 1]],
   butcher: [['iron_knife', 1]],
   smith: [['iron_hammer', 1], ['iron_tongs', 1]],
+  potter: [['iron_shovel', 1]],
   elder: [],
   villager: [['iron_knife', 1]],
   priest: [], mayor: [], merchant: [],
@@ -77,7 +78,7 @@ const KIT: Record<HouseRole, [string, number][]> = {
 /** What each job is good at (skill levels). */
 const TRADE: Record<HouseRole, SkillId[]> = {
   farmer: ['farming'], shepherd: ['taming'], woodcutter: ['woodcutting', 'carpentry'], butcher: ['butchering'],
-  smith: ['smithing', 'firemaking'], elder: ['firemaking'], villager: ['foraging'],
+  smith: ['smithing', 'firemaking'], potter: ['pottery', 'digging'], elder: ['firemaking'], villager: ['foraging'],
   priest: ['herbalism'], mayor: ['firemaking', 'cooking'], merchant: [], baker: ['cooking', 'firemaking'], carpenter: ['carpentry'],
   lord: [], noble: [], innkeeper: ['cooking', 'firemaking'], guard: ['fighting'], performer: [], dockhand: ['ropemaking'],
 };
@@ -942,7 +943,7 @@ export class VillageLife {
     const eco = this.g.economy, vil = v.village, b = v.home.bakery;
     if (!b) { this.gather(v); return; }
     if (v.inv.count('bread') >= 4) { this.store(v, ['bread'], 'taking bread to the stores'); return; }
-    const quern = this.structureAt(b.quern, 'quern'), oven = this.structureAt(b.oven, 'campfire');
+    const quern = this.structureAt(b.quern, 'quern'), oven = this.structureAt(b.oven, 'bread_oven') ?? this.structureAt(b.oven, 'campfire');
     if (!quern || !oven) return;
     const rec = (id: string) => RECIPES.find((x) => x.id === id)!;
     // Bake what dough there is (the oven lit first).

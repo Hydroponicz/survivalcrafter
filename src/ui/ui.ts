@@ -31,7 +31,7 @@ import type { HouseRole } from '../world/villages';
 /** Whose work a good is, as a work order puts it. */
 const JOB_WORDS: Record<HouseRole, string> = {
   farmer: 'farmer\'s work', shepherd: 'shepherd\'s work', woodcutter: 'woodcutter\'s work', butcher: 'butcher\'s work',
-  smith: 'smith\'s work', elder: 'odd jobs', villager: 'gathering about the land',
+  smith: 'smith\'s work', potter: 'potter\'s work', elder: 'odd jobs', villager: 'gathering about the land',
   priest: 'the church\'s needs', mayor: 'the town\'s needs', merchant: 'trade goods', baker: 'baker\'s work', carpenter: 'carpenter\'s work',
   lord: 'the castle\'s needs', noble: 'fine goods', innkeeper: 'the tavern\'s needs', guard: 'the garrison\'s needs', performer: 'the playhouse\'s needs', dockhand: 'the harbour\'s needs',
 };

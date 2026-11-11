@@ -181,9 +181,10 @@ export class NightLights {
     const lanterns: THREE.Vector3[] = [], posts: { x: number; y: number; z: number; yaw: number }[] = [];
     for (const h of v.houses) {
       // The door faces out from the house's middle; hang the lantern on the wall beside it, a little above the door.
+      // (On the door's other side from a trade's sign, which hangs toward the house's local +x.)
       const ox = h.door.x - h.x, oz = h.door.z - h.z, l = Math.hypot(ox, oz) || 1;
-      const nx = ox / l, nz = oz / l, sx = -nz, sz = nx;
-      const wx = h.door.x - nx * 0.75 + sx * 0.75, wz = h.door.z - nz * 0.75 + sz * 0.75;
+      const nx = ox / l, nz = oz / l, ax = Math.cos(h.yaw), az = -Math.sin(h.yaw);
+      const wx = h.door.x - nx * 0.75 - ax * 0.8, wz = h.door.z - nz * 0.75 - az * 0.8;
       lanterns.push(new THREE.Vector3(wx, h.y + 2.15, wz));
     }
     // Lantern posts round the square (a village's fire, a town's market).
