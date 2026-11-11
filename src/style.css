@@ -734,3 +734,29 @@ button.dev-on { background: #6b5530; border-color: var(--accent); color: #fff3d6
 .path-card em { font-size: 11.5px; color: var(--muted); font-style: normal; margin-top: auto; padding-top: 4px; }
 .path-card.on { background: rgba(159, 220, 124, 0.12); border-color: rgba(159, 220, 124, 0.5); }
 .path-card.on em { color: #b9e39c; }
+
+/* ---------- new game: choose your life */
+.menu-life { width: min(980px, 95vw); max-height: 86vh; overflow-y: auto; padding: 14px 16px; background: rgba(20, 16, 11, 0.86); border: 1px solid var(--panel-edge); border-radius: 10px; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6); }
+.life-intro { margin: 0; text-align: center; color: #d8cdb6; font-size: 14px; }
+.life-step { margin-top: 4px; font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent); }
+.life-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 7px; }
+.menu-panel .life-card { position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 6px 9px; font-size: 14px; line-height: 1.2; }
+.menu-panel .life-card.on { background: rgba(232, 181, 98, 0.22); border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.menu-panel .life-card.wanderer { border-color: rgba(159, 220, 124, 0.5); }
+.life-card em { position: absolute; top: 3px; right: 5px; font-size: 10px; font-style: normal; color: #b9e39c; }
+.life-icon { font-size: 28px; line-height: 1; }
+.life-icon.big { font-size: 38px; }
+.life-detail { padding: 10px 14px; border-radius: 8px; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.08); color: var(--ink); font-size: 14.5px; line-height: 1.45; }
+.life-detail p { margin: 6px 0 2px; }
+.life-head { display: flex; align-items: center; gap: 12px; }
+.life-head b { display: block; font-size: 19px; color: var(--accent); }
+.life-head small { color: var(--muted); font-size: 13px; }
+.life-tip { color: #d8cdb6; font-size: 13.5px; }
+.life-ranks { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 8px; }
+.menu-panel .life-rank { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; text-align: left; padding: 10px 12px; font-size: 15px; line-height: 1.35; }
+.menu-panel .life-rank.on { background: rgba(232, 181, 98, 0.22); border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.life-rank small { font-size: 12.5px; color: #d8cdb6; }
+.life-facts { font-size: 12px; color: var(--muted); }
+.life-rec { font-size: 11px; font-weight: normal; padding: 1px 7px; margin-left: 4px; border-radius: 9px; background: rgba(159, 220, 124, 0.18); color: #b9e39c; border: 1px solid rgba(159, 220, 124, 0.35); vertical-align: middle; }
+.life-foot { display: flex; flex-direction: column; gap: 8px; width: min(360px, 100%); align-self: center; margin-top: 6px; }
+#life-ranks-wrap[hidden] { display: none; }

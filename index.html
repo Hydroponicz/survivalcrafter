@@ -25,12 +25,22 @@
         <button data-go="wiki">Wiki</button>
         <button id="exit">Exit game</button>
       </div>
-      <div class="menu-panel" data-panel="new" hidden>
+      <div class="menu-panel menu-life" data-panel="new" hidden>
         <h2>New game</h2>
-        <label class="menu-field">World seed<input id="seed" placeholder="Random" autocomplete="off" /></label>
-        <p class="menu-note">Leave it empty for a random world, or enter a seed (a number or any words) to make that world again.</p>
-        <button id="create">Create world</button>
-        <button data-go="main">Back</button>
+        <p class="life-intro">Who are you when your story begins? Pick whatever sounds fun: you're never locked in, and you can always learn other trades or walk away from yours.</p>
+        <div class="life-step">1 · Choose your life</div>
+        <div id="life-grid" class="life-grid"></div>
+        <div id="life-detail" class="life-detail"></div>
+        <div id="life-ranks-wrap">
+          <div class="life-step">2 · Choose your level</div>
+          <div id="life-ranks" class="life-ranks"></div>
+        </div>
+        <div class="life-foot">
+          <label class="menu-field">World seed<input id="seed" placeholder="Random" autocomplete="off" /></label>
+          <p class="menu-note">Leave it empty for a random world, or enter a seed (a number or any words) to make that world again.</p>
+          <button id="create">Create world</button>
+          <button data-go="main">Back</button>
+        </div>
       </div>
       <div class="menu-panel" data-panel="settings" hidden>
         <h2>Settings</h2>

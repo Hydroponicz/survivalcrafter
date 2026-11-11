@@ -4,6 +4,7 @@ import { isIdentified, itemDef } from '../data/items';
 import { FORAGE_SPECIES } from '../data/forage';
 import type { ToolKind } from '../data/items';
 import type { StructureObj } from '../world/world';
+import { professionById } from '../data/professions';
 import type { Game } from './game';
 
 // Quests: guided goals, each a list of steps that finish on their own as you
@@ -657,6 +658,17 @@ const FORAGER_STEPS: Step[] = [
     targets: (g) => forage(g, ['yarrow']) },
 ];
 
+/** The welcome's last word: where your life begins. */
+function start(g: Game): string {
+  const o = g.origin, prof = professionById(o?.profession);
+  if (!o || prof.id === 'wanderer') return `<p><b>You begin with nothing</b>, a wanderer on the edge of the wild. Before anything else, you'll need a camp: shelter, fire, and the means to make the tools to build a life. The guide on the right will show you how.</p>`;
+  const rank = o.rank === 'apprentice' ? 'an apprentice' : o.rank === 'journeyman' ? 'a journeyman' : 'a master';
+  const how = o.rank === 'apprentice' ? 'The quests on the right walk you through your trade, step by step.'
+    : o.rank === 'journeyman' ? 'You know the work: your trade\'s quests wait in your quest log (L) if you want them.'
+      : 'Your workshop is set up just outside the village. Your trade\'s quests wait in your quest log (L) if you want them.';
+  return `<p><b>You begin as ${rank} ${prof.name.toLowerCase()}</b> in ${o.village ?? 'a village nearby'}, with the tools of your trade. ${how}</p>`;
+}
+
 /** Camp is made (or the tutorial's been turned off): the paths open up. */
 const campMade = (g: Game) => !!g.quests && (g.quests.off || g.quests.quests.some((q) => q.id === 'camp' && q.status === 'done'));
 const doneQuest = (g: Game, id: string) => !!g.quests?.quests.some((q) => q.id === id && q.status === 'done');
@@ -959,8 +971,8 @@ export class QuestLog {
       `<p>This is a living medieval world. Its towns trade, its lords rule, its people work, eat, sleep and gossip, all without waiting for you. You are one more life in it.</p>
       <p><b>Make your own way.</b> Fell trees, burn charcoal, smith iron, weave cloth, sail between harbours, or rule from a castle. Every trade is hands-on: you split the logs, work the bellows and throw the pots yourself, and you get better the more you do.</p>
       <p><b>Nothing is off-limits.</b> Serve your master faithfully, or rob him blind. Rise to the high table, or slip away into the forest and start again. The world will remember what you did.</p>
-      <p><b>You begin with nothing</b>, on the edge of the wild. Before anything else, you'll need a camp: shelter, fire, and the means to make the tools to build a life. The guide on the right will show you how.</p>
-      <p class="notice-note">In this early version you always begin as a wanderer. Choosing a starting life (labourer, apprentice, master, noble) is coming.</p>`,
+      ${start(g)}
+      <p class="notice-note">In this early version, your profession sets where you begin, what you know and what you carry, and starts your trade's quests. Working under a master for wages, customers, and running a business of your own are coming, as are lives beyond the trades.</p>`,
       'Begin', () => { this.timer = 0; }, { kind: 'lesson' });
   }
 
@@ -1015,7 +1027,7 @@ export class QuestLog {
     let flashOffer = false;
     const free = !g.working && !g.action && !g.ui.modalOpen && !g.ui.anyWindowOpen();
     // A new wanderer, waking up: what the game is about, before anything else.
-    if (!g.tips.has('welcome') && free && this.quests.some((q) => q.id === 'camp' && q.status === 'active' && q.step === 0)) { this.welcome(g); return; }
+    if (!g.tips.has('welcome') && free && g.newGame) { this.welcome(g); return; }
     // New quests, when their time comes.
     for (const d of QUESTS) {
       if (!d.offer || this.quests.some((q) => q.id === d.id) || (d.tutorial && this.off) || !d.offer(g)) continue;

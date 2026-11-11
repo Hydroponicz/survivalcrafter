@@ -3,6 +3,7 @@ import { getNextUid, isIdentified, itemDef, itemName, learnSpecies, makeItem, se
 import type { Recipe, StationKind } from '../data/recipes';
 import { SKILLS, Skills, type SkillId } from '../data/skills';
 import { FISH_BY_ID } from '../data/fish';
+import { professionById, rankById, type Profession, type Rank, type RankId } from '../data/professions';
 import { pieceBoxes, STRUCTURES, type StructureDef, type V3 } from '../data/structures';
 import { VESSELS, vesselOf } from '../data/vessels';
 import { BuildGame } from './minigames/build';
@@ -305,7 +306,18 @@ export class Game {
   }
 
   // ---------- setup
-  newCharacter() {
+  /** Where you wake if you die: where your life began (a village, for a tradesman), else the world's spawn. */
+  home: { x: number; z: number } | null = null;
+  /** The life you began with: your profession and level, and the village you started in. */
+  origin: { profession: string; rank: RankId; village?: string } | null = null;
+  /** Just started (shown the welcome). */
+  newGame = false;
+
+  newCharacter(profession = 'wanderer', rank: RankId = 'apprentice') {
+    this.newGame = true;
+    const prof = professionById(profession);
+    if (prof.id !== 'wanderer' && this.startInTrade(prof, rankById(rank))) return;
+    this.origin = { profession: 'wanderer', rank: 'apprentice' };
     const s = this.world.spawn;
     this.player.pos.set(s.x, this.world.terrain.heightAt(s.x, s.z) + 0.1, s.z);
     // A very humble start: empty hands and a couple of handfuls of berries.
@@ -315,6 +327,79 @@ export class Game {
     this.msg('You wake up in the wilderness, a wanderer with nothing but a few berries. Press H for help.', 'warn');
     this.msg('Follow the quest on the right: it shows you how to make camp.', 'info');
     this.quests = QuestLog.begin(this.markerTex, s.x, s.z);
+  }
+
+  /**
+   * Begin in a trade: at the nearest village (beside the house of your trade,
+   * if it has one), with the skills, tools and coin of your level, your
+   * trade's quests (started, for an apprentice) and, for a master, a workshop
+   * of your own set up beside the village. False if there's no village near
+   * enough (then you begin as a wanderer).
+   */
+  private startInTrade(prof: Profession, rank: Rank): boolean {
+    const s = this.world.spawn, t = this.world.terrain;
+    const villages = t.villages.around(s.x, s.z, 3000).filter((v) => v.houses.length).sort((a, b) => Math.hypot(a.x - s.x, a.z - s.z) - Math.hypot(b.x - s.x, b.z - s.z));
+    const v = villages[0];
+    if (!v) return false;
+    // Where you begin: beside a house of your trade, else by the village fire; a master just outside the village, at his workshop.
+    const house = prof.house ? v.houses.find((h) => h.role === prof.house) : undefined;
+    let at = house ? house.door : v.fire;
+    if (rank.id === 'master') {
+      const dx = s.x - v.x, dz = s.z - v.z, l = Math.hypot(dx, dz) || 1;
+      at = { x: v.x + (dx / l) * (v.r + 10), z: v.z + (dz / l) * (v.r + 10) };
+    }
+    const p = this.player;
+    p.pos.set(at.x, t.heightAt(at.x, at.z) + 0.3, at.z);
+    p.yaw = Math.atan2(v.x - at.x, v.z - at.z);
+    this.home = { x: at.x, z: at.z };
+    this.origin = { profession: prof.id, rank: rank.id, village: v.name };
+    // What you know.
+    prof.skills.forEach((k, i) => { this.skills.levels[k] = Math.max(this.skills.levels[k], rank.skill + (i === 0 ? 5 : 0)); });
+    // What you carry.
+    for (const [type, n] of [...prof.kit.all, ...(prof.kit[rank.id] ?? [])]) {
+      for (let k = 0; k < n; k++) this.inv.add(makeItem(type, Math.min(60, rank.skill + 10)));
+    }
+    this.coins = rank.coins;
+    // A master's workshop, set up beside where you begin.
+    if (rank.id === 'master' && prof.workshop) this.setUpWorkshop(prof.workshop, at, p.yaw, rank.skill);
+    // Your trade's quests (camp is already made: you've a roof in the village): an apprentice's started and tracked; the others' waiting.
+    this.quests = QuestLog.begin(this.markerTex, at.x, at.z);
+    const camp = this.quests.quests.find((q) => q.id === 'camp');
+    if (camp) { camp.status = 'done'; camp.step = this.quests.def(camp).steps.length; }
+    for (const id of prof.quests) {
+      this.quests.quests.push({ id, status: rank.id === 'apprentice' ? 'active' : 'offered', step: 0, tracked: rank.id === 'apprentice', anchor: null, start: { x: at.x, z: at.z } });
+    }
+    const name = prof.name.toLowerCase();
+    this.msg(`You are ${rank.id === 'apprentice' ? 'an apprentice' : rank.id === 'journeyman' ? 'a journeyman' : 'a master'} ${name} in ${v.name}.${rank.id === 'master' ? ' Your workshop is set up here, just outside the village.' : ''} Press H for help.`, 'warn');
+    this.msg(rank.id === 'apprentice' ? 'Follow the quests on the right: they walk you through your trade.' : 'Your trade\'s quests wait in your quest log (L), if you want them.', 'info');
+    telemetry.event('player', `Began as a ${rank.id} ${prof.id} in ${v.name}`);
+    return true;
+  }
+
+  /** A master's workshop: its pieces set up, built, in a row beside you (the bellows against the forge). */
+  private setUpWorkshop(pieces: string[], at: { x: number; z: number }, yaw: number, ql: number) {
+    const t = this.world.terrain, rx = Math.cos(yaw), rz = -Math.sin(yaw), fx = Math.sin(yaw), fz = Math.cos(yaw);
+    let k = 0, forge: StructureObj | null = null;
+    for (const type of pieces) {
+      const def = STRUCTURES[type];
+      if (!def) continue;
+      let x: number, z: number, y: number, ry = yaw + Math.PI;
+      if (type === 'bellows' && forge) {
+        // Against the forge's side.
+        x = forge.x + rx * 1.15; z = forge.z + rz * 1.15; y = forge.y; ry = forge.yaw;
+      } else {
+        // In a row before you, a few steps out, spaced by their size.
+        const off = (k - (pieces.length - 1) / 2) * 3.2;
+        x = at.x + fx * 3.5 + rx * off; z = at.z + fz * 3.5 + rz * off; y = t.heightAt(x, z);
+        k++;
+      }
+      const consumed: Record<string, number> = {};
+      for (const m of def.materials) consumed[m.item] = m.count;
+      const o = this.world.add<StructureObj>({ kind: 'structure', type, x, y, z, yaw: ry, consumed, built: true, ql, fuel: def.burns ? 600 : 0, lit: false });
+      if (def.container) o.items = [];
+      this.clearAround(o);
+      if (type === 'forge') forge = o;
+    }
   }
 
   /** Show this world as the main menu's backdrop: a slow camera tour, nothing to play. */
@@ -2787,7 +2872,8 @@ export class Game {
     this.cancelAction();
     p.health = 100; p.food = 60; p.water = 60; p.stamina = 100;
     p.effects = {};
-    const s = this.world.spawn;
+    // (Back where your life began: your village, or the wild.)
+    const s = this.home ?? this.world.spawn;
     p.pos.set(s.x, this.world.terrain.heightAt(s.x, s.z) + 0.3, s.z);
     p.vel.set(0, 0, 0);
     for (const a of this.world.animals) if (a.state === 'attack') { a.state = 'idle'; a.timer = 3; }
@@ -2879,6 +2965,8 @@ export class Game {
         shipping: this.shipping.serialize(),
         wolves: this.wolves.serialize(),
         coins: this.coins,
+        home: this.home,
+        origin: this.origin,
       };
       await writeSave(SAVE_KEY, data);
       telemetry.count('save:ok');
@@ -3035,6 +3123,8 @@ export class Game {
       g.shipping.load(data.shipping);
       g.wolves.load(data.wolves);
       g.coins = data.coins ?? 20;
+      g.home = data.home ?? null;
+      g.origin = data.origin ?? null;
       const quests = data.quests ?? data.onboarding;
       if (quests) g.quests = QuestLog.load(g.markerTex, quests);
       return g;

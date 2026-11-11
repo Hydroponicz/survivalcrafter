@@ -17,6 +17,7 @@ import { World } from './world/world';
 import { WorldGen } from './world/worldgen';
 import { prepareTiles } from './world/tilesource';
 import { perf } from './game/perf';
+import { ALL_PROFESSIONS, RANKS, type RankId } from './data/professions';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 const menu = document.getElementById('menu')!;
@@ -48,7 +49,7 @@ function revealMenu() {
 // Starting a game reloads the page with what to start written down, so the
 // world touring behind the menu is gone and the game starts afresh.
 const LAUNCH = 'survivalcrafter.launch';
-type Launch = { kind: 'new'; seed: number } | { kind: 'continue' };
+type Launch = { kind: 'new'; seed: number; profession?: string; rank?: RankId } | { kind: 'continue' };
 function relaunch(l: Launch) {
   try { sessionStorage.setItem(LAUNCH, JSON.stringify(l)); } catch { /* fall through: started below */ }
   location.reload();
@@ -124,17 +125,48 @@ function startGame(l: Launch) {
       loadStep('Planting the forests…', 0.6);
       await paint();
       const g = new Game(canvas, world);
-      g.newCharacter();
+      g.newCharacter(l.profession, l.rank);
       g.msg(`World seed: ${l.seed}`, 'info');
       return g;
     });
   }
 }
 
+// ---------- choosing your life (new game)
+/** What you've picked: the wanderer by default. */
+const life: { profession: string; rank: RankId } = { profession: 'wanderer', rank: 'apprentice' };
+function renderLife() {
+  const grid = document.getElementById('life-grid')!, detail = document.getElementById('life-detail')!;
+  const ranksWrap = document.getElementById('life-ranks-wrap')!, ranks = document.getElementById('life-ranks')!;
+  grid.innerHTML = ALL_PROFESSIONS.map((p) => `<button class="life-card${p.id === life.profession ? ' on' : ''}${p.id === 'wanderer' ? ' wanderer' : ''}" data-life="${p.id}">
+      <span class="life-icon">${p.icon}</span><b>${p.name}</b>${p.id === 'wanderer' ? '<em>Default</em>' : ''}</button>`).join('');
+  const p = ALL_PROFESSIONS.find((x) => x.id === life.profession)!;
+  const wander = p.id === 'wanderer';
+  detail.innerHTML = `<div class="life-head"><span class="life-icon big">${p.icon}</span><div><b>${p.name}</b><small>${p.chain}</small></div></div>
+    <p>${p.blurb}</p>
+    ${wander
+      ? '<p class="life-tip">For players who want to <b>explore the game at their own pace</b>. You learn how to make camp first; then every trade in the game opens up as quests you choose yourself, in any order. You can become a smith, a farmer, a hunter (or all of them) whenever you like.</p>'
+      : `<p class="life-tip">You start in a village${p.house ? ', beside the house of your trade' : ''}, with the skills, tools and coin of your level, and your trade's quests. You can still learn any other trade later.</p>`}`;
+  ranksWrap.hidden = wander;
+  ranks.innerHTML = RANKS.map((r) => `<button class="life-rank${r.id === life.rank ? ' on' : ''}" data-rank="${r.id}">
+      <b>${r.name}${r.recommended ? ' <span class="life-rec">Recommended for new players</span>' : ''}</b>
+      <small>${r.blurb}</small>
+      <span class="life-facts">Skill ${r.skill} · ${r.coins} coins${r.id === 'master' ? ' · your own workshop' : ''}</span></button>`).join('');
+}
+document.getElementById('life-grid')!.addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest('[data-life]') as HTMLElement | null;
+  if (b) { life.profession = b.dataset.life!; renderLife(); }
+});
+document.getElementById('life-ranks')!.addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest('[data-rank]') as HTMLElement | null;
+  if (b) { life.rank = b.dataset.rank as RankId; renderLife(); }
+});
+renderLife();
+
 // ---------- the menu
 function menuShow(panel: string | null) {
   for (const p of menu.querySelectorAll<HTMLElement>('.menu-panel')) p.hidden = p.dataset.panel !== panel;
-  if (panel === 'new') seedInput.focus();
+  if (panel === 'new') { life.profession = 'wanderer'; life.rank = 'apprentice'; renderLife(); }
 }
 menu.addEventListener('click', (e) => {
   const go = (e.target as HTMLElement).dataset.go;
@@ -155,7 +187,7 @@ function showSettings() {
 cont.addEventListener('click', () => relaunch({ kind: 'continue' }));
 $('create').addEventListener('click', async () => {
   if (await Game.hasSave() && !confirm('Start a new world? Your current save will be overwritten.')) return;
-  relaunch({ kind: 'new', seed: seedFrom(seedInput.value) });
+  relaunch({ kind: 'new', seed: seedFrom(seedInput.value), profession: life.profession, rank: life.rank });
 });
 seedInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') $('create').click(); });
 $('load').addEventListener('click', () => pickFile(async (file) => {
