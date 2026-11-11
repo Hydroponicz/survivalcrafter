@@ -3044,7 +3044,8 @@ export class Game {
     this.view.updateFires(p.pos.x, p.pos.z, this.elapsed);
     this.updateTorchLight();
     this.frameNo++;
-    this.renderer.shadowMap.needsUpdate = this.frameNo % this.graphics.level.shadowEvery === 0;
+    // (The first frame always draws them: until a shadow map exists, everything that receives shadows fails to draw.)
+    this.renderer.shadowMap.needsUpdate = this.frameNo === 1 || this.frameNo % this.graphics.level.shadowEvery === 0;
     perf.time('draw', () => { if (this.composer) this.composer.render(this.renderDt); else this.renderer.render(this.scene, this.camera); });
     // First-person hands and tool, on top of the world.
     if (!this.working && !this.tour) {

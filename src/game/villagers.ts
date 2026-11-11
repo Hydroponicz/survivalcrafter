@@ -34,6 +34,8 @@ import { telemetry } from './telemetry';
 import { buildToolMesh } from './tools';
 import { disposeObject } from '../world/view';
 
+/** Villagers are drawn within this distance of you, and cast shadows within the second. */
+const VIEW_FAR = 120, SHADOW_NEAR = 35;
 /** Villagers come to life within this distance of their village, and are let go beyond the second. */
 const ACTIVE_R = 170, DROP_R = 280;
 const WALK = 1.45;
@@ -182,6 +184,16 @@ export class Villager {
     this.model.add(stand);
   }
 
+  /** Time since the body was last posed (far off, it's posed every few frames). */
+  animDt = 0;
+  private shadowOn = true;
+  /** Cast a shadow only near you: each body in the shadow map is posed and drawn a second time. */
+  shadows(on: boolean) {
+    if (on === this.shadowOn) return;
+    this.shadowOn = on;
+    this.model.traverse((o) => { if ((o as THREE.Mesh).isMesh) o.castShadow = on; });
+  }
+
   /** Swap the plain figure for the animated body, once the model is loaded. */
   dress(): boolean {
     if (this.rig) return true;
@@ -192,6 +204,8 @@ export class Villager {
     const stand = this.model.getObjectByName('stand-in');
     if (stand) { stand.removeFromParent(); disposeObject(stand); }
     this.model.add(this.rig.root);
+    // (The new body casts shadows as made: the next frame sets it right for how far off it is.)
+    this.shadowOn = true;
     this.rig.hand.add(this.held);
     return true;
   }
@@ -232,8 +246,11 @@ export class VillageLife {
   /** Bodies dressed this frame (a few a frame, so a city's people don't all arrive in one stalled frame). */
   private dressed = 0;
 
+  /** Frames counted, to share the far bodies' updates out between frames. */
+  private frame = 0;
   update(dt: number) {
     this.dressed = 0;
+    this.frame++;
     this.checkT -= dt;
     if (this.checkT <= 0) { this.checkT = 1; this.refresh(); }
     const p = this.g.player.pos;
@@ -247,8 +264,8 @@ export class VillageLife {
         v.active = undefined;
       }
       const d = Math.hypot(v.pos.x - p.x, v.pos.z - p.z);
-      v.model.visible = d < 160;
-      if (v.model.visible) this.animate(v, dt, d);
+      v.model.visible = d < VIEW_FAR;
+      if (v.model.visible) { this.animate(v, dt, d); v.shadows(d < SHADOW_NEAR); }
     }
     // Where they stand (you bump into them).
     this.g.world.people = this.villagers.map((v) => ({ x: v.pos.x, z: v.pos.z, y: v.pos.y }));
@@ -1362,9 +1379,10 @@ export class VillageLife {
     // A guard keeps their sword in hand.
     if (!item && v.role === 'guard') item = v.inv.items.find((i) => i.type === 'iron_sword');
     v.hold(item);
-    // Far away, the body is updated less often (it's small on screen).
-    const skip = far > 60 && (v.id + Math.floor(performance.now() / 16)) % 3 !== 0;
-    if (!skip) rig.update(far > 60 ? dt * 3 : dt, pose, 0.2);
+    // Further off, the body is updated less often (it's small on screen): every other frame past 30 m, every fourth past 60.
+    const every = far > 60 ? 4 : far > 30 ? 2 : 1;
+    v.animDt += dt;
+    if ((v.id + this.frame) % every === 0) { rig.update(v.animDt, pose, 0.2); v.animDt = 0; }
     if (v.lying) {
       // On the bed: lying along it.
       v.model.position.set(v.lying.x - Math.sin(v.lying.yaw) * 0.85, v.lying.y, v.lying.z - Math.cos(v.lying.yaw) * 0.85);

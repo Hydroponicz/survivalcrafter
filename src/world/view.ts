@@ -329,7 +329,8 @@ export class WorldView implements WorldListener {
     }
 
     // The nearest few fires and planted torches light their surroundings.
-    for (let i = 0; i < 6; i++) {
+    // (Four: every light is paid for on every pixel drawn, lit or not.)
+    for (let i = 0; i < 4; i++) {
       const l = new THREE.PointLight(0xff9a40, 0, 16, 1.6);
       this.fireLights.push(l);
       this.group.add(l);
