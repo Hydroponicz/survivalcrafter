@@ -608,6 +608,30 @@ export class Terrain {
     done();
   }
 
+  /**
+   * Repaint the surface layer over a square of ground, point for point
+   * (x0..x1, z0..z1 inclusive): a tilled bed, neat and square. Returns how many points changed.
+   */
+  paintRect(x0: number, z0: number, x1: number, z1: number, to: Mat, can: (m: Mat) => boolean): number {
+    let n = 0, ylo = Infinity, yhi = -Infinity;
+    for (let z = z0; z <= z1; z++) {
+      for (let x = x0; x <= x1; x++) {
+        const h = Math.floor(this.heightAt(x, z));
+        for (let y = Math.max(Y_MIN + 1, h - 2); y <= Math.min(Y_MAX - 1, h + 2); y++) {
+          const yi = y - Y_MIN;
+          const c = this.writable(x >> 4, yi >> 4, z >> 4), i = ((yi & 15) * CH + (z & 15)) * CH + (x & 15);
+          if (c.d[i] < 60 || !can(c.m[i] as Mat)) continue;
+          // Only the skin: points with open air close above.
+          if (this.d(x, y + 1, z) >= ISO && this.d(x, y + 2, z) >= ISO) continue;
+          if (c.m[i] !== to) { c.m[i] = to; n++; }
+          ylo = Math.min(ylo, y); yhi = Math.max(yhi, y);
+        }
+      }
+    }
+    if (ylo <= yhi) this.touched(x0, ylo, z0, x1, yhi, z1);
+    return n;
+  }
+
   /** Repaint the surface layer (e.g. tilling a field). Returns how many points changed. */
   paint(cx: number, cy: number, cz: number, r: number, to: Mat, can: (m: Mat) => boolean): number {
     let n = 0;

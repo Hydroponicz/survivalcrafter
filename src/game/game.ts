@@ -30,7 +30,7 @@ import {
   ANIMALS, DAY_LENGTH, pointInPiece, type CartObj, toLocal, toWorld, World, type AnimalObj, type ForageObj, type PileObj, type StructureObj, type TreeObj, type WorldObj,
 } from '../world/world';
 import {
-  ACTION_MAP, ACTIONS, COMFORT_REGEN, craftProblem, defaultOption, DIG_RADIUS, EARTH_PER_ITEM, LEVEL_RADIUS, type ActionDef, type Ctx, type Target,
+  ACTION_MAP, ACTIONS, BED, bedAt, COMFORT_REGEN, craftProblem, defaultOption, DIG_RADIUS, EARTH_PER_ITEM, LEVEL_RADIUS, type ActionDef, type Ctx, type Target,
 } from './actions';
 import { DevSettings } from './dev';
 import { distVol, Sound } from './sound';
@@ -190,6 +190,8 @@ export class Game {
 
   private brush: THREE.LineLoop;
   private brushOuter: THREE.LineLoop;
+  /** The bed a hoe will till (or seeds will sow), as a grid of its 1 m cells draped on the ground. */
+  private bedGrid!: THREE.LineSegments;
   private ghost: THREE.Group | null = null;
   private ghostType = '';
   private ghostMats = {
@@ -306,6 +308,17 @@ export class Game {
     this.brushOuter = ring(0.35);
     this.brush.renderOrder = this.brushOuter.renderOrder = 5;
     this.scene.add(this.brush, this.brushOuter);
+    {
+      const segs = 2 * (BED + 1) * BED * 3;
+      this.bedGrid = new THREE.LineSegments(
+        new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(new Float32Array(segs * 2 * 3), 3)),
+        new THREE.LineBasicMaterial({ color: 0xfff2c0, transparent: true, opacity: 0.9, depthTest: false, fog: false }),
+      );
+      this.bedGrid.renderOrder = 5;
+      this.bedGrid.frustumCulled = false;
+      this.bedGrid.visible = false;
+      this.scene.add(this.bedGrid);
+    }
 
     window.addEventListener('resize', () => {
       this.camera.aspect = window.innerWidth / window.innerHeight;
@@ -423,6 +436,7 @@ export class Game {
     this.player.pos.set(s.x, this.world.terrain.heightAt(s.x, s.z), s.z);
     this.tour = new Tour(this.world.terrain.gen, s, fade, () => this.world.terrain.pendingChunks);
     this.brush.visible = this.brushOuter.visible = false;
+    if (this.bedGrid) this.bedGrid.visible = false;
     this.start();
   }
 
@@ -2098,7 +2112,13 @@ export class Game {
   private updateBrush() {
     const t = this.target;
     const tool = this.activeItem() ? itemDef(this.activeItem()!.type).tool : undefined;
-    const show = !this.placing && t?.kind === 'terrain' && (tool === 'shovel' || tool === 'pickaxe' || tool === 'hoe');
+    // A hoe on grass, earth or field tills a square bed; seeds on a field sow one: show that bed's grid.
+    const seeds = this.activeItem()?.type === 'wheat_seeds';
+    const tillable = t?.kind === 'terrain' && (t.mat === Mat.Grass || t.mat === Mat.Dirt || t.mat === Mat.Field);
+    const bed = !this.placing && t?.kind === 'terrain' && ((tool === 'hoe' && tillable) || (seeds && t.mat === Mat.Field));
+    this.bedGrid.visible = bed;
+    if (bed && t?.kind === 'terrain') this.drawBed(t.point.x, t.point.y, t.point.z, seeds || t.mat === Mat.Field);
+    const show = !bed && !this.placing && t?.kind === 'terrain' && (tool === 'shovel' || tool === 'pickaxe' || tool === 'hoe');
     this.brush.visible = show;
     // The hoe levels a wider round (the outer ring); the inner is what it tills.
     this.brushOuter.visible = show && tool === 'hoe';
@@ -2118,6 +2138,26 @@ export class Game {
     };
     place(this.brush, tool === 'pickaxe' ? 1.1 : DIG_RADIUS);
     if (tool === 'hoe') place(this.brushOuter, LEVEL_RADIUS);
+  }
+
+  /** Drape the bed's grid over the ground round (x, z): green on a field (sow here), cream where it'll be tilled. */
+  private drawBed(x: number, y: number, z: number, field: boolean) {
+    const b = bedAt(x, z), pos = this.bedGrid.geometry.attributes.position as THREE.BufferAttribute;
+    const ground = (px: number, pz: number) => {
+      const h = this.world.terrain.groundBelow(px, y + 1.5, pz);
+      return (Number.isFinite(h) && Math.abs(h - y) < 3 ? h : y) + 0.05;
+    };
+    let i = 0;
+    const seg = (x0: number, z0: number, x1: number, z1: number) => { pos.setXYZ(i++, x0, ground(x0, z0), z0); pos.setXYZ(i++, x1, ground(x1, z1), z1); };
+    const step = 1 / 3;
+    for (let k = 0; k <= BED; k++) {
+      for (let s = 0; s < BED * 3; s++) {
+        seg(b.x + s * step, b.z + k, b.x + (s + 1) * step, b.z + k);
+        seg(b.x + k, b.z + s * step, b.x + k, b.z + (s + 1) * step);
+      }
+    }
+    pos.needsUpdate = true;
+    (this.bedGrid.material as THREE.LineBasicMaterial).color.setHex(field ? 0xa8f070 : 0xfff2c0);
   }
 
   // ---------- building placement (Valheim-style planning)

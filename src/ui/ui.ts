@@ -12,7 +12,7 @@ import { CharacterPreview } from './preview';
 import { BUILDABLE, STRUCTURES, totalMaterials } from '../data/structures';
 import { vesselOf } from '../data/vessels';
 import { allowed, nextStep, pointsTo, settle, SHIP_PRESETS, windName, shipLength, shipMaterials, shipStats, totalSteps, type ShipDesign } from '../data/ships';
-import { ACTION_MAP, craftProblem, defaultOption, forageName, type ActionDef, type Ctx, type Target } from '../game/actions';
+import { ACTION_MAP, BED, craftProblem, defaultOption, forageName, type ActionDef, type Ctx, type Target } from '../game/actions';
 import { DEV_FLAGS, devCommands, type DevFlag } from '../game/dev';
 import { BIOME_NAMES, IDENTIFY } from '../data/forage';
 import { VirtualCursor } from './cursor';
@@ -20,7 +20,7 @@ import { controlsFor, controlsHtml } from './controls';
 import { BIOMES, biomeAt } from '../game/forage';
 import { QUICK_MARGIN, type Game, type MsgKind } from '../game/game';
 import { minigameVerb, RECIPE_MINIGAMES } from '../game/minigames';
-import { MAT_NAMES } from '../world/terrain';
+import { Mat, MAT_NAMES } from '../world/terrain';
 import { ANIMALS, cropKey, type CartObj, type PileObj, type StructureObj } from '../world/world';
 import { GOODS } from '../game/economy';
 import type { HouseRole } from '../world/villages';
@@ -506,6 +506,17 @@ export class UI {
         const crop = g.world.crops.get(cropKey(t.point.x, t.point.z));
         const b = biomeAt(g.world, t.point.x, t.point.y, t.point.z, t.mat);
         const name = b === 'meadow' || b === 'forest' || b === 'wetland' ? BIOMES[b].name : MAT_NAMES[t.mat];
+        if (t.mat === Mat.Field) {
+          // A tilled bed: how much of it is sown, so you can see where seed can still go.
+          const bx = Math.floor(t.point.x / BED) * BED, bz = Math.floor(t.point.z / BED) * BED;
+          let sown = 0, open = 0;
+          for (let k = 0; k < BED * BED; k++) {
+            const x = bx + (k % BED) + 0.5, z = bz + Math.floor(k / BED) + 0.5;
+            if (g.world.crops.has(cropKey(x, z))) sown++;
+            else if (g.world.terrain.surfaceMaterial(x, z) === Mat.Field) open++;
+          }
+          return crop ? `Wheat (${sown} of ${sown + open} sown in this bed)` : open && !sown ? 'Tilled bed (ready to sow)' : open ? `Tilled bed (${open} spot${open > 1 ? 's' : ''} left to sow)` : 'Tilled bed';
+        }
         return `${name}${crop ? ' (wheat)' : ''}`;
       }
       case 'water': return 'Water';

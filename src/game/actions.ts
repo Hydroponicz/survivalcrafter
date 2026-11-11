@@ -8,7 +8,7 @@ import type { SkillId } from '../data/skills';
 import { isRock, isSoft, Mat, MAT_NAMES, WATER_LEVEL, Y_MIN } from '../world/terrain';
 import { telemetry } from './telemetry';
 import {
-  ANIMALS, APPLE_AGE, APPLES, corpseSpecies, toLocal, toWorld, CROP_STAGES, type CartObj, cropKey, type AnimalObj, type BushObj, type Crop, type ForageObj, type PileObj, type StructureObj, type Stump, type TreeObj, type WorldObj,
+  ANIMALS, APPLE_AGE, APPLES, corpseSpecies, toLocal, toWorld, CROP_STAGES, type CartObj, cropKey, cropPos, type AnimalObj, type BushObj, type Crop, type ForageObj, type PileObj, type StructureObj, type Stump, type TreeObj, type WorldObj,
 } from '../world/world';
 import { FORAGE, IDENTIFY } from '../data/forage';
 import type { Boulder } from '../world/groundcover';
@@ -88,6 +88,8 @@ export interface ActionDef {
   byHand?: boolean;
   /** Swung by hand: how far through the whole job is (0..1), shown round the crosshair. */
   handProgress?: (c: Ctx) => number;
+  /** Never what a plain click does here (only from the menu): e.g. levelling a field you'd rather till. */
+  notDefault?: (c: Ctx) => boolean;
   /** Re-queue automatically after completing, while still valid. */
   repeat?: boolean | ((c: Ctx) => boolean);
   run(c: Ctx, o: Outcome): void;
@@ -148,6 +150,19 @@ function afterEdit(c: Ctx, x: number, z: number, r: number, dug = false) {
   c.g.view.refreshNear(x, z, r + 1);
   c.g.groundCover.invalidate(x, z, r + 1);
 }
+
+/** Fields are tilled in square beds on a fixed grid (metres a side), so beds tile neatly side by side. */
+export const BED = 3;
+/** The bed a point is in: its corner (the cells run from here, BED a side). */
+export const bedAt = (x: number, z: number) => ({ x: Math.floor(x / BED) * BED, z: Math.floor(z / BED) * BED });
+/** The bed's 1 m crop cells (their corners). */
+function bedCells(x: number, z: number): { x: number; z: number }[] {
+  const b = bedAt(x, z), out = [];
+  for (let k = 0; k < BED * BED; k++) out.push({ x: b.x + (k % BED), z: b.z + Math.floor(k / BED) });
+  return out;
+}
+const isField = (c: Ctx, x: number, z: number) => c.g.world.terrain.surfaceMaterial(x + 0.5, z + 0.5) === Mat.Field;
+const tillable = (m: Mat | undefined) => m === Mat.Grass || m === Mat.Dirt || m === Mat.Field;
 
 function cropAt(c: Ctx): { key: number; crop?: Crop } {
   if (!isGround(c)) return { key: -1 };
@@ -329,6 +344,7 @@ export const ACTIONS: ActionDef[] = [
   {
     id: 'level', label: 'Level ground (to your feet)',
     show: (c) => toolIs(c, 'hoe') && isGround(c),
+    notDefault: (c) => tillable(groundMat(c)),
     check: (c) => {
       if (!isGround(c)) return '';
       const p = c.t.point;
@@ -383,6 +399,7 @@ export const ACTIONS: ActionDef[] = [
   {
     id: 'smooth', label: 'Smooth ground',
     show: (c) => toolIs(c, 'hoe') && isGround(c),
+    notDefault: (c) => tillable(groundMat(c)),
     swing: 'dig',
     time: 3, skill: 'digging', difficulty: 4, stamina: 4, toolWear: 0.05,
     run: (c) => {
@@ -442,41 +459,69 @@ export const ACTIONS: ActionDef[] = [
     },
   },
   {
-    id: 'cultivate', label: 'Till the soil',
-    show: (c) => toolIs(c, 'hoe') && (groundMat(c) === Mat.Grass || groundMat(c) === Mat.Dirt),
+    id: 'cultivate',
+    label: (c) => (groundMat(c) !== Mat.Field ? `Till a bed (${BED} × ${BED} m)`
+      : isGround(c) && bedCells(c.t.point.x, c.t.point.z).every((k) => isField(c, k.x, k.z)) ? 'Bed is tilled' : 'Till the rest of this bed'),
+    show: (c) => toolIs(c, 'hoe') && tillable(groundMat(c)),
     check: (c) => {
       if (!isGround(c)) return '';
-      if (c.t.normal.y < 0.85) return 'The ground is too steep to farm. Level it first.';
-      if (c.t.point.y < c.g.world.terrain.waterAt(c.t.point.x, c.t.point.z) + 0.1) return 'Too wet to farm.';
-      if (c.g.world.near(c.t.point.x, c.t.point.z, 1.5).some((o) => o.kind === 'tree' && Math.hypot(o.x - c.t.point.x, o.z - c.t.point.z) < 1.2)) return 'Tree roots are in the way.';
+      const { x: px, z: pz } = c.t.point, t = c.g.world.terrain, b = bedAt(px, pz);
+      const cells = bedCells(px, pz);
+      if (cells.every((k) => isField(c, k.x, k.z))) return c.g.world.crops.has(cropKey(px, pz))
+        ? 'Wheat is growing here. Tend it with the hoe now and then (right-click → Tend crop).'
+        : 'This bed is tilled. Hold wheat seeds and click it to sow.';
+      const hs = [0, BED].flatMap((dx) => [0, BED].map((dz) => t.heightAt(b.x + dx, b.z + dz)));
+      if (c.t.normal.y < 0.85 || Math.max(...hs) - Math.min(...hs) > 1.1) return 'The ground is too steep to farm here. Find flatter ground, or level it first (right-click → Level ground).';
+      if (hs.some((h, i) => h < t.waterAt(b.x + (i >> 1) * BED, b.z + (i & 1) * BED) + 0.1)) return 'Too wet to farm here.';
+      const cx = b.x + BED / 2, cz = b.z + BED / 2;
+      if (c.g.world.near(cx, cz, BED).some((o) => o.kind === 'tree' && Math.abs(o.x - cx) < BED / 2 + 0.6 && Math.abs(o.z - cz) < BED / 2 + 0.6)) return 'Tree roots are in the way. Fell the tree and dig out its stump first.';
       return null;
     },
     swing: 'dig',
     time: 6, skill: 'farming', difficulty: 5, stamina: 7, toolWear: 0.1,
     run: (c, o) => {
       if (!isGround(c)) return;
-      if (!o.success) return c.g.msg('The roots are too tough here. You couldn\'t break the soil.', 'fail');
-      const p = c.t.point;
-      c.g.world.terrain.paint(p.x, p.y, p.z, 1.3, Mat.Field, (m) => m === Mat.Grass || m === Mat.Dirt);
-      c.g.msg('You till the soil into a field. Sow seeds on it.', 'good');
+      if (!o.success) return c.g.msg('The roots are too tough here. You couldn\'t break the soil. Try again.', 'fail');
+      const t = c.g.world.terrain, b = bedAt(c.t.point.x, c.t.point.z);
+      const cx = b.x + BED / 2, cz = b.z + BED / 2;
+      // Break up the sod and rake it even, then turn the whole bed over: a neat, square field.
+      const sown = [...c.g.world.crops.keys()].some((k) => { const p = cropPos(k); return p.x > b.x && p.x < b.x + BED && p.z > b.z && p.z < b.z + BED; });
+      if (!sown) for (let i = 0; i < 2; i++) t.smooth(cx, t.heightAt(cx, cz), cz, BED * 0.8);
+      t.paintRect(b.x, b.z, b.x + BED, b.z + BED, Mat.Field, tillable);
+      afterEdit(c, cx, cz, BED * 0.75);
+      c.g.msg(`You till a ${BED} × ${BED} m bed. Hold wheat seeds and click it to sow.`, 'good');
       c.g.quests?.note('tilled');
     },
   },
   {
-    id: 'sow', label: 'Sow wheat',
+    id: 'sow', label: 'Sow wheat on this bed',
     show: (c) => groundMat(c) === Mat.Field && c.tool?.type === 'wheat_seeds',
-    check: (c) => (cropAt(c).crop ? 'Something is already growing here.' : null),
-    time: 3, skill: 'farming', difficulty: 6, stamina: 2,
+    check: (c) => {
+      if (!isGround(c)) return '';
+      return bedCells(c.t.point.x, c.t.point.z).some((k) => isField(c, k.x, k.z) && !c.g.world.crops.has(cropKey(k.x, k.z))) ? null : 'This bed is fully sown. Till another beside it with the hoe.';
+    },
+    time: 4, skill: 'farming', difficulty: 6, stamina: 2,
     run: (c, o) => {
       if (!isGround(c) || !c.tool) return;
-      const seedQl = c.tool.ql;
-      c.g.consumeActive();
-      if (!o.success) return c.g.msg('You scatter the seeds badly, and the birds eat them.', 'fail');
-      const { key } = cropAt(c);
-      c.g.world.crops.set(key, { planted: c.g.world.time, ql: (o.ql + seedQl) / 2, tended: 0 });
-      c.g.world.listener?.cropsChanged(key);
-      c.g.msg('You sow a row of wheat.', 'good');
-      c.g.quests?.note('sowed');
+      const g = c.g;
+      if (!o.success) { g.consumeActive(); return g.msg('You scatter a handful badly, and the birds eat it. Try again.', 'fail'); }
+      // A seed in every empty cell of the bed, as far as your seeds go: the one you aimed at first.
+      const aim = cropKey(c.t.point.x, c.t.point.z);
+      const cells = bedCells(c.t.point.x, c.t.point.z).map((k) => cropKey(k.x, k.z)).filter((k, i, a) => a.indexOf(k) === i);
+      cells.sort((a, b) => Number(b === aim) - Number(a === aim));
+      let n = 0;
+      for (const k of cells) {
+        const { x, z } = cropPos(k);
+        if (g.world.crops.has(k) || g.world.terrain.surfaceMaterial(x, z) !== Mat.Field) continue;
+        const seed = g.activeItem();
+        if (!seed || seed.type !== 'wheat_seeds') break;
+        g.consumeActive();
+        g.world.crops.set(k, { planted: g.world.time, ql: (o.ql + seed.ql) / 2, tended: 0 });
+        g.world.listener?.cropsChanged(k);
+        n++;
+      }
+      g.msg(n >= cells.length ? 'You sow the whole bed with wheat.' : `You sow ${n} seed${n > 1 ? 's' : ''}.${g.inv.count('wheat_seeds') ? '' : ' That was your last seed: pick wild wheat for more.'}`, 'good');
+      g.quests?.note('sowed');
     },
   },
   {
@@ -1615,8 +1660,9 @@ const DESTRUCTIVE = new Set(['destroy_plan', 'demolish']);
  * done and isn't destructive; failing that, the first one (a click then says
  * why it can't be done yet).
  */
-export function defaultOption<T extends { def: ActionDef; problem: string | null }>(opts: T[]): T | undefined {
-  return opts.find((o) => !o.problem && !DESTRUCTIVE.has(o.def.id)) ?? opts.find((o) => !DESTRUCTIVE.has(o.def.id)) ?? opts[0];
+export function defaultOption<T extends { def: ActionDef; ctx?: Ctx; problem: string | null }>(opts: T[]): T | undefined {
+  const plain = (o: T) => !DESTRUCTIVE.has(o.def.id) && !(o.ctx && o.def.notDefault?.(o.ctx));
+  return opts.find((o) => !o.problem && plain(o)) ?? opts.find(plain) ?? opts.find((o) => !DESTRUCTIVE.has(o.def.id)) ?? opts[0];
 }
 
 export function nextMaterial(def: StructureDef, s: StructureObj): string | undefined {
