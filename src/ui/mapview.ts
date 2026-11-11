@@ -14,7 +14,7 @@ const RED = '#8e2a1c';
 
 /** An aged parchment texture, made once: mottled, stained and grained. */
 let paperUrl = '';
-function paper(): string {
+export function paper(): string {
   if (paperUrl) return paperUrl;
   const S = 512, c = document.createElement('canvas');
   c.width = c.height = S;

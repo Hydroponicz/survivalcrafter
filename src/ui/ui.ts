@@ -5,10 +5,10 @@ import { isIdentified, ITEMS, itemDef, itemName, TOOL_NAMES, typeDesc, WEAR_SLOT
 import { RECIPES, STATION_NAMES, type Recipe } from '../data/recipes';
 import { SKILL_INFO, SKILLS, type SkillId } from '../data/skills';
 import { Tooltip } from './tooltip';
-import { MapView } from './mapview';
+import { MapView, paper } from './mapview';
 import { drawIcons, itemIcon, onIconsReady, pieceIcon } from './itemIcons';
 import { pieceBounds } from '../world/pieceFill';
-import { CharacterPreview } from './preview';
+import { CharacterPreview, PortraitView } from './preview';
 import { BUILDABLE, STRUCTURES, totalMaterials } from '../data/structures';
 import { vesselOf } from '../data/vessels';
 import { allowed, nextStep, pointsTo, settle, SHIP_PRESETS, windName, shipLength, shipMaterials, shipStats, totalSteps, type ShipDesign } from '../data/ships';
@@ -21,6 +21,9 @@ import { BIOMES, biomeAt } from '../game/forage';
 import { QUICK_MARGIN, type Game, type MsgKind } from '../game/game';
 import { minigameVerb, RECIPE_MINIGAMES } from '../game/minigames';
 import { Mat, MAT_NAMES } from '../world/terrain';
+import { NEED_ICONS, SETTLEMENT_ICON, WILDS_ICON } from './hudArt';
+import { professionById, rankById } from '../data/professions';
+import { tierOf } from '../game/reputation';
 import { ANIMALS, cropKey, type CartObj, type PileObj, type StructureObj } from '../world/world';
 import { GOODS } from '../game/economy';
 import type { HouseRole } from '../world/villages';
@@ -56,6 +59,47 @@ export class UI {
   private windows = new Map<WindowName, HTMLElement>();
   private open = new Set<WindowName>();
   private bars: Record<string, HTMLElement> = {};
+  /** Your face, bottom left, and who you are under it. */
+  private portrait = new PortraitView();
+  private portraitName!: HTMLElement;
+  /** Where you are, top centre: the settlement, what it thinks of you, your work there. */
+  private placeEl!: HTMLElement;
+  private placeKey = '';
+  private placeWait = 0;
+
+  /** The banner top centre: the settlement you're in (what it thinks of you, who lives there, your work there), or the open country. */
+  private updatePlace() {
+    if ((this.placeWait -= 1 / 60) > 0) return;
+    this.placeWait = 0.4;
+    const g = this.g, p = g.player.pos;
+    const v = g.world.terrain.villages.at(p.x, p.z, 25);
+    const renown = g.rep.renownName();
+    const compass = (dx: number, dz: number) => ['north', 'north-east', 'east', 'south-east', 'south', 'south-west', 'west', 'north-west'][Math.round(((Math.atan2(dx, -dz) / (Math.PI * 2)) * 8 + 8)) % 8];
+    let key: string, html: string, tip: string;
+    if (v) {
+      const n = g.rep.of(v), tier = tierOf(n);
+      const folk = g.life.villagers.filter((x) => x.village === v).length;
+      const kind = v.kind === 'village' ? (v.houses.length < 5 ? 'Hamlet' : 'Village') : v.kind === 'port' ? 'Port town' : v.kind === 'city' ? 'Castle city' : 'Town';
+      const work = g.origin && g.origin.profession !== 'wanderer' && g.origin.village === v.name ? `${rankById(g.origin.rank).name} ${professionById(g.origin.profession).name.toLowerCase()}` : '';
+      const share = (n + 100) / 200;
+      key = `${v.name}|${Math.round(n)}|${folk}|${work}|${renown}`;
+      html = `<div class="place-name">${SETTLEMENT_ICON}<span>${v.name}</span><small>${kind}</small></div>
+        <div class="place-rep"><span class="place-tier" style="color:${tier.colour}">${tier.name}</span><div class="place-rep-bar"><i style="left:${(share * 100).toFixed(1)}%"></i></div></div>
+        <div class="place-facts">${folk ? `${folk} folk` : `${v.houses.length} houses`}${work ? ` · <b>You work here</b>: ${work}` : ''} · Renown: ${renown}</div>`;
+      tip = `<b>${v.name}</b> (${kind.toLowerCase()})<br>What they think of you: <b>${tier.name}</b> (${Math.round(n)}). ${tier.blurb}<br>Trade at the storehouse and take their work orders to raise it.${work ? `<br>You work here as ${/^[aeiou]/i.test(work) ? 'an' : 'a'} ${work.toLowerCase()}.` : ''}<br><b>Renown</b> (your name across the world): ${renown}.`;
+    } else {
+      const h = g.home, d = h ? Math.hypot(h.x - p.x, h.z - p.z) : 0;
+      const home = h && d > 30 ? `Home: ${d >= 1000 ? `${(d / 1000).toFixed(1)} km` : `${Math.round(d / 10) * 10} m`} ${compass(h.x - p.x, h.z - p.z)}` : h ? 'Home is near' : '';
+      key = `wilds|${home}|${renown}`;
+      html = `<div class="place-name">${WILDS_ICON}<span>The open country</span></div><div class="place-facts">${home}${home ? ' · ' : ''}Renown: ${renown}</div>`;
+      tip = '<b>The open country</b><br>No settlement here. Villages, towns and ports show on your map (M) once you\'ve seen them.<br><b>Renown</b> (your name across the world): ' + renown + '.';
+    }
+    if (key === this.placeKey) return;
+    this.placeKey = key;
+    this.placeEl.innerHTML = html;
+    this.placeEl.dataset.tip = tip;
+    this.placeEl.classList.toggle('in-town', !!v);
+  }
   private targetEl: HTMLElement;
   /** What you can press right now, and what it does. */
   private controlsEl: HTMLElement;
@@ -126,6 +170,8 @@ export class UI {
   constructor(private g: Game) {
     this.root = document.getElementById('ui')!;
     this.root.innerHTML = '';
+    // Every panel is drawn on the same old parchment as the map.
+    document.documentElement.style.setProperty('--paper', `url(${paper()})`);
     this.tooltip = new Tooltip(document.body);
     onIconsReady(() => { this.lastRefreshKey = ''; this.refresh(); });
     const hud = el('div', 'hud');
@@ -142,7 +188,8 @@ export class UI {
         <path class="wg-ship" d="M0,-24 C7,-14 8,6 6,22 L-6,22 C-8,6 -7,-14 0,-24 Z"/>
         <g class="wg-arrow"><path d="M0,-44 L0,-26 M-6,-33 L0,-25 L6,-33"/></g>
       </svg><div class="wg-text"></div></div>
-      <div class="bars"></div>
+      <div class="vitals"><div class="portrait"><div class="portrait-oval"></div><div class="portrait-name"></div></div><div class="orbs"></div></div>
+      <div class="place"></div>
       <div class="hotbar"></div>
       <div class="controls"></div>
       <div class="log"></div>`;
@@ -162,12 +209,16 @@ export class UI {
     this.controlsEl = hud.querySelector('.controls')!;
     this.windEl = hud.querySelector('.wind-gauge')!;
     this.logEl = hud.querySelector('.log')!;
-    const bars = hud.querySelector('.bars')!;
-    for (const [k, label] of [['health', 'Health'], ['food', 'Food'], ['water', 'Water'], ['stamina', 'Stamina']]) {
-      const b = el('div', `bar bar-${k}`, `<span>${label}</span><div class="bar-fill"></div>`);
-      bars.appendChild(b);
-      this.bars[k] = b.querySelector('.bar-fill')!;
+    // Your portrait, and beside it a round gauge for each need, top to bottom.
+    const orbs = hud.querySelector('.orbs')!;
+    for (const k of ['health', 'food', 'water', 'stamina'] as const) {
+      const b = el('div', `orb orb-${k}`, `<div class="orb-well"><div class="orb-fill"></div></div>${NEED_ICONS[k]}<div class="orb-glass"></div>`);
+      orbs.appendChild(b);
+      this.bars[k] = b.querySelector('.orb-fill')!;
     }
+    hud.querySelector('.portrait-oval')!.appendChild(this.portrait.canvas);
+    this.portraitName = hud.querySelector('.portrait-name')!;
+    this.placeEl = hud.querySelector('.place')!;
 
     for (const name of ['inventory', 'character', 'crafting', 'skills', 'build', 'help', 'container', 'dev', 'journal', 'quests', 'map', 'store', 'shipyard'] as WindowName[]) {
       const w = el('div', `window window-${name}`);
@@ -598,9 +649,17 @@ export class UI {
     const g = this.g, p = g.player;
     // (Everything below touches the page only when what it shows has changed:
     // writing the same thing every frame still costs the browser style and layout work.)
-    for (const k of ['health', 'food', 'water', 'stamina'] as const) setStyle(this.bars[k], 'width', `${Math.round(p[k] * 2) / 2}%`);
+    for (const k of ['health', 'food', 'water', 'stamina'] as const) {
+      setStyle(this.bars[k], 'height', `${Math.round(p[k] * 2) / 2}%`);
+      const orb = this.bars[k].parentElement!.parentElement!;
+      if (orb.classList.contains('low') !== p[k] < 20) orb.classList.toggle('low', p[k] < 20);
+    }
+    this.portrait.update(p, `${JSON.stringify(g.equipped)}|${p.rig ? 1 : 0}`, 1 / 60);
+    const prof = g.origin && g.origin.profession !== 'wanderer' ? `${rankById(g.origin.rank).name} ${professionById(g.origin.profession).name.toLowerCase()}` : 'Wanderer';
+    setText(this.portraitName, prof);
+    this.updatePlace();
 
-    const bar = (k: string, v: number, what: string) => setData(this.bars[k].parentElement!, 'tip', `<b>${k[0].toUpperCase() + k.slice(1)}</b> ${Math.round(v)} / 100<br>${what}`);
+    const bar = (k: string, v: number, what: string) => setData(this.bars[k].parentElement!.parentElement!, 'tip', `<b>${k[0].toUpperCase() + k.slice(1)}</b> ${Math.round(v)} / 100<br>${what}`);
     bar('health', p.health, 'At zero you die and wake at home, your pack left where you fell. Heals slowly while you\'re fed and watered.');
     bar('food', p.food, 'Falls over time. Eat (from your backpack): cooked food and better quality feed you more. Starving hurts.');
     bar('water', p.water, 'Falls faster than food. Aim at a lake or river and drink, or carry jars of water.');
@@ -1970,7 +2029,7 @@ function weightTip(items: Item[], cap: number | undefined, capNote: string): str
 function setText(e: HTMLElement, v: string) { if (e.textContent !== v) e.textContent = v; }
 const htmlCache = new WeakMap<HTMLElement, string>();
 function setHTML(e: HTMLElement, v: string) { if (htmlCache.get(e) !== v) { htmlCache.set(e, v); e.innerHTML = v; } }
-function setStyle(e: HTMLElement, prop: 'width' | 'display', v: string) { if (e.style[prop] !== v) e.style[prop] = v; }
+function setStyle(e: HTMLElement, prop: 'width' | 'height' | 'display', v: string) { if (e.style[prop] !== v) e.style[prop] = v; }
 function setData(e: HTMLElement, key: string, v: string) { if (e.dataset[key] !== v) e.dataset[key] = v; }
 /** Identity of what's aimed at (its kind and which one). */
 function targetKey(t: Target): string {

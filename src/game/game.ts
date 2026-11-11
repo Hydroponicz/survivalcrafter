@@ -57,6 +57,8 @@ import { Combat } from './combat';
 import { WorldMap } from '../ui/worldmap';
 import { VillageLife } from './villagers';
 import { Economy } from './economy';
+import { Reputation, type Tier } from './reputation';
+import type { Village } from '../world/villages';
 import { Traders } from './traders';
 import { Shipping } from './shipping';
 import { Wolves } from './wolves';
@@ -133,6 +135,10 @@ export class Game {
   life!: VillageLife;
   /** The villages' stores, treasuries and your work orders. */
   economy = new Economy(this);
+  /** What each settlement thinks of you, and how far your name has travelled. */
+  rep = Object.assign(new Reputation(), {
+    onTier: (v: Village, t: Tier, up: boolean) => this.msg(up ? `${v.name} thinks better of you: you're ${t.name.toLowerCase()} there now.` : `${v.name} thinks less of you: you're ${t.name.toLowerCase()} there now.`, up ? 'good' : 'warn'),
+  });
   /** Your purse. */
   coins = 20;
   /** The travelling traders on the roads. */
@@ -383,6 +389,9 @@ export class Game {
     p.yaw = Math.atan2(v.x - at.x, v.z - at.z);
     this.home = { x: at.x, z: at.z };
     this.origin = { profession: prof.id, rank: rank.id, village: v.name };
+    // The village you work in knows you (and a master is someone there).
+    this.rep.set(v, rank.id === 'apprentice' ? 18 : rank.id === 'journeyman' ? 32 : 58);
+    this.rep.renown = rank.id === 'master' ? 60 : rank.id === 'journeyman' ? 15 : 0;
     // What you know.
     prof.skills.forEach((k, i) => { this.skills.levels[k] = Math.max(this.skills.levels[k], rank.skill + (i === 0 ? 5 : 0)); });
     // What you carry.
@@ -3084,6 +3093,7 @@ export class Game {
         tips: [...this.tips],
         explored: this.map.serialize(),
         economy: this.economy.serialize(),
+        rep: this.rep.serialize(),
         traders: this.traders.serialize(),
         shipping: this.shipping.serialize(),
         wolves: this.wolves.serialize(),
@@ -3243,6 +3253,7 @@ export class Game {
       g.tips = new Set(data.tips ?? []);
       g.map.load(data.explored);
       g.economy.load(data.economy);
+      g.rep.load(data.rep);
       g.traders.load(data.traders);
       g.shipping.load(data.shipping);
       g.wolves.load(data.wolves);

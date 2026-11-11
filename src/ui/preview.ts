@@ -84,3 +84,67 @@ export class CharacterPreview {
     this.renderer.render(this.scene, this.camera);
   }
 }
+
+/**
+ * The HUD's portrait: your character's head and shoulders, at ease, in what
+ * you're wearing, drawn small and only now and then (it hardly changes).
+ */
+export class PortraitView {
+  readonly canvas: HTMLCanvasElement;
+  private renderer: THREE.WebGLRenderer | null = null;
+  private scene = new THREE.Scene();
+  private camera = new THREE.PerspectiveCamera(24, 0.8, 0.05, 10);
+  private rig: CharacterRig | null = null;
+  private key = '';
+  private wait = 0;
+  private failed = false;
+
+  constructor() {
+    this.canvas = document.createElement('canvas');
+    this.canvas.className = 'portrait-canvas';
+    this.canvas.width = 160;
+    this.canvas.height = 200;
+    this.scene.add(new THREE.HemisphereLight(0xfff0d8, 0x3a2a18, 1.7));
+    const key = new THREE.DirectionalLight(0xfff2dc, 2.4);
+    key.position.set(1.5, 2.5, 2.5);
+    this.scene.add(key);
+    const rim = new THREE.DirectionalLight(0xffc890, 1.4);
+    rim.position.set(-2, 1.5, -2);
+    this.scene.add(rim);
+  }
+
+  /** Draw it again if what you wear changed, else now and then (the idle sway). */
+  update(player: Player, key: string, dt: number) {
+    if (this.failed || !this.canvas.isConnected) return;
+    const g = characterLoaded();
+    if (!g || !player.rig) return;
+    if (!this.rig) {
+      this.rig = new CharacterRig(g);
+      this.scene.add(this.rig.root);
+      this.rig.root.rotation.y = 0.35;
+      // Head and shoulders: frame the head from the model's own bones.
+      const head = this.rig.head;
+      this.rig.update(0.01, { kind: 'loop', clip: 'idle' });
+      this.rig.root.updateMatrixWorld(true);
+      const at = new THREE.Vector3();
+      (head ?? this.rig.root).getWorldPosition(at);
+      if (!head) at.y = 1.55;
+      this.camera.position.set(at.x + 0.12, at.y + 0.03, at.z + 1.05);
+      this.camera.lookAt(at.x, at.y - 0.05, at.z);
+    }
+    const changed = key !== this.key;
+    if (changed) { this.key = key; this.rig.setColours(player.wornColours); }
+    this.wait -= dt;
+    if (!changed && this.wait > 0) return;
+    this.wait = 0.25;
+    if (!this.renderer) {
+      try {
+        this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, alpha: true });
+        this.renderer.setPixelRatio(1);
+        this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      } catch { this.failed = true; return; }
+    }
+    this.rig.update(0.25, { kind: 'loop', clip: 'idle' });
+    this.renderer.render(this.scene, this.camera);
+  }
+}

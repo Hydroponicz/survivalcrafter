@@ -1020,7 +1020,7 @@ export class QuestLog {
       <p>Open your <b>quest log</b> with ${KEY('L')}:</p>
       <ul>
         <li><b>Accept</b> to start a quest. It's <b>pinned</b> to the panel on the right.</li>
-        <li><b>Track</b> to show a quest's objectives in the world: <span style="color:#8fd0ff">blue markers</span> and an arrow. One quest is tracked at a time; switch any time.</li>
+        <li><b>Track</b> to show a quest's objectives in the world: <span style="color:#1f5a96;font-weight:bold">blue markers</span> and an arrow. One quest is tracked at a time; switch any time.</li>
         <li><b>Unpin</b> to hide a quest from the panel. You won't lose progress.</li>
       </ul>`,
       'Open my quests', () => { g.ui.show('quests'); g.ui.refresh(); });

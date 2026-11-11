@@ -348,11 +348,15 @@ export class Economy {
           this.g.coins += bonus;
           this.dropOrder(order);
           this.g.msg(`Work order done for ${v.name}: ${order.count} ${itemDef(order.item).name.toLowerCase()}. A bonus of ${bonus} coins.`, 'good');
+          // Work done for a village: it thinks better of you.
+          this.g.rep.add(v, 6 + order.count * 0.4);
           telemetry.event('economy', `Work order done: ${order.count} ${order.item} for ${v.name}`, { bonus });
         }
       }
     }
     this.g.coins += paid;
+    // Honest trade: they get to know you.
+    if (paid) this.g.rep.add(v, Math.min(4, paid * 0.06));
     if (n) this.g.inventoryChanged();
     return n;
   }
@@ -365,6 +369,7 @@ export class Economy {
     if (!it) return false;
     this.g.coins -= p;
     this.ledger(v).treasury += p;
+    this.g.rep.add(v, Math.min(2, p * 0.03));
     this.g.inv.add(it);
     this.g.inventoryChanged();
     return true;
