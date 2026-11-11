@@ -236,6 +236,35 @@ export function morePieceMesh(type: string, g: THREE.Group, tex: Tex, add: Add, 
       for (const x of [-0.2, 0.2]) { const t = add(new THREE.ConeGeometry(0.2, 0.3, 3), 0x8a1c1c, x, 1.2, 0.07, { roughness: 1 }); t.rotation.z = Math.PI; t.scale.z = 0.05; }
       return true;
     }
+    case 'pottery_kiln': {
+      // An updraft kiln: a stone footing, a beehive of clay bricks (courses picked out darker), a firebox arch at the
+      // front with its dark mouth, a vent at the top, and a few pots set by it.
+      tex(new THREE.CylinderGeometry(0.86, 0.9, 0.22, 16), 'stone', 0, 0.11, 0);
+      add(new THREE.SphereGeometry(0.78, 18, 12, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, 1.25, 1), 0xa8573a, 0, 0.2, 0, { roughness: 0.95 });
+      for (let k = 1; k <= 5; k++) {
+        const a = (k / 6) * (Math.PI / 2), r = 0.785 * Math.cos(a), y = 0.2 + 0.78 * 1.25 * Math.sin(a);
+        add(new THREE.TorusGeometry(r, 0.012, 4, 24).rotateX(Math.PI / 2), 0x6e3420, 0, y, 0, { roughness: 1 });
+      }
+      add(new THREE.CylinderGeometry(0.14, 0.18, 0.18, 12), 0x8a4630, 0, 1.18, 0, { roughness: 1 });
+      add(new THREE.CylinderGeometry(0.1, 0.1, 0.02, 10), 0x150c08, 0, 1.28, 0, { roughness: 1 });
+      // The firebox: an arch of brick standing out at the front, its mouth dark.
+      add(new THREE.BoxGeometry(0.5, 0.36, 0.34), 0x9a4c32, 0, 0.32, 0.72, { roughness: 1 });
+      add(new THREE.CylinderGeometry(0.25, 0.25, 0.34, 12, 1, false, -Math.PI / 2, Math.PI).rotateX(Math.PI / 2), 0x9a4c32, 0, 0.5, 0.72, { roughness: 1 });
+      // (Lit, the mouth glows with the fire inside, and flames lick out of it.)
+      const mouth = state.lit ? { emissive: 0xff4a10, emissiveIntensity: 1.6 } : {};
+      add(new THREE.BoxGeometry(0.28, 0.22, 0.04), state.lit ? 0x8a2a08 : 0x0e0806, 0, 0.3, 0.9, { roughness: 1, ...mouth });
+      add(new THREE.CylinderGeometry(0.14, 0.14, 0.04, 10, 1, false, -Math.PI / 2, Math.PI).rotateX(Math.PI / 2), state.lit ? 0x8a2a08 : 0x0e0806, 0, 0.41, 0.9, { roughness: 1, ...mouth });
+      if (state.lit) {
+        const f = add(new THREE.ConeGeometry(0.09, 0.22, 7), 0xffa030, 0, 0.32, 0.93, { emissive: 0xff6a00, emissiveIntensity: 2.5, transparent: true, opacity: 0.85 });
+        f.castShadow = false; f.userData.flame = true;
+      }
+      // Pots drying beside it.
+      for (const [x, z, s] of [[0.95, 0.35, 1], [1.08, 0.05, 0.8], [0.9, -0.25, 0.9]]) {
+        add(new THREE.SphereGeometry(0.11 * s, 10, 8).scale(1, 1.15, 1), 0xb8865a, x, 0.12 * s, z, { roughness: 1 });
+        add(new THREE.CylinderGeometry(0.05 * s, 0.07 * s, 0.07 * s, 10), 0xb8865a, x, 0.24 * s, z, { roughness: 1 });
+      }
+      return true;
+    }
     case 'charcoal_kiln': {
       // A clamp: a dome of turf and earth over logs stood on end, a few log ends showing at the foot, a smoking vent at the top.
       add(new THREE.SphereGeometry(0.95, 18, 10, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, 0.95, 1), 0x4a3a28, 0, 0, 0, { roughness: 1, flatShading: true });

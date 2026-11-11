@@ -419,7 +419,8 @@ export class Game {
     }
     this.coins = rank.coins;
     // A master's workshop, set up beside where you begin.
-    if (rank.id === 'master' && prof.workshop) this.setUpWorkshop(prof.workshop, at, p.yaw, rank.skill);
+    const pieces = [...(prof.yard ?? []), ...(rank.id === 'master' ? prof.workshop ?? [] : [])];
+    if (pieces.length) this.setUpWorkshop(pieces, at, p.yaw, rank.skill);
     // Your trade's quests (camp is already made: you've a roof in the village): an apprentice's started and tracked; the others' waiting.
     this.quests = QuestLog.begin(this.markerTex, at.x, at.z);
     const camp = this.quests.quests.find((q) => q.id === 'camp');
@@ -1009,7 +1010,9 @@ export class Game {
       if (Math.hypot(o.x - p.x, o.z - p.z) > 4) continue;
       const st = STRUCTURES[o.type].station;
       if (kind === 'fire' && (st === 'fire' || st === 'forge') && o.lit) return true;
-      if (kind === st && kind !== 'fire') return true;
+      // Pots are fired in a lit kiln (a lit forge is hot enough too).
+      if (kind === 'pottery_kiln' && (st === 'pottery_kiln' || st === 'forge') && o.lit) return true;
+      if (kind === st && kind !== 'fire' && kind !== 'pottery_kiln') return true;
     }
     return false;
   }

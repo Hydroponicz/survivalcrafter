@@ -52,6 +52,8 @@ export interface Profession {
   kit: { all: [string, number][]; apprentice?: [string, number][]; journeyman?: [string, number][]; master?: [string, number][] };
   /** A master's workshop: pieces set up, built, beside where you start. */
   workshop?: string[];
+  /** What the trade can't work without, set up beside where you start at every level (a potter's kiln). */
+  yard?: string[];
 }
 
 /** The wanderer: the default, and the way to learn everything at your own pace. */
@@ -110,7 +112,7 @@ export const PROFESSIONS: Profession[] = [
     chain: 'Clay → pots and jars → crucibles and mortar',
     skills: ['pottery', 'digging'], quests: ['potter', 'masonry'],
     kit: { all: BASIC, apprentice: [['wooden_shovel', 1]], journeyman: [['wooden_shovel', 1], ['clay', 6], ['clay_jar', 1]], master: [['iron_shovel', 1], ['clay', 10], ['sand', 4], ['clay_jar', 2]] },
-    workshop: ['campfire'] },
+    yard: ['pottery_kiln'] },
   { id: 'mason', name: 'Stonemason', icon: '🧱',
     blurb: 'Break and dress stone, mix mortar and raise foundations and walls that stand for ages.',
     chain: 'Stone → dressed stone and mortar → walls',

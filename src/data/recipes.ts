@@ -3,7 +3,7 @@ import type { ToolKind } from './items';
 import type { SkillId } from './skills';
 import { FURNITURE } from './furniture';
 
-export type StationKind = 'fire' | 'forge' | 'anvil' | 'workbench' | 'quern' | 'chopping_block' | 'kiln';
+export type StationKind = 'fire' | 'forge' | 'anvil' | 'workbench' | 'quern' | 'chopping_block' | 'kiln' | 'pottery_kiln';
 
 export const STATION_NAMES: Record<StationKind, string> = {
   fire: 'a lit fire',
@@ -13,6 +13,7 @@ export const STATION_NAMES: Record<StationKind, string> = {
   quern: 'a quern',
   chopping_block: 'a chopping block',
   kiln: 'a charcoal kiln',
+  pottery_kiln: 'a lit pottery kiln (or a lit forge)',
 };
 
 export interface Recipe {
@@ -101,7 +102,7 @@ export const RECIPES: Recipe[] = [
   { id: 'clay_jar', name: 'Unfired clay jar', category: 'Pottery', skill: 'pottery', difficulty: 5, time: 8,
     inputs: [{ item: 'clay', count: 3 }], output: { item: 'clay_jar_unfired', count: 1 } },
   { id: 'fire_jar', name: 'Fire clay jar', category: 'Pottery', skill: 'pottery', difficulty: 8, time: 15,
-    stations: ['fire'], inputs: [{ item: 'clay_jar_unfired', count: 1 }], output: { item: 'clay_jar', count: 1 } },
+    stations: ['pottery_kiln'], inputs: [{ item: 'clay_jar_unfired', count: 1 }], output: { item: 'clay_jar', count: 1 } },
   { id: 'mortar', name: 'Mortar', category: 'Pottery', skill: 'masonry', difficulty: 6, time: 5,
     inputs: [{ item: 'clay', count: 1 }, { item: 'sand', count: 1 }], output: { item: 'mortar', count: 2 } },
 
@@ -143,7 +144,7 @@ export const RECIPES: Recipe[] = [
   { id: 'crucible', name: 'Unfired crucible', category: 'Smithy', skill: 'pottery', difficulty: 7, time: 8,
     inputs: [{ item: 'clay', count: 2 }, { item: 'sand', count: 1 }], output: { item: 'crucible_unfired', count: 1 } },
   { id: 'fire_crucible', name: 'Fire crucible', category: 'Smithy', skill: 'pottery', difficulty: 9, time: 15,
-    stations: ['fire'], inputs: [{ item: 'crucible_unfired', count: 1 }], output: { item: 'crucible', count: 1 } },
+    stations: ['pottery_kiln'], inputs: [{ item: 'crucible_unfired', count: 1 }], output: { item: 'crucible', count: 1 } },
   { id: 'bellows', name: 'Bellows', category: 'Smithy', skill: 'carpentry', difficulty: 8, time: 14,
     tool: 'hammer', inputs: [{ item: 'hide', count: 2 }, { item: 'plank', count: 2 }, { item: 'cordage', count: 2 }],
     output: { item: 'bellows', count: 1 } },
