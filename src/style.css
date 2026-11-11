@@ -596,7 +596,7 @@ button.dev-on { background: #6b5530; border-color: var(--accent); color: var(--i
 .mg-keys { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; padding-top: 6px; border-top: 1px solid rgba(80, 52, 20, 0.144); font-size: 11.5px; color: var(--muted); }
 .mg-keys kbd { font: inherit; font-size: 10.5px; padding: 0 4px; margin-right: 3px; border-radius: 3px; background: rgba(80, 52, 20, 0.18); border: 1px solid rgba(80, 52, 20, 0.27); color: var(--ink); }
 /* At a ship's helm or aboard her: the wind round her bow. */
-.wind-gauge { position: absolute; right: 16px; top: 52px; display: flex; gap: 10px; align-items: center; background: rgba(0,0,0,0.35); padding: 6px 10px; border-radius: 6px; font-size: 13px; line-height: 1.35; text-shadow: 0 1px 3px #000; }
+.wind-gauge { position: absolute; right: 16px; top: 64px; display: flex; gap: 10px; align-items: center; background: rgba(0,0,0,0.35); padding: 6px 10px; border-radius: 6px; font-size: 13px; line-height: 1.35; text-shadow: 0 1px 3px #000; }
 .wind-gauge .wg-ring { fill: rgba(20,40,60,0.45); stroke: rgba(255,255,255,0.5); stroke-width: 1.5; }
 .wind-gauge .wg-nogo { fill: rgba(220,80,60,0.28); }
 .wind-gauge .wg-ship { fill: #c9a26b; stroke: #3b2a17; stroke-width: 1.5; }
@@ -1012,3 +1012,6 @@ button.dev-on { background: #6b5530; border-color: var(--accent); color: var(--i
 .main-menu .life-foot button { flex: 0 0 auto; padding: 10px 22px; }
 .main-menu .life-foot button.primary { order: 4; padding: 10px 34px; }
 .main-menu .menu-panel.menu-life { max-height: 90vh; }
+/* Frame rate and the graphics card's time, small and quiet under the clock. */
+.gpu-line { position: absolute; top: 44px; right: 16px; font-size: 11px; color: #d8c8a4; opacity: 0.7; text-shadow: 0 1px 2px #000; pointer-events: auto !important; font-variant-numeric: tabular-nums; }
+.perf-line { top: 62px; }

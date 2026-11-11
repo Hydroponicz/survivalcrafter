@@ -65,6 +65,8 @@ export class UI {
   /** Where you are, top centre: the settlement, what it thinks of you, your work there. */
   private placeEl!: HTMLElement;
   private placeKey = '';
+  /** Frames a second and the graphics card's time per frame, small under the clock. */
+  private gpuEl!: HTMLElement;
   private placeWait = 0;
 
   /** The banner top centre: the settlement you're in (what it thinks of you, who lives there, your work there), or the open country. */
@@ -181,6 +183,7 @@ export class UI {
       <div class="hand-swing"><div class="hand-ring"><i></i></div><div class="hand-label"></div></div>
       <div class="progress"><div class="progress-label"></div><div class="progress-bar"><div class="progress-fill"></div></div></div>
       <div class="clock"></div>
+      <div class="gpu-line"></div>
       <div class="perf-line"></div>
       <div class="status"></div>
       <div class="wind-gauge"><svg viewBox="-50 -50 100 100" width="92" height="92">
@@ -205,6 +208,7 @@ export class UI {
     this.hotbarEl = hud.querySelector('.hotbar')!;
     this.clockEl = hud.querySelector('.clock')!;
     this.perfEl = hud.querySelector('.perf-line')!;
+    this.gpuEl = hud.querySelector('.gpu-line')!;
     this.statusEl = hud.querySelector('.status')!;
     this.controlsEl = hud.querySelector('.controls')!;
     this.windEl = hud.querySelector('.wind-gauge')!;
@@ -671,6 +675,11 @@ export class UI {
     const pos = g.dev.anyActive ? ` · ${Math.round(g.player.pos.x)}, ${Math.round(g.player.pos.z)} · ${perf.fps} fps` : '';
     setData(this.clockEl, 'tip', '<b>Time</b><br>A day lasts 20 minutes. Nights are dark: have a fire, or a house to wait them out in.');
     setText(this.clockEl, `Day ${g.world.day} · ${hh}:${mm}${f > 0.78 || f < 0.22 ? ' · night' : ''}${pos}`);
+    const gt = g.gpu;
+    setText(this.gpuEl, `${perf.fps} fps · ${gt.supported ? `GPU ${gt.avg >= 0 ? `${gt.avg.toFixed(1)} ms` : '…'}` : `frame ${perf.fps ? (1000 / perf.fps).toFixed(1) : '…'} ms (GPU timer blocked)`}`);
+    setData(this.gpuEl, 'tip', gt.supported
+      ? `<b>Frame rate and graphics card time</b><br>${perf.fps} frames a second. Your graphics card spends ${gt.avg >= 0 ? gt.avg.toFixed(1) : '…'} ms drawing each frame (slowest in the last second: ${gt.worst >= 0 ? gt.worst.toFixed(1) : '…'} ms). Under about 16 ms keeps 60 frames a second.<br>A summary goes into the debug report (dev console, F2) every minute.`
+      : '<b>Frame rate</b><br>This browser doesn\'t let pages time the graphics card (some, like Brave with fingerprinting protection on, hide the timer), so the time per frame is shown instead. In Chrome or Edge the graphics card time shows here.');
     // With dev settings on: the slowest frame each second, and what took the time in it.
     setStyle(this.perfEl, 'display', g.dev.anyActive ? '' : 'none');
     if (g.dev.anyActive) {

@@ -24,6 +24,7 @@ import { seaFloor } from '../world/water';
 import { prepareTiles, WorkerTiles } from '../world/tilesource';
 import { ViewCull } from '../world/cull';
 import { perf } from './perf';
+import { GpuTimer } from './gputimer';
 import { telemetry } from './telemetry';
 import { TILE, tileOf, WorldGen } from '../world/worldgen';
 import {
@@ -164,6 +165,23 @@ export class Game {
   graphics = new GraphicsSettings();
   private lastFrame = -Infinity;
   private frameNo = 0;
+  /** The graphics card's own time per frame (shown small under the clock, and in the debug report). */
+  gpu!: GpuTimer;
+  private perfReportAt = 0;
+  /** Once a minute, a line in the debug report: how the frames went on this machine. */
+  private reportPerf() {
+    const now = performance.now();
+    if (!this.perfReportAt) this.perfReportAt = now + 60000;
+    if (now < this.perfReportAt || this.tour) return;
+    this.perfReportAt = now + 60000;
+    const m = this.gpu.minute, gpuAvg = m.length ? m.reduce((a, b) => a + b, 0) / m.length : -1;
+    const info = this.renderer.info.render, p = this.player.pos;
+    telemetry.info('perf', `${perf.fps} fps · GPU ${gpuAvg >= 0 ? gpuAvg.toFixed(1) + ' ms' : 'n/a'} (worst ${this.gpu.worst >= 0 ? this.gpu.worst.toFixed(1) : 'n/a'}) · slowest frame ${perf.worst.toFixed(0)} ms`, {
+      fps: perf.fps, gpuMs: +gpuAvg.toFixed(2), gpuWorstMs: +this.gpu.worst.toFixed(2), slowestFrameMs: +perf.worst.toFixed(1),
+      calls: info.calls, triangles: info.triangles, quality: this.graphics.level.label, where: [Math.round(p.x), Math.round(p.z)],
+      parts: perf.average.slice(0, 6).map(([k, v]) => `${k} ${v.toFixed(1)}`).join(', '),
+    });
+  }
 
   target: Target | null = null;
   action: RunningAction | null = null;
@@ -249,6 +267,7 @@ export class Game {
     // Log depth: the view runs out to kilometres without distant hills flickering.
     // (MSAA on the canvas can only be chosen now: turning anti-aliasing off or on takes a restart.)
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: this.graphics.aa !== 'off', powerPreference: 'high-performance', logarithmicDepthBuffer: true });
+    this.gpu = new GpuTimer(this.renderer.getContext() as WebGL2RenderingContext);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.shadowMap.enabled = true;
@@ -3046,7 +3065,10 @@ export class Game {
     this.frameNo++;
     // (The first frame always draws them: until a shadow map exists, everything that receives shadows fails to draw.)
     this.renderer.shadowMap.needsUpdate = this.frameNo === 1 || this.frameNo % this.graphics.level.shadowEvery === 0;
+    this.gpu.begin();
     perf.time('draw', () => { if (this.composer) this.composer.render(this.renderDt); else this.renderer.render(this.scene, this.camera); });
+    this.gpu.end();
+    this.reportPerf();
     // First-person hands and tool, on top of the world.
     if (!this.working && !this.tour) {
       const it = this.heldNow();
