@@ -168,6 +168,15 @@ const T: Record<string, Tutorial> = {
     ],
     quality: 'Playing a fish well (the line in the green) brings it in in better shape. Keep fishing as long as you like: right-click to stop.',
   },
+  'heat:char': {
+    title: 'Burning charcoal',
+    what: 'Wood burned slowly with too little air chars into charcoal instead of burning away: a fuel that burns hot and long.',
+    steps: [
+      { gesture: 'updown', text: 'Move the mouse up and down to bank the burn: keep it low and slow. Too fierce and the wood burns to ash.' },
+      { gesture: 'click', text: 'When the wood is charred black right through, click to seal the kiln.' },
+    ],
+    quality: 'A slow, even burn makes the best charcoal.',
+  },
   boulder: {
     title: 'Breaking a boulder',
     what: 'Break the boulder up with your pickaxe for small rocks (and now and then a nodule of flint). Every blow bites into the stone, and it crumbles bit by bit.',

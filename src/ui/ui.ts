@@ -548,7 +548,7 @@ export class UI {
    * A notice that stops the game until you've read it: a warning (red), or a
    * lesson (a picture of the thing, then how it works).
    */
-  showNotice(title: string, html: string, button: string, onOk: () => void, opts: { image?: string; kind?: 'warning' | 'lesson' } = {}) {
+  showNotice(title: string, html: string, button: string, onOk: () => void, opts: { image?: string; kind?: 'warning' | 'lesson' | 'wide' } = {}): HTMLElement {
     const g = this.g;
     this.modalOpen = true;
     g.paused = true;
@@ -556,15 +556,16 @@ export class UI {
     this.cursor.setVisible(false);
     const el2 = el('div', 'notice-backdrop');
     const pic = opts.image ? `<img class="notice-pic" src="${opts.image}" alt="" draggable="false">` : '';
-    el2.innerHTML = `<div class="notice${opts.kind === 'lesson' ? ' lesson' : ''}">${pic}<div class="notice-head">${title}</div><div class="notice-body">${html}</div><button class="notice-ok">${button}</button></div>`;
+    el2.innerHTML = `<div class="notice${opts.kind === 'lesson' ? ' lesson' : opts.kind === 'wide' ? ' lesson wide' : ''}">${pic}<div class="notice-head">${title}</div><div class="notice-body">${html}</div><button class="notice-ok">${button}</button></div>`;
     this.root.appendChild(el2);
-    el2.querySelector('button')!.addEventListener('click', () => {
+    el2.querySelector('button.notice-ok')!.addEventListener('click', () => {
       el2.remove();
       this.modalOpen = false;
       g.paused = false;
       g.input.lock();
       onOk();
     });
+    return el2;
   }
 
   showDeath() {
@@ -682,9 +683,9 @@ export class UI {
     setStyle(this.pauseEl, 'display', showPause ? 'flex' : 'none');
     if (showPause) {
       (this.pauseEl.querySelector('[data-act="skip-tutorial"]') as HTMLElement).style.display = g.quests?.active ? '' : 'none';
-      // Offered once the tutorial's off, or its house quest is gone from the log.
-      const home = g.quests?.quests.find((q) => q.id === 'home');
-      (this.pauseEl.querySelector('[data-act="restart-tutorial"]') as HTMLElement).style.display = g.quests && (g.quests.off || !home) ? '' : 'none';
+      // Offered once the tutorial's off, or its camp quest is gone from the log.
+      const camp = g.quests?.quests.find((q) => q.id === 'camp');
+      (this.pauseEl.querySelector('[data-act="restart-tutorial"]') as HTMLElement).style.display = g.quests && (g.quests.off || !camp) ? '' : 'none';
     }
 
     // Live windows refresh a few times per second.

@@ -2,12 +2,13 @@ import * as THREE from 'three';
 import { benchMesh, box, clamp01, cyl, fireMesh, Minigame, ringMesh, type Meter, type MgInput } from './core';
 import type { Gesture } from './tutorials';
 
-export type HeatVariant = 'roast' | 'bake' | 'fire' | 'brew';
+export type HeatVariant = 'roast' | 'bake' | 'fire' | 'brew' | 'char';
 
 const HEAT_TEXT: Record<HeatVariant, { title: string; how: string; raw: number; done: number }> = {
   roast: { title: 'Cooking', how: 'Move the mouse up/down to hold the food higher or lower over the flame. Click to take it off when it’s done — don’t burn it.', raw: 0xb5655a, done: 0x7a3f1c },
   bake: { title: 'Baking', how: 'Move the mouse up/down to raise or lower the bread. Click to take it off when golden.', raw: 0xe8d8b0, done: 0xb07832 },
   fire: { title: 'Firing pottery', how: 'Move the mouse to push the pot into or out of the coals. Click to pull it out when it’s fired through — too hot and it cracks.', raw: 0x9a8a7a, done: 0xb0583a },
+  char: { title: 'Burning charcoal', how: 'Move the mouse up/down to bank the burn: low and slow, never blazing (a fierce fire burns the wood to ash). Click to seal the kiln when the wood is charred black right through.', raw: 0x8a6a48, done: 0x1c1714 },
   brew: { title: 'Brewing', how: 'Move the mouse up/down to set the pot over the flame. Click to take it off when it’s steeped — don’t let it boil away.', raw: 0x7a9a6a, done: 0x6a7a3a },
 };
 
@@ -43,7 +44,8 @@ export class HeatGame extends Minigame {
       post.position.set(x, 0.37, 0);
       this.scene.add(post);
     }
-    const geo = variant === 'bake' ? new THREE.SphereGeometry(0.08, 12, 8).scale(1.4, 0.7, 1)
+    const geo = variant === 'char' ? new THREE.CylinderGeometry(0.05, 0.055, 0.32, 9).rotateZ(Math.PI / 2)
+      : variant === 'bake' ? new THREE.SphereGeometry(0.08, 12, 8).scale(1.4, 0.7, 1)
       : variant === 'fire' ? new THREE.CylinderGeometry(0.06, 0.08, 0.16, 12)
         : variant === 'brew' ? new THREE.CylinderGeometry(0.08, 0.07, 0.12, 12)
           : new THREE.DodecahedronGeometry(0.07, 1);

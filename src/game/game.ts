@@ -312,8 +312,8 @@ export class Game {
     // Your first tool is a knife you knap yourself.
     this.inv.add(makeItem('berries', 10));
     this.inv.add(makeItem('berries', 10));
-    this.msg('You wake up in the wilderness with nothing but a few berries. Press H for help.', 'warn');
-    this.msg('Follow the quest on the right: it guides you all the way to your first house.', 'info');
+    this.msg('You wake up in the wilderness, a wanderer with nothing but a few berries. Press H for help.', 'warn');
+    this.msg('Follow the quest on the right: it shows you how to make camp.', 'info');
     this.quests = QuestLog.begin(this.markerTex, s.x, s.z);
   }
 
@@ -1318,6 +1318,7 @@ export class Game {
     this.dropToGround([makeItem('corpse', 50, `${d.name.toLowerCase()} corpse`)], a.x, this.world.terrain.heightAt(a.x, a.z), a.z);
     this.msg(`You killed the ${d.name.toLowerCase()}! Butcher it with a knife for meat and hide.`, 'good');
     this.quests?.note(`killed_${a.species}`);
+    this.quests?.note('killed');
     if (this.action?.ctx.t.kind === 'animal' && this.action.ctx.t.animal === a) this.action = null;
     this.queue = this.queue.filter((q) => !(q.ctx.t.kind === 'animal' && q.ctx.t.animal === a));
   }

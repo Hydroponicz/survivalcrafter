@@ -92,6 +92,7 @@ export const RECIPE_MINIGAMES: Record<string, MinigameSpec> = {
   torch: { kind: 'bowdrill' },
   // (Stringing the bow and binding the kit together.)
   fire_kit: { kind: 'cord', plies: 3 },
+  burn_charcoal: { kind: 'heat', variant: 'char' },
   fishing_rod: { kind: 'cord', plies: 4 },
   fine_fishing_rod: { kind: 'carve', passes: 2, make: 'shaft' },
   relight_torch: { kind: 'bowdrill' },
@@ -178,7 +179,7 @@ export function minigameVerb(spec: MinigameSpec): string {
     case 'chop': return 'split';
     case 'boulder': return 'break stone';
     case 'fish': return 'fish';
-    case 'heat': return { roast: 'cook', bake: 'bake', fire: 'fire', brew: 'brew' }[spec.variant];
+    case 'heat': return { roast: 'cook', bake: 'bake', fire: 'fire', brew: 'brew', char: 'burn charcoal' }[spec.variant];
     case 'place': return 'lay';
     case 'center': return 'throw';
   }

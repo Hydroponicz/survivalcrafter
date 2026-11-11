@@ -452,6 +452,7 @@ export const ACTIONS: ActionDef[] = [
       const p = c.t.point;
       c.g.world.terrain.paint(p.x, p.y, p.z, 1.3, Mat.Field, (m) => m === Mat.Grass || m === Mat.Dirt);
       c.g.msg('You till the soil into a field. Sow seeds on it.', 'good');
+      c.g.quests?.note('tilled');
     },
   },
   {
@@ -468,6 +469,7 @@ export const ACTIONS: ActionDef[] = [
       c.g.world.crops.set(key, { planted: c.g.world.time, ql: (o.ql + seedQl) / 2, tended: 0 });
       c.g.world.listener?.cropsChanged(key);
       c.g.msg('You sow a row of wheat.', 'good');
+      c.g.quests?.note('sowed');
     },
   },
   {

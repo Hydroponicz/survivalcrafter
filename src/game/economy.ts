@@ -49,6 +49,7 @@ export const GOODS: Record<string, GoodDef> = {
   log: { value: 4, want: 10, job: 'woodcutter' },
   plank: { value: 3, want: 16, job: 'woodcutter' },
   kindling: { value: 1, want: 10, job: 'woodcutter' },
+  charcoal: { value: 3, want: 6, job: 'woodcutter' },
   branch: { value: 0.5, want: 12, job: 'villager' },
   shaft: { value: 2, want: 6, job: 'villager' },
   plant_fiber: { value: 0.5, want: 10, job: 'villager' },

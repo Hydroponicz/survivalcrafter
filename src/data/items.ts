@@ -85,6 +85,7 @@ const defs: ItemDef[] = [
   { id: 'log', name: 'Log', icon: '🪵', weight: 14, desc: 'A heavy log. Split it into planks at a chopping block, or burn it as fuel.', fuel: 600 },
   { id: 'plank', name: 'Rough plank', icon: '🟫', weight: 3, desc: 'A rough, uneven plank split from a log. Good for building floors, walls, roofs and doors.', fuel: 150 },
   { id: 'refined_plank', name: 'Refined plank', icon: '🟧', weight: 2.5, desc: 'A smooth plank cut with an iron saw. Used for workbenches and furniture.', fuel: 120 },
+  { id: 'charcoal', name: 'Charcoal', icon: '⚫', weight: 0.5, desc: 'Wood charred slowly in a kiln: light, and it burns hot and long. The best fuel there is for a fire or a forge.', fuel: 1500 },
   { id: 'shaft', name: 'Shaft', icon: '🥢', weight: 0.6, desc: 'A straight wooden handle for tools.', fuel: 40 },
   { id: 'kindling', name: 'Kindling', icon: '🔥', weight: 0.3, desc: 'Dry wood chips for starting fires and making torches.', fuel: 60 },
   { id: 'torch', name: 'Torch', icon: '🔥', weight: 0.6, desc: 'A burning torch. Hold it to light your way, plant it in the ground or stand it on a floor, or mount it on a wall (indoors too). Burns for about 3 days, then relight it with kindling and a branch.' },

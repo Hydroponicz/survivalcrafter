@@ -3,7 +3,7 @@ import type { ToolKind } from './items';
 import type { SkillId } from './skills';
 import { FURNITURE } from './furniture';
 
-export type StationKind = 'fire' | 'forge' | 'anvil' | 'workbench' | 'quern' | 'chopping_block';
+export type StationKind = 'fire' | 'forge' | 'anvil' | 'workbench' | 'quern' | 'chopping_block' | 'kiln';
 
 export const STATION_NAMES: Record<StationKind, string> = {
   fire: 'a lit fire',
@@ -12,6 +12,7 @@ export const STATION_NAMES: Record<StationKind, string> = {
   workbench: 'a workbench',
   quern: 'a quern',
   chopping_block: 'a chopping block',
+  kiln: 'a charcoal kiln',
 };
 
 export interface Recipe {
@@ -59,6 +60,8 @@ export const RECIPES: Recipe[] = [
     inputs: [{ item: 'torch_spent', count: 1 }, { item: 'kindling', count: 1 }, { item: 'branch', count: 1 }], output: { item: 'torch', count: 1 } },
   { id: 'bandage', name: 'Bandage', category: 'Primitive', skill: 'herbalism', difficulty: 2, time: 5,
     inputs: [{ item: 'plant_fiber', count: 4 }], output: { item: 'bandage', count: 1 } },
+  { id: 'burn_charcoal', name: 'Burn charcoal', category: 'Woodworking', skill: 'firemaking', difficulty: 6, time: 12,
+    stations: ['kiln'], inputs: [{ item: 'log', count: 2 }], output: { item: 'charcoal', count: 4 } },
   { id: 'fishing_rod', name: 'Fishing rod', category: 'Primitive', skill: 'toolcrafting', difficulty: 5, time: 10,
     inputs: [{ item: 'shaft', count: 3 }, { item: 'cordage', count: 5 }], output: { item: 'fishing_rod', count: 1 } },
   { id: 'fine_fishing_rod', name: 'Fine fishing rod', category: 'Woodworking', skill: 'carpentry', difficulty: 14, time: 16, tool: 'knife',

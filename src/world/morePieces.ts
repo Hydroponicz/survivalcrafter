@@ -236,6 +236,17 @@ export function morePieceMesh(type: string, g: THREE.Group, tex: Tex, add: Add, 
       for (const x of [-0.2, 0.2]) { const t = add(new THREE.ConeGeometry(0.2, 0.3, 3), 0x8a1c1c, x, 1.2, 0.07, { roughness: 1 }); t.rotation.z = Math.PI; t.scale.z = 0.05; }
       return true;
     }
+    case 'charcoal_kiln': {
+      // A clamp: a dome of turf and earth over logs stood on end, a few log ends showing at the foot, a smoking vent at the top.
+      add(new THREE.SphereGeometry(0.95, 18, 10, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, 0.95, 1), 0x4a3a28, 0, 0, 0, { roughness: 1, flatShading: true });
+      add(new THREE.SphereGeometry(0.97, 18, 6, 0, Math.PI * 2, 0, 0.55).scale(1, 0.95, 1), 0x4e6a32, 0, 0, 0, { roughness: 1, flatShading: true });
+      for (let k = 0; k < 7; k++) {
+        const a = (k / 7) * Math.PI * 2 + 0.3;
+        tex(new THREE.CylinderGeometry(0.07, 0.07, 0.35, 6).rotateZ(Math.PI / 2).rotateY(-a), 'rough_wood', Math.cos(a) * 0.9, 0.1, Math.sin(a) * 0.9);
+      }
+      add(new THREE.CylinderGeometry(0.12, 0.15, 0.08, 10), 0x1a1410, 0, 0.9, 0, { roughness: 1 });
+      return true;
+    }
     case 'woodpile': {
       for (let r = 0; r < 3; r++) for (let k = 0; k < 6 - r; k++) {
         const l = tex(new THREE.CylinderGeometry(0.1, 0.1, 0.7, 7).rotateX(Math.PI / 2), 'rough_wood', -0.65 + r * 0.13 + k * 0.26, 0.1 + r * 0.18, 0);
