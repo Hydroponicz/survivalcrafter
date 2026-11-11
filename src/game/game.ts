@@ -25,6 +25,7 @@ import { prepareTiles, WorkerTiles } from '../world/tilesource';
 import { ViewCull } from '../world/cull';
 import { perf } from './perf';
 import { GpuTimer } from './gputimer';
+import { NightLights, nightAmount, setNight, type NightLight } from '../world/nightLights';
 import { telemetry } from './telemetry';
 import { TILE, tileOf, WorldGen } from '../world/worldgen';
 import {
@@ -165,6 +166,9 @@ export class Game {
   graphics = new GraphicsSettings();
   private lastFrame = -Infinity;
   private frameNo = 0;
+  /** Lanterns, lit windows and the halos round every lamp and torch at night. */
+  readonly nightLights = new NightLights();
+  private nightExtra: NightLight[] = [];
   /** The graphics card's own time per frame (shown small under the clock, and in the debug report). */
   gpu!: GpuTimer;
   private perfReportAt = 0;
@@ -322,7 +326,7 @@ export class Game {
     this.groundCover = new GroundCover(world);
     this.groundCover.view = this.grassCull;
     this.applyGraphics();
-    this.scene.add(this.groundCover.group, this.fireflies.points);
+    this.scene.add(this.groundCover.group, this.fireflies.points, this.nightLights.group);
     // A piece going up (or coming down) changes the grass round it: redraw the patches it reaches.
     this.view.onStructure = (o) => this.groundCover.invalidate(o.x, o.z, 4.5);
     // A find turning up (or going) where the grass is already drawn: redraw that patch round it.
@@ -3063,7 +3067,16 @@ export class Game {
     this.view.updateTreeDetail(this.camera.position.x, this.camera.position.z);
     this.view.syncAnimals(this.elapsed);
     this.view.syncCarts();
-    this.view.updateFires(p.pos.x, p.pos.z, this.elapsed);
+    // The lights of the night: lamps lit at dusk, windows aglow, torches carried, ships' lanterns.
+    {
+      const night = nightAmount(this.world.dayFraction);
+      setNight(night);
+      this.nightExtra.length = 0;
+      if (night > 0.02) { this.life.torchLights(this.nightExtra); this.view.shipLanterns(this.nightExtra); }
+      const t = this.world.terrain;
+      this.nightLights.update(this.renderDt, night, p.pos.x, p.pos.z, () => t.villages.planned(), (x, z) => t.heightAt(x, z), this.nightExtra);
+      this.view.updateFires(p.pos.x, p.pos.z, this.elapsed, night > 0.02 ? this.nightLights.lights : []);
+    }
     this.updateTorchLight();
     this.frameNo++;
     // (The first frame always draws them: until a shadow map exists, everything that receives shadows fails to draw.)

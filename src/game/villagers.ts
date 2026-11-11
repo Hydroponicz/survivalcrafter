@@ -24,6 +24,7 @@ import { STRUCTURES } from '../data/structures';
 import { mulberry32 } from '../world/noise';
 import { Mat } from '../world/terrain';
 import type { House, HouseRole, Village } from '../world/villages';
+import { nightAmount } from '../world/nightLights';
 import { cropKey, CROP_STAGES, type AnimalObj, type PileObj, type StructureObj, type TreeObj, type WorldObj } from '../world/world';
 import { ACTION_MAP, type ActionDef, type Ctx, type Target } from './actions';
 import { CharacterRig, characterLoaded, HOLD, SEGMENTS, segmentTime, type Clip, type Pose } from './character';
@@ -34,6 +35,8 @@ import { telemetry } from './telemetry';
 import { buildToolMesh } from './tools';
 import { disposeObject } from '../world/view';
 
+/** A torch to carry after dark (never in anyone's pack: just in hand). */
+const TORCH = { type: 'torch' } as Item;
 /** Villagers are drawn within this distance of you, and cast shadows within the second. */
 const VIEW_FAR = 120, SHADOW_NEAR = 35;
 /** Villagers come to life within this distance of their village, and are let go beyond the second. */
@@ -186,6 +189,21 @@ export class Villager {
 
   /** Time since the body was last posed (far off, it's posed every few frames). */
   animDt = 0;
+  /** Carrying a lit torch (after dark). */
+  torchLit = false;
+  /** Where the flame of the torch in hand is. */
+  torchTip(out: THREE.Vector3) {
+    // (The torch's own flame: the additive glow in it.)
+    let flame: THREE.Object3D | undefined = this.flameOf;
+    if (!flame || !flame.parent) {
+      this.held.traverse((o) => { const m = (o as THREE.Mesh).material as THREE.Material | undefined; if (!flame && m && m.blending === THREE.AdditiveBlending) flame = o; });
+      this.flameOf = flame;
+    }
+    if (flame) return flame.getWorldPosition(out);
+    this.held.updateMatrixWorld();
+    return out.set(0, 0.62, 0).applyMatrix4(this.held.matrixWorld);
+  }
+  private flameOf?: THREE.Object3D;
   private shadowOn = true;
   /** Cast a shadow only near you: each body in the shadow map is posed and drawn a second time. */
   shadows(on: boolean) {
@@ -248,9 +266,22 @@ export class VillageLife {
 
   /** Frames counted, to share the far bodies' updates out between frames. */
   private frame = 0;
+  /** How dark it is (set by the game each frame): out after dark, villagers carry torches. */
+  dark = 0;
+
+  /** Where the torches carried by villagers you can see are (for their halos, and the nearest for real light). */
+  torchLights(out: { x: number; y: number; z: number; strength: number }[]) {
+    const v = new THREE.Vector3();
+    for (const p of this.villagers) {
+      if (!p.torchLit || !p.model.visible) continue;
+      p.torchTip(v);
+      out.push({ x: v.x, y: v.y, z: v.z, strength: 0.55 });
+    }
+  }
   update(dt: number) {
     this.dressed = 0;
     this.frame++;
+    this.dark = nightAmount(this.g.world.dayFraction);
     this.checkT -= dt;
     if (this.checkT <= 0) { this.checkT = 1; this.refresh(); }
     const p = this.g.player.pos;
@@ -393,7 +424,12 @@ export class VillageLife {
   private think(v: Villager) {
     const h = this.hour;
     this.restock(v);
-    if (this.night()) { this.goToBed(v); return; }
+    if (this.night()) {
+      // The night watch: half the guards stay on their rounds all night, and in a village one neighbour walks round with a torch before turning in.
+      if (v.role === 'guard' && v.id % 2 === 0) { this.nightRounds(v); return; }
+      if (v.village.kind === 'village' && v.id % 9 === 0 && h >= 21.5) { this.nightRounds(v); return; }
+      this.goToBed(v); return;
+    }
     if (h < 7) { this.breakfast(v); return; }
     if (h >= 12 && h < 13) { this.lunch(v); return; }
     if (h >= 18.5) { this.evening(v); return; }
@@ -1030,6 +1066,15 @@ export class VillageLife {
     }
   }
 
+  /** The night watch: from door to door and round the square with a torch, stopping now and then to look about. */
+  private nightRounds(v: Villager) {
+    const vil = v.village;
+    const h = vil.houses[Math.floor(Math.random() * vil.houses.length)];
+    const spot = h && Math.random() < 0.7 ? h.door : { x: vil.square.x + (Math.random() - 0.5) * vil.square.r, z: vil.square.z + (Math.random() - 0.5) * vil.square.r };
+    this.walkTo(v, spot, 'on the night watch');
+    v.steps.push({ kind: 'pose', clip: 'idle', time: 6 + Math.random() * 10, doing: 'keeping watch' });
+  }
+
   /** A guard: keeps watch at a gate (the castle's, or one of the town's), sword in hand. */
   private guard(v: Villager) {
     const gates = v.village.gates;
@@ -1376,9 +1421,12 @@ export class VillageLife {
         pose = { kind: 'scrub', clip, time: segmentTime(seg, phase, def?.impactAt ?? 0.62) };
       } else pose = { kind: 'loop', clip };
     }
-    // A guard keeps their sword in hand.
+    // After dark, anyone out and about carries a torch, and a guard on watch always does; by day a guard keeps their sword in hand.
+    const out = !v.lying && (s?.kind === 'walk' || v.role === 'guard' || (s?.kind === 'pose' && s.doing === 'keeping watch'));
+    if (!item && this.dark > 0.5 && out) item = TORCH;
     if (!item && v.role === 'guard') item = v.inv.items.find((i) => i.type === 'iron_sword');
     v.hold(item);
+    v.torchLit = item === TORCH;
     // Further off, the body is updated less often (it's small on screen): every other frame past 30 m, every fourth past 60.
     const every = far > 60 ? 4 : far > 30 ? 2 : 1;
     v.animDt += dt;

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { Surface } from './surfaces';
 import { STRUCTURES } from '../data/structures';
+import { WINDOW_GLOW } from './nightLights';
 
 // Models of the newer building pieces (data/structures: more ways to build,
 // decor, and the waterside pieces), in the same photographed surfaces as the
@@ -106,6 +107,7 @@ export function morePieceMesh(type: string, g: THREE.Group, tex: Tex, add: Add, 
       tex(new THREE.BoxGeometry(0.05, 0.62, 0.06), 'rough_wood', 0, 1.25, 0);
       tex(new THREE.BoxGeometry(0.9, 0.05, 0.06), 'rough_wood', 0, 1.25, 0, { turn: true });
       tex(new THREE.BoxGeometry(2.04, 0.1, 0.44), 'stone', 0, 1.95, 0, { tint: 0xd8d4cc });
+      add(new THREE.BoxGeometry(0.88, 0.6, 0.02), 0x1c1f24, 0, 1.25, 0).material = WINDOW_GLOW;
       return true;
     }
     case 'palisade': {

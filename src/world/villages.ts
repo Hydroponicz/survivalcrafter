@@ -295,6 +295,13 @@ export class Villages {
     return ok;
   }
 
+  /** The settlements already planned (never plans one: safe to ask every frame). */
+  planned(): Village[] {
+    const out: Village[] = [];
+    for (const v of this.cells.values()) if (v) out.push(v);
+    return out;
+  }
+
   /** The settlement planned in a grid square (or null), planning it if need be. */
   inCell(cx: number, cz: number): Village | null {
     if (!this.ready) return null;

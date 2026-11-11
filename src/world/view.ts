@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { lanternModel, WINDOW_GLOW, type NightLight } from './nightLights';
 import { leafMaterial, SPECIES, treeGeometries, TREES } from './trees';
 import { FORAGE, FORAGE_SPECIES } from '../data/forage';
 import { forageGeometry, forageScale, LOW_FINDS } from './forageProps';
@@ -753,6 +754,14 @@ export class WorldView implements WorldListener {
       if (!m) {
         m = vesselModel(c.type, loaded, c.ship);
         m.userData.sig = sig;
+        // A finished ship carries lanterns: at the stern, at the bow, and one below, in the hold.
+        if (c.ship && c.ship.done >= 1) {
+          const s = shipStats(c.ship.design), D = s.D - (c.ship.design.decked ? 0.3 : 0);
+          const spots = [new THREE.Vector3(0, D + 1.3, -s.L / 2 + 0.7), new THREE.Vector3(0, D + 0.9, s.L / 2 - 1.2), new THREE.Vector3(0, D * 0.55, 0),
+            new THREE.Vector3(s.B / 2 - 0.15, D + 0.6, -s.L * 0.12), new THREE.Vector3(-s.B / 2 + 0.15, D + 0.6, -s.L * 0.12)];
+          for (const p of spots) { const l = lanternModel(); l.position.copy(p); m.add(l); }
+          m.userData.lanterns = spots;
+        }
         this.cartMeshes.set(c.id, m);
         this.group.add(m);
       }
@@ -820,18 +829,40 @@ export class WorldView implements WorldListener {
     }
   }
 
-  /** Flicker flames and park the light pool on the fires nearest the player. */
-  updateFires(px: number, pz: number, time: number) {
+  /** Where the ships' lanterns are this frame (for their halos, and the nearest for real light). */
+  shipLanterns(out: NightLight[]) {
+    const v = new THREE.Vector3();
+    for (const m of this.cartMeshes.values()) {
+      const spots = m.userData.lanterns as THREE.Vector3[] | undefined;
+      if (!spots) continue;
+      m.updateMatrixWorld();
+      for (const p of spots) { v.copy(p).applyMatrix4(m.matrixWorld); out.push({ x: v.x, y: v.y, z: v.z, strength: 0.5 }); }
+    }
+  }
+
+  /** Flicker flames and park the light pool on the fires nearest the player (and, at night, lanterns and torches). */
+  updateFires(px: number, pz: number, time: number, night: NightLight[] = []) {
     const lit: StructureObj[] = [];
     // Only built things carry a flame: look through those, not everything around.
     for (const id of this.meshes.keys()) {
       const o = this.world.objects.get(id);
       if (o?.kind === 'structure' && o.lit && Math.abs(o.x - px) < 40 && Math.abs(o.z - pz) < 40) lit.push(o);
     }
-    lit.sort((a, b) => Math.hypot(a.x - px, a.z - pz) - Math.hypot(b.x - px, b.z - pz));
+    // Fires and lamps together, nearest first.
+    type Src = { x: number; y: number; z: number; f?: StructureObj; strength: number };
+    const srcs: Src[] = lit.map((f) => ({ x: f.x, y: f.y, z: f.z, f, strength: 1 }));
+    for (const n of night) srcs.push(n);
+    srcs.sort((a, b) => Math.hypot(a.x - px, a.z - pz) - Math.hypot(b.x - px, b.z - pz));
     this.fireLights.forEach((l, i) => {
-      const f = lit[i];
-      if (!f) { l.intensity = 0; return; }
+      const s = srcs[i];
+      if (!s) { l.intensity = 0; return; }
+      if (!s.f) {
+        // A lantern or a torch carried: a steadier, smaller light where it hangs.
+        l.position.set(s.x, s.y, s.z);
+        l.intensity = (7 + Math.sin(time * 9 + i) * 0.6) * s.strength;
+        return;
+      }
+      const f = s.f;
       // A fire's light, or a torch's (weaker, up where its flame is).
       const glow = STRUCTURES[f.type].glow;
       const out = glow?.out ?? 0;
@@ -1687,6 +1718,8 @@ export function buildPieceMesh(type: string, state: { lit?: boolean; open?: bool
       }
       tex(new THREE.BoxGeometry(0.05, 0.62, 0.06), 'rough_wood', 0, 1.25, 0);
       tex(new THREE.BoxGeometry(0.9, 0.05, 0.06), 'rough_wood', 0, 1.25, 0, { turn: true });
+      // The pane: dark by day, lamplight behind it at night.
+      add(new THREE.BoxGeometry(0.88, 0.6, 0.02), 0x1c1f24, 0, 1.25, 0).material = WINDOW_GLOW;
       break;
     }
     case 'gable': {
@@ -2041,10 +2074,10 @@ function townhouseMesh(type: string, tex: (geo: THREE.BufferGeometry, s: Surface
     const fz = -(k === 0 ? D / 2 : D / 2 + jut) - 0.02;
     for (let x = -W / 2 + 1; x < W / 2; x += 2) {
       if (k === 0 && x === -W / 2 + 1) continue; // the door's bay
-      add(new THREE.BoxGeometry(0.7, 0.8, 0.06), 0x1c1f24, x, H * k + 1.3, fz, { roughness: 0.3, metalness: 0.1 });
+      add(new THREE.BoxGeometry(0.7, 0.8, 0.06), 0x1c1f24, x, H * k + 1.3, fz).material = WINDOW_GLOW;
       tex(new THREE.BoxGeometry(0.86, 0.1, 0.1), 'rough_wood', x, H * k + 0.86, fz, { turn: true });
       // (and at the back)
-      add(new THREE.BoxGeometry(0.7, 0.8, 0.06), 0x1c1f24, x, H * k + 1.3, D / 2 + 0.02, { roughness: 0.3, metalness: 0.1 });
+      add(new THREE.BoxGeometry(0.7, 0.8, 0.06), 0x1c1f24, x, H * k + 1.3, D / 2 + 0.02).material = WINDOW_GLOW;
     }
   }
   tex(new THREE.BoxGeometry(1.0, 1.95, 0.1), 'dark_planks', -W / 2 + 1, 0.98, -D / 2 - 0.04);
