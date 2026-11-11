@@ -1206,6 +1206,8 @@ export class Game {
     const label = typeof def.label === 'function' ? def.label(ctx) : def.label;
     // Making fire: the kit is laid out on the ground, beside the fire or torch you're lighting, or before you.
     if (spec.kind === 'bowdrill' && !spec.spot) spec = { ...spec, spot: this.fireSpot(ctx) };
+    // Whittling: kneeling, the branch laid across a log on the ground before you.
+    if (spec.kind === 'carve' && !spec.spot) spec = { ...spec, spot: this.fireSpot({ ...ctx, t: { kind: 'none' } }) };
     // Work that isn't on a piece in the world is set down where you are, on the ground (or the deck, or floor) before you.
     const p0 = this.player, fw = p0.forward();
     const anchor = {

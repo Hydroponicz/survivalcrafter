@@ -27,6 +27,9 @@ const OUTLINES: Record<string, [number, number][]> = {
 /** A cap: a circle. */
 for (const k of ['hide_cap']) OUTLINES[k] = Array.from({ length: 18 }, (_, i) => [Math.cos((i / 18) * Math.PI * 2) * -0.24, Math.sin((i / 18) * Math.PI * 2) * 0.2] as [number, number]);
 
+/** Whether the knife work is cutting an outline from a plank or hide (else whittling a stick). */
+export const isFlatCarve = (make: string | undefined, wide = false) => !!OUTLINES[make ?? (wide ? 'wooden_shovel' : 'shaft')];
+
 const BARK = 0x5a3c22, PARED = 0xc79a64, SMOOTH = 0xe0bc84;
 
 export class CarveGame extends Minigame {

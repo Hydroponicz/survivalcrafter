@@ -3,7 +3,8 @@ import { Minigame, type Blocked, type MgInput } from './core';
 import { CordageGame } from './cordage';
 import { CrankGame, type CrankVariant } from './crank';
 import { CenterGame, HeatGame, PlaceGame, type HeatVariant, type PlaceVariant } from './shape';
-import { CarveGame } from './whittle';
+import { CarveGame, isFlatCarve } from './whittle';
+import { WhittleGame, type CarveSpot } from './whittleWorld';
 import { BuildGame } from './build';
 import { ChopGame, type BlockSpot, type ChopVariant } from './chop';
 import { FireDrillGame, type FireSpot } from './firedrill';
@@ -27,7 +28,7 @@ export type MinigameSpec =
   | { kind: 'quench'; gear?: number }
   | { kind: 'crank'; variant: CrankVariant; turns: number }
   | { kind: 'strike'; variant: StrikeVariant; hits: number; gear?: number; heat?: number; iron?: boolean }
-  | { kind: 'carve'; passes: number; wide?: boolean; make?: string }
+  | { kind: 'carve'; passes: number; wide?: boolean; make?: string; spot?: CarveSpot }
   | { kind: 'heat'; variant: HeatVariant }
   | { kind: 'place'; variant: PlaceVariant; count: number }
   | { kind: 'center' }
@@ -65,7 +66,14 @@ export function createMinigame(spec: MinigameSpec, ease: number, toolType?: stri
     case 'quench': return new QuenchGame(ease, spec.gear ?? 0.5);
     case 'crank': return new CrankGame(ease, spec.variant, spec.turns);
     case 'strike': return new StrikeGame(ease, spec.variant, spec.hits, { anvil: spec.gear, heat: spec.heat, iron: spec.iron }, toolType);
-    case 'carve': return new CarveGame(ease, spec.passes, spec.wide, toolType, spec.make);
+    case 'carve': {
+      // Whittling a stick: out in the world, kneeling where you are. (Cutting an outline from a plank or hide: at the bench.)
+      if (camera && !isFlatCarve(spec.make, spec.wide)) {
+        const f = new THREE.Vector3(); camera.getWorldDirection(f); f.y = 0; f.normalize();
+        return new WhittleGame(ease, spec.passes, spec.spot ?? { x: camera.position.x + f.x * 0.8, y: camera.position.y - 1.6, z: camera.position.z + f.z * 0.8 }, camera, toolType, spec.make);
+      }
+      return new CarveGame(ease, spec.passes, spec.wide, toolType, spec.make);
+    }
     case 'heat': return new HeatGame(ease, spec.variant);
     case 'place': return new PlaceGame(ease, spec.variant, spec.count);
     case 'center': return new CenterGame(ease);
@@ -75,8 +83,8 @@ export function createMinigame(spec: MinigameSpec, ease: number, toolType?: stri
 }
 
 /** Work played out in the world itself (building, splitting at the block), drawn by the game's own camera. */
-function inWorld(mg: Minigame): mg is (BuildGame | ChopGame | FireDrillGame | BoulderGame | FishGame) {
-  return mg instanceof BuildGame || mg instanceof ChopGame || mg instanceof FireDrillGame || mg instanceof BoulderGame || mg instanceof FishGame;
+function inWorld(mg: Minigame): mg is (BuildGame | ChopGame | FireDrillGame | BoulderGame | FishGame | WhittleGame) {
+  return mg instanceof BuildGame || mg instanceof ChopGame || mg instanceof FireDrillGame || mg instanceof BoulderGame || mg instanceof FishGame || mg instanceof WhittleGame;
 }
 
 /** The hands-on work for each recipe. */
