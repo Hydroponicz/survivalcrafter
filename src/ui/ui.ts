@@ -22,6 +22,8 @@ import { QUICK_MARGIN, type Game, type MsgKind } from '../game/game';
 import { minigameVerb, RECIPE_MINIGAMES } from '../game/minigames';
 import { Mat, MAT_NAMES } from '../world/terrain';
 import { NEED_ICONS, SETTLEMENT_ICON, WILDS_ICON } from './hudArt';
+import { STALLS } from '../data/tradePieces';
+import type { Village } from '../world/villages';
 import { professionById, rankById } from '../data/professions';
 import { tierOf } from '../game/reputation';
 import { ANIMALS, cropKey, type CartObj, type PileObj, type StructureObj } from '../world/world';
@@ -35,6 +37,17 @@ const JOB_WORDS: Record<HouseRole, string> = {
   priest: 'the church\'s needs', mayor: 'the town\'s needs', merchant: 'trade goods', baker: 'baker\'s work', carpenter: 'carpenter\'s work',
   lord: 'the castle\'s needs', noble: 'fine goods', innkeeper: 'the tavern\'s needs', guard: 'the garrison\'s needs', performer: 'the playhouse\'s needs', dockhand: 'the harbour\'s needs',
 };
+/**
+ * Whether holding something lets you do anything with it: tools and weapons,
+ * a torch, fuel (fed to a fire), things set down or planted from the hand
+ * (seeds, a sprout, a jar to fill, an apple for a horse). Food and the like
+ * have nothing to do in the hand: they're eaten from the pack.
+ */
+const HELD_USES = new Set(['wheat_seeds', 'sprout', 'clay_jar', 'apple', 'torch']);
+function usableInHand(type: string): boolean {
+  const d = itemDef(type);
+  return !!(d.tool || d.damage || d.places || d.fuel || HELD_USES.has(type));
+}
 const fmtCoins = (n: number) => (Number.isInteger(n) ? `${n}` : n.toFixed(1));
 
 type WindowName = 'inventory' | 'character' | 'crafting' | 'skills' | 'build' | 'help' | 'container' | 'dev' | 'journal' | 'quests' | 'map' | 'store' | 'shipyard';
@@ -964,7 +977,7 @@ export class UI {
     if (def.wear) {
       const on = items.some((i) => g.equipped[def.wear!.slot] === i.uid);
       actions.push(on ? { label: 'Take off', fn: () => g.takeOff(def.wear!.slot) } : { label: 'Wear', fn: (it) => g.putOn(it.uid) });
-    } else actions.push({ label: isActive ? 'Put away' : 'Use', fn: (it) => g.setActive(isActive ? null : it.uid) });
+    } else if (isActive || usableInHand(type)) actions.push({ label: isActive ? 'Put away' : 'Hold', fn: (it) => g.setActive(isActive ? null : it.uid) });
     if (def.food) actions.push({ label: def.food.verb ?? (def.food.nutrition || def.food.effect ? 'Eat' : 'Drink'), fn: (it) => g.eat(it.uid) });
     if (def.sips) actions.push({ label: 'Drink', fn: (it) => g.drinkCanteen(it.uid) });
     if (def.holds) {
@@ -1310,6 +1323,9 @@ export class UI {
     const eco = g.economy, v = eco.villageOf(s);
     const body = el('div');
     if (!v) { body.appendChild(el('div', 'empty', 'This storehouse belongs to no village.')); this.frame('store', 'Storehouse', body); return; }
+    // A market stall: just its own wares (out of the same stores).
+    const stall = s.type.startsWith('stall_') ? STALLS[s.type.slice(6)] : undefined;
+    if (stall) { this.renderStall(v, stall, body); return; }
     const l = eco.ledger(v);
     const meals = eco.meals(v), pop = eco.population(v);
     body.appendChild(el('div', 'store-head',
@@ -1375,6 +1391,37 @@ export class UI {
       body.appendChild(row);
     }
     this.frame('store', `${esc(v.name)} storehouse`, body);
+  }
+
+  /** A market stall's counter: what it sells (and buys back), at the town's prices. */
+  private renderStall(v: Village, stall: { name: string; goods: string[] }, body: HTMLElement) {
+    const g = this.g, eco = g.economy;
+    body.appendChild(el('div', 'store-head', `<span>Your purse: <b>${fmtCoins(g.coins)}</b> coins</span><span>${esc(v.name)} market</span>`));
+    body.appendChild(el('div', 'hint', 'Prices follow supply and demand. What runs short is brought in by the merchants each morning.'));
+    let shown = 0;
+    for (const item of stall.goods) {
+      if (!ITEMS[item]) continue;
+      const stock = eco.stock(v, item), have = g.inv.count(item);
+      const buy = eco.price(v, item, 'buy'), sell = eco.price(v, item, 'sell');
+      const row = el('div', 'item-row');
+      row.innerHTML = `<span class="icon">${itemIcon(item)}</span><span class="name">${esc(itemDef(item).name)} <b>${stock}</b><small>${stock ? `buy ${buy}` : 'sold out today'} · sells to it for ${sell}${have ? ` · you have ${have}` : ''}</small></span>`;
+      const b = el('span', 'btns');
+      const btn = (label: string, tip: string, fn: () => void, off = false) => {
+        const e2 = el('button', '', label); e2.dataset.tip = tip; if (off) e2.setAttribute('disabled', '');
+        e2.addEventListener('click', (ev) => { ev.stopPropagation(); fn(); this.refresh(); });
+        return e2;
+      };
+      b.append(
+        btn(`Buy (${buy})`, `Buy one for ${buy} coins.`, () => eco.buy(v, item), !stock || g.coins < buy),
+        btn('Buy 5', `Buy five for about ${buy * 5} coins.`, () => { for (let k = 0; k < 5; k++) if (!eco.buy(v, item)) break; }, stock < 5 || g.coins < buy * 5),
+        btn('Sell 1', `Sell one for ${sell} coins.`, () => eco.sell(v, g.inv.ofType(item).slice(-1)), !have),
+      );
+      row.appendChild(b);
+      body.appendChild(row);
+      shown++;
+    }
+    if (!shown) body.appendChild(el('div', 'empty', 'Nothing on the counter today.'));
+    this.frame('store', esc(stall.name), body);
   }
 
   // ---------- the crafting menu: smart tabs and categories down the side, a search, the recipes as pictures, the chosen one in detail

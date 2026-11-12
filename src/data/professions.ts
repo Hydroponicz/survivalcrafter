@@ -64,7 +64,8 @@ export const WANDERER: Profession = {
   skills: [], quests: [], kit: { all: [] },
 };
 
-const BASIC: [string, number][] = [['stone_knife', 1], ['berries', 10], ['fire_kit', 1]];
+// Every trade starts with a knife, food, a fire kit and fuel enough to get a fire, a kiln or an oven going a few times.
+const BASIC: [string, number][] = [['stone_knife', 1], ['berries', 10], ['fire_kit', 1], ['kindling', 8], ['branch', 6], ['log', 2]];
 
 export const PROFESSIONS: Profession[] = [
   { id: 'woodcutter', name: 'Woodcutter', icon: '🪓', house: 'woodcutter',
@@ -76,13 +77,13 @@ export const PROFESSIONS: Profession[] = [
   { id: 'charcoal', name: 'Charcoal burner', icon: '⚫', house: 'woodcutter',
     blurb: 'Hard, smoky work in the woods: stack logs into a kiln, cover it over and burn them slowly into charcoal for the smiths.',
     chain: 'Trees → logs → charcoal',
-    skills: ['firemaking', 'woodcutting'], quests: ['woodcutting', 'charcoal'],
+    skills: ['firemaking', 'woodcutting'], quests: ['woodcutting', 'charcoal', 'fuel'],
     kit: { all: BASIC, apprentice: [['stone_hatchet', 1]], journeyman: [['stone_hatchet', 1], ['wooden_shovel', 1], ['log', 4]], master: [['iron_hatchet', 1], ['wooden_shovel', 1], ['log', 6], ['charcoal', 8]] },
     workshop: ['charcoal_kiln', 'chopping_block'] },
   { id: 'hunter', name: 'Hunter', icon: '🏹', house: 'butcher',
     blurb: 'Track deer and boar, bring them down, butcher them for meat and take their hides.',
     chain: 'Game → meat and hides → leather',
-    skills: ['fighting', 'butchering'], quests: ['hunting', 'butchering', 'skinning'],
+    skills: ['fighting', 'butchering'], quests: ['hunting', 'butchering', 'skinning', 'fuel'],
     kit: { all: BASIC, apprentice: [['stone_spear', 1]], journeyman: [['stone_spear', 1], ['bow', 1], ['quiver', 1], ['arrow', 12]], master: [['bow', 1], ['quiver', 1], ['arrow', 24], ['iron_knife', 1], ['hide', 4]] },
     workshop: ['drying_rack', 'hide_tent'] },
   { id: 'tailor', name: 'Tailor', icon: '🧵', house: 'villager',
@@ -99,18 +100,18 @@ export const PROFESSIONS: Profession[] = [
   { id: 'baker', name: 'Baker', icon: '🍞', house: 'baker',
     blurb: 'Grind the grain, mix the dough and bake the bread the whole village lives on.',
     chain: 'Wheat → flour → dough → bread',
-    skills: ['cooking', 'farming'], quests: ['milling', 'baking', 'cooking'],
-    kit: { all: BASIC, apprentice: [['wheat', 4], ['clay_jar', 1]], journeyman: [['wheat', 8], ['flour', 2], ['jar_of_water', 2]], master: [['wheat', 12], ['flour', 4], ['jar_of_water', 3], ['bread', 4], ['wooden_hammer', 1]] },
+    skills: ['cooking', 'farming'], quests: ['milling', 'baking', 'cooking', 'fuel'],
+    kit: { all: BASIC, apprentice: [['wheat', 4], ['jar_of_water', 3], ['clay_jar', 1]], journeyman: [['wheat', 8], ['flour', 2], ['jar_of_water', 4]], master: [['wheat', 12], ['flour', 4], ['jar_of_water', 3], ['bread', 4], ['wooden_hammer', 1]] },
     workshop: ['quern', 'campfire'] },
   { id: 'fisher', name: 'Fisher', icon: '🎣',
     blurb: 'Cast your line from the banks, the jetties and your own boat, and bring home the catch.',
     chain: 'Rod and line → fish → cooked fish',
-    skills: ['fishing', 'cooking'], quests: ['fisher', 'cooking', 'boatwright'],
+    skills: ['fishing', 'cooking'], quests: ['fisher', 'cooking', 'boatwright', 'fuel'],
     kit: { all: BASIC, apprentice: [['fishing_rod', 1]], journeyman: [['fishing_rod', 1], ['paddle', 1]], master: [['fine_fishing_rod', 1], ['paddle', 1], ['cooked_fish', 4]] } },
   { id: 'potter', name: 'Potter', icon: '⚱️', house: 'potter',
     blurb: 'Dig clay from the riverbanks, throw pots on the wheel and fire them hard.',
     chain: 'Clay → pots and jars → crucibles and mortar',
-    skills: ['pottery', 'digging'], quests: ['potter', 'masonry'],
+    skills: ['pottery', 'digging'], quests: ['potter', 'masonry', 'fuel'],
     kit: { all: BASIC, apprentice: [['wooden_shovel', 1]], journeyman: [['wooden_shovel', 1], ['clay', 6], ['clay_jar', 1]], master: [['iron_shovel', 1], ['clay', 10], ['sand', 4], ['clay_jar', 2]] },
     yard: ['pottery_kiln'] },
   { id: 'mason', name: 'Stonemason', icon: '🧱',
@@ -121,7 +122,7 @@ export const PROFESSIONS: Profession[] = [
   { id: 'smith', name: 'Blacksmith', icon: '⚒️', house: 'smith',
     blurb: 'Mine ore, smelt it into iron and hammer out the tools and weapons everyone else needs.',
     chain: 'Ore → iron → tools and weapons',
-    skills: ['smithing', 'mining'], quests: ['mining', 'smithing', 'combat'],
+    skills: ['smithing', 'mining'], quests: ['mining', 'smithing', 'combat', 'fuel'],
     kit: { all: BASIC, apprentice: [['stone_pickaxe', 1], ['wooden_hammer', 1]], journeyman: [['stone_pickaxe', 1], ['wooden_hammer', 1], ['wooden_tongs', 1], ['iron_ore', 3]], master: [['iron_pickaxe', 1], ['iron_hammer', 1], ['iron_tongs', 1], ['crucible', 1], ['iron_lump', 4], ['charcoal', 10]] },
     workshop: ['forge', 'bellows', 'anvil'] },
   { id: 'carpenter', name: 'Carpenter', icon: '🪚', house: 'carpenter',

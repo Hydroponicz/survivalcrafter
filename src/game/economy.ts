@@ -66,7 +66,18 @@ export const GOODS: Record<string, GoodDef> = {
   iron_shovel: { value: 38, want: 2, job: 'smith' },
   iron_hatchet: { value: 42, want: 2, job: 'smith' },
   iron_pickaxe: { value: 50, want: 1, job: 'smith' },
+  // The market's fruit, and the potter's ware (jars, and jars of water for the road).
+  apple: { value: 2, want: 6, job: 'farmer' },
+  berries: { value: 1, want: 6, job: 'villager' },
+  clay_jar: { value: 8, want: 3, job: 'potter' },
+  jar_of_water: { value: 9, want: 4, job: 'potter' },
+  crucible: { value: 14, want: 1, job: 'potter' },
 };
+/** What a market's stalls are kept stocked with: when one runs low, the merchants bring more (so many, if the treasury can pay). */
+const MARKET: [string, number, number][] = [
+  ['kindling', 6, 12], ['branch', 4, 8], ['log', 4, 6], ['charcoal', 2, 4], ['apple', 4, 10], ['berries', 3, 8],
+  ['bread', 4, 8], ['clay_jar', 2, 4], ['jar_of_water', 2, 6], ['cooked_meat', 3, 6], ['hide', 1, 3],
+];
 
 /** What a new village has in store, and in its treasury. */
 const START: [string, number][] = [
@@ -75,8 +86,9 @@ const START: [string, number][] = [
 ];
 /** A town's stores are bigger (and it has bread and sawn timber). */
 const TOWN_START: [string, number][] = [
-  ['wheat', 20], ['bread', 16], ['cooked_meat', 8], ['flour', 4], ['log', 12], ['plank', 10], ['refined_plank', 6], ['kindling', 12],
-  ['iron_lump', 6], ['shaft', 10], ['branch', 6], ['wheat_seeds', 6],
+  ['wheat', 20], ['bread', 16], ['cooked_meat', 8], ['flour', 4], ['log', 12], ['plank', 10], ['refined_plank', 6], ['kindling', 16],
+  ['iron_lump', 6], ['shaft', 10], ['branch', 10], ['wheat_seeds', 6], ['charcoal', 4],
+  ['apple', 12], ['berries', 10], ['clay_jar', 6], ['jar_of_water', 8], ['crucible', 1], ['hide', 2],
 ];
 const START_TREASURY = 250, TOWN_TREASURY = 900, CITY_TREASURY = 2500;
 
@@ -255,6 +267,8 @@ export class Economy {
       bought += Math.round(afford * each);
     };
     if (this.stock(v, 'iron_lump') < 2) buyIn('iron_lump', 3);
+    // A town's market stalls kept in what they sell.
+    if (v.kind !== 'village') for (const [item, low, n] of MARKET) if (this.stock(v, item) < low) buyIn(item, n, 1.15);
     if (this.stock(v, 'wheat_seeds') < 6) buyIn('wheat_seeds', 10);
     // Enough grain for everyone's two meals a day (a town has no fields of its own: it lives on what comes in).
     const short = this.population(v) * 2 - this.meals(v);

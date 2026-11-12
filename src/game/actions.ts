@@ -170,6 +170,9 @@ function cropAt(c: Ctx): { key: number; crop?: Crop } {
   return { key, crop: c.g.world.crops.get(key) };
 }
 
+/** How many hides a beast's skin cuts into, before skill (the bigger the animal, the more). */
+const HIDES: Record<string, number> = { deer: 2, boar: 2, sheep: 2, wolf: 2, horse: 3, ox: 4 };
+
 /** A tamed ox close to the aimed-at cart (to hitch it to). */
 function nearOx(c: Ctx): AnimalObj | undefined {
   if (c.t.kind !== 'cart') return undefined;
@@ -1068,6 +1071,7 @@ export const ACTIONS: ActionDef[] = [
       s.fuel += itemDef(f.type).fuel! * (0.6 + f.ql / 250);
       c.g.world.changed(s);
       c.g.msg(`You add the ${itemName(f).toLowerCase()} to the fire.`, 'info');
+      c.g.quests?.note('fueled');
     },
   },
   {
@@ -1096,6 +1100,26 @@ export const ACTIONS: ActionDef[] = [
     show: (c) => { const s = obj(c, 'structure'); return !!s && s.built && !!STRUCTURES[s.type].container && s.type !== 'village_store'; },
     time: 0,
     run: (c) => c.g.ui.openContainer(obj(c, 'structure')!),
+  },
+  {
+    // A market stall: buy (and sell) what it deals in, out of the town's stores.
+    id: 'open_stall', label: (c) => `Buy at the ${STRUCTURES[obj(c, 'structure')!.type].name.toLowerCase()}`,
+    show: (c) => !!obj(c, 'structure')?.type.startsWith('stall_'),
+    time: 0,
+    run: (c) => c.g.ui.openStore(obj(c, 'structure')!),
+  },
+  {
+    // At the tavern: a jar of water for the road (the jar's yours to keep).
+    id: 'buy_water', label: (c) => (c.t.kind === 'villager' ? `Buy a jar of water (${c.g.economy.price(c.t.villager.village, 'jar_of_water', 'buy')} coins)` : 'Buy a jar of water'),
+    show: (c) => c.t.kind === 'villager' && c.t.villager.role === 'innkeeper',
+    check: (c) => {
+      if (c.t.kind !== 'villager') return '';
+      const v = c.t.villager.village, eco = c.g.economy;
+      if (eco.stock(v, 'jar_of_water') < 1) return 'The tavern has no filled jars left today. Come back tomorrow.';
+      return c.g.coins < eco.price(v, 'jar_of_water', 'buy') ? 'You can\'t afford it.' : null;
+    },
+    time: 0,
+    run: (c) => { if (c.t.kind === 'villager' && c.g.economy.buy(c.t.villager.village, 'jar_of_water')) c.g.msg('The innkeeper hands you a jar of water, stoppered for the road.', 'good'); },
   },
   {
     // The village's stores: buy and sell, and take on its work.
@@ -1255,10 +1279,15 @@ export const ACTIONS: ActionDef[] = [
       const species = corpseSpecies(corpse.label);
       const meat = Math.max(1, ANIMALS[species].meat + (o.success ? 1 : -1));
       c.g.give('raw_meat', o.ql, meat);
-      if (o.success) c.g.give('hide', o.ql, 1);
+      // Hides by the size of the beast (a big ox's skin cuts into several), more as your skill grows; a botched job ruins some.
+      const skill = c.g.skills.get('butchering');
+      const full = (HIDES[species] ?? 2) + Math.floor(skill / 30) + (Math.random() < (skill % 30) / 30 ? 1 : 0);
+      const hides = o.success ? full : Math.max(0, Math.floor(full / 2));
+      if (hides) c.g.give('hide', o.ql, hides);
       if (p.items.length === 0) c.g.world.remove(p);
       else c.g.world.changed(p);
-      c.g.msg(`You butcher the ${ANIMALS[species].name.replace('Wild ', '').toLowerCase()}: ${meat} meat${o.success ? ' and a hide' : '. The hide is ruined'}.`, o.success ? 'good' : 'info');
+      const what = hides ? `${hides} hide${hides > 1 ? 's' : ''}` : 'no hide (it was ruined)';
+      c.g.msg(`You butcher the ${ANIMALS[species].name.replace('Wild ', '').toLowerCase()}: ${meat} meat and ${what}${!o.success && hides ? ' (some were ruined)' : ''}.`, o.success ? 'good' : 'info');
       c.g.quests?.note('butchered');
     },
   },

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { Surface } from './surfaces';
-import { SIGNS } from '../data/tradePieces';
+import { SIGNS, STALLS } from '../data/tradePieces';
 
 // Models for the trades' signs and yards (data/tradePieces). Origin at the
 // bottom centre, front toward +z (for a sign: out from the wall it's hung on).
@@ -84,8 +84,74 @@ function sign(trade: string, tex: Tex, add: Add) {
   }
 }
 
+/** A market stall: a counter, posts and an awning in its colours, and its goods piled on the counter. */
+function stall(kind: string, tex: Tex, add: Add) {
+  const s = STALLS[kind];
+  tex(new THREE.BoxGeometry(2.0, 0.85, 0.6), 'planks', 0, 0.43, -0.4);
+  tex(new THREE.BoxGeometry(2.1, 0.06, 0.7), 'dark_planks', 0, 0.88, -0.4, { turn: true });
+  for (const [x, z, h] of [[-0.95, -0.7, 2.0], [0.95, -0.7, 2.0], [-0.95, 0.4, 2.3], [0.95, 0.4, 2.3]]) tex(new THREE.BoxGeometry(0.08, h, 0.08), 'rough_wood', x, h / 2, z);
+  for (let k = 0; k < 6; k++) {
+    const st = add(new THREE.BoxGeometry(0.36, 0.03, 1.4), s.awning[k % 2], -0.9 + k * 0.36, 2.15, -0.15, { roughness: 1 });
+    st.rotation.x = -0.22;
+  }
+  const y = 0.91, z = -0.42;
+  switch (kind) {
+    case 'firewood':
+      // Bundles of kindling tied with cord, split logs stacked, a basket of charcoal.
+      for (let b = 0; b < 2; b++) {
+        for (let k = 0; k < 7; k++) { const st = add(new THREE.CylinderGeometry(0.018, 0.02, 0.5, 5).rotateZ(Math.PI / 2), 0xc8a070, -0.6 + b * 0.0, y + 0.04 + (k % 3) * 0.035 + b * 0.12, z - 0.06 + Math.floor(k / 3) * 0.035, { roughness: 1 }); st.rotation.y = 0.05 * k; }
+        add(new THREE.TorusGeometry(0.06, 0.008, 4, 10).rotateY(Math.PI / 2), 0x8a7a5a, -0.6, y + 0.07 + b * 0.12, z - 0.03, { roughness: 1 });
+      }
+      for (let k = 0; k < 5; k++) tex(new THREE.CylinderGeometry(0.07, 0.07, 0.45, 7).rotateX(Math.PI / 2), 'log_wall', 0.05 + (k % 3) * 0.15, y + 0.07 + Math.floor(k / 3) * 0.13, z);
+      add(new THREE.CylinderGeometry(0.16, 0.13, 0.14, 10), 0x6a5030, 0.65, y + 0.07, z, { roughness: 1 });
+      add(new THREE.SphereGeometry(0.14, 8, 5).scale(1, 0.4, 1), 0x1a1816, 0.65, y + 0.14, z, { roughness: 1, flatShading: true });
+      break;
+    case 'fruit':
+      // Baskets heaped with apples and berries.
+      for (const [bx, col, n] of [[-0.55, 0xc0281e, 9], [0.0, 0x8a1e14, 9], [0.55, 0x3a3a9a, 12]] as [number, number, number][]) {
+        add(new THREE.CylinderGeometry(0.22, 0.17, 0.15, 12), 0x8a6a3a, bx, y + 0.07, z, { roughness: 1 });
+        for (let k = 0; k < n; k++) {
+          const a = k * 2.4, r = 0.05 + (k % 3) * 0.05, s2 = col === 0x3a3a9a ? 0.035 : 0.06;
+          add(new THREE.SphereGeometry(s2, 7, 5), col, bx + Math.cos(a) * r, y + 0.16 + (k % 2) * 0.03, z + Math.sin(a) * r, { roughness: 0.5 });
+        }
+      }
+      break;
+    case 'bread':
+      // Loaves in rows, a sack of flour, a sheaf.
+      for (let k = 0; k < 6; k++) add(new THREE.SphereGeometry(0.1, 8, 6).scale(1.4, 0.7, 0.9), 0xb07a3a, -0.75 + (k % 3) * 0.24, y + 0.06 + Math.floor(k / 3) * 0.08, z - 0.08 + Math.floor(k / 3) * 0.1, { roughness: 0.9 });
+      add(new THREE.SphereGeometry(0.2, 8, 6).scale(1, 1.2, 0.9), 0xd8c8a0, 0.45, y + 0.18, z, { roughness: 1 });
+      add(new THREE.CircleGeometry(0.1, 10).rotateX(-Math.PI / 2), 0xf6f0e4, 0.45, y + 0.4, z, { roughness: 1 });
+      break;
+    case 'pots':
+      // Jars and pots of all sizes, a couple glistening wet (full of water).
+      for (let k = 0; k < 6; k++) {
+        const sc = 0.75 + (k % 3) * 0.2, x = -0.75 + k * 0.3, col = [0xb8653a, 0xc8865a, 0x9a5a3a][k % 3];
+        add(new THREE.SphereGeometry(0.1 * sc, 10, 8).scale(1, 1.2, 1), col, x, y + 0.11 * sc, z, { roughness: k % 2 ? 0.35 : 0.9 });
+        add(new THREE.CylinderGeometry(0.045 * sc, 0.06 * sc, 0.07 * sc, 10), col, x, y + 0.24 * sc, z, { roughness: 0.9 });
+      }
+      break;
+    case 'meat':
+      // Joints on a board, a ham hanging from the awning, a folded hide.
+      for (let k = 0; k < 4; k++) add(new THREE.SphereGeometry(0.1, 8, 6).scale(1.3, 0.8, 1), k % 2 ? 0x8a3a28 : 0xb04848, -0.6 + k * 0.25, y + 0.07, z, { roughness: 0.7 });
+      add(new THREE.SphereGeometry(0.12, 10, 8).scale(1, 1.5, 0.9), 0xa04038, 0.5, 1.55, -0.6, { roughness: 0.7 });
+      add(new THREE.CylinderGeometry(0.006, 0.006, 0.4, 4), 0x2a2826, 0.5, 1.85, -0.6, { metalness: 0.5 });
+      add(new THREE.BoxGeometry(0.4, 0.05, 0.35), 0x8a6a4a, 0.6, y + 0.03, z, { roughness: 1 });
+      break;
+    case 'fish':
+      // Fish laid in rows on a bed of reeds, a basket.
+      add(new THREE.BoxGeometry(1.5, 0.02, 0.45), 0x7a8a4a, -0.15, y + 0.01, z, { roughness: 1 });
+      for (let k = 0; k < 8; k++) {
+        const f = add(new THREE.SphereGeometry(0.06, 8, 6).scale(2.6, 0.6, 1), k % 3 ? 0x8aa0b0 : 0xa8a07a, -0.75 + (k % 4) * 0.36, y + 0.05, z - 0.1 + Math.floor(k / 4) * 0.2, { roughness: 0.45, metalness: 0.2 });
+        f.rotation.y = (k % 2 ? 0.2 : -0.2);
+      }
+      add(new THREE.CylinderGeometry(0.18, 0.15, 0.16, 12), 0x8a6a3a, 0.75, y + 0.08, z, { roughness: 1 });
+      break;
+  }
+}
+
 export function tradePieceMesh(type: string, g: THREE.Group, tex: Tex, add: Add, state: { lit?: boolean }): boolean {
   if (type.startsWith('sign_')) { sign(type.slice(5), tex, add); return true; }
+  if (type.startsWith('stall_')) { stall(type.slice(6), tex, add); return true; }
   switch (type) {
     case 'log_stack': {
       // Trunks in a pyramid, their sawn ends out (pale, with rings), held by stakes.

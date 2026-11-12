@@ -14,7 +14,7 @@
 // take apart or build onto.
 
 import { hash2, mulberry32 } from './noise';
-import { SIGNS } from '../data/tradePieces';
+import { SIGNS, STALL_ROUND } from '../data/tradePieces';
 import { BLEND, PAD, SEA, TILE, type WorldGen } from './worldgen';
 
 /** Settlements are planned one (at most) per square of this size. */
@@ -1119,9 +1119,10 @@ export class Villages {
       return { x, z };
     };
     const pave = (bi: number, bj: number, half = BLOCK / 2) => { const c = pt(bi * BLOCK, bj * BLOCK); v.paved.push({ x: c.x, z: c.z, yaw: F.yaw, hx: half, hz: half }); };
+    let stallN = 0;
     const stall = (lx: number, lz: number, ox: number, oz: number, y: number) => {
-      // Its front (with the goods) facing out (ox, oz).
-      const p = put('market_stall', lx, lz, y, faceYaw(ox, oz));
+      // Its front (with the goods) facing out (ox, oz); each sells something of its own, in turn round the market.
+      const p = put(`stall_${STALL_ROUND[stallN++ % STALL_ROUND.length]}`, lx, lz, y, faceYaw(ox, oz));
       v.stalls.push({ ...p, yaw: F.yaw + faceYaw(ox, oz) });
     };
 
@@ -1610,7 +1611,7 @@ export class Villages {
     for (let lx = -E + 6; lx <= E; lx += 16) put('lantern_post', lx, wallZ - 1.4, A);
     // The fish market at the west end: stalls facing the quay, nets and racks drying.
     for (const [lx, lz, ry] of [[-E + 4, E + 3.5, 0], [-E + 10, E + 3.5, 0], [-E + 16, E + 3.5, 0], [-E + 7, E + 9, Math.PI], [-E + 13, E + 9, Math.PI]] as const) {
-      const p = put('market_stall', lx, lz, A, ry);
+      const p = put('stall_fish', lx, lz, A, ry);
       v.stalls.push({ ...p, yaw: F.yaw + ry });
     }
     put('net_rack', -E - 1, E + 6, A, Math.PI / 2);

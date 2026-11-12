@@ -640,6 +640,18 @@ const POTTER_STEPS: Step[] = [
     progress: (g) => g.inv.count('jar_of_water') > 0,
     targets: (g) => water(g) },
 ];
+/** Fires, kilns and ovens burn fuel: where to get more of it. */
+const FUEL_STEPS: Step[] = [
+  { id: 'stock', title: 'Keep fuel by you',
+    text: `Your fires, kilns and ovens burn <b>fuel</b>: branches, kindling, logs and charcoal. When you run low:<br>`
+      + `• <b>Branches</b> lie fallen in any wood: pick them up (or snap one off a tree with bare hands).<br>`
+      + `• <b>Kindling</b>: split a rough plank on a chopping block (four sticks a plank).<br>`
+      + `• <b>Logs</b>: fell a tree with a hatchet.<br>`
+      + `• Or <b>buy</b> kindling and logs at a town's <b>firewood stall</b> or a village's storehouse.<br>`
+      + `Keep at least 12 pieces of fuel, and feed a fire (or your kiln or oven): aim at it with fuel in your pack and <b>Add fuel</b>.`,
+    progress: (_g, q) => !!q.flags?.includes('fueled'),
+    targets: (g) => structuresNear(g, ['stall_firewood', 'village_store']) },
+];
 const BOAT_STEPS: Step[] = [
   { id: 'paddle', title: 'Carve a paddle',
     text: `Carve a <b>Paddle</b> (${KEY('C')} → Woodworking) from a rough plank and a shaft.`,
@@ -720,6 +732,8 @@ const PATHS: (Omit<QuestDef, 'offer'> & { after?: string[] })[] = [
   // Paths of their own.
   { id: 'home', title: 'A roof over your head', path: '🏠', summary: 'Build a timber house: floor, walls, a window, a door and a roof, then a bed and a chest.', steps: HOUSE_STEPS,
     outro: { title: 'Welcome home', text: `You've built a house with a bed and a storage chest. Sleep in it to wake there; store your things safely.`, msg: 'Quest complete: you have a home!' } },
+  { id: 'fuel', title: 'Fuel for the fire', summary: 'Learn where fuel comes from, and keep some by you.', steps: FUEL_STEPS,
+    outro: { title: 'Fuel laid by', text: `A fire is only as good as its fuel: keep a stack by your hearth, your kiln or your oven.`, msg: 'Quest complete: you know where to find fuel.' } },
   { id: 'fisher', title: 'Fishing', path: '🎣', summary: 'Make a rod, catch fish and cook them.', steps: FISHER_STEPS,
     outro: { title: 'A fisher', text: `Dawn and dusk are best, and deep water holds big fish. A fine rod bites sooner and lands bigger ones.`, msg: 'Quest complete: you can fish.' } },
   { id: 'potter', title: 'Pottery', path: '⚱️', summary: 'Dig clay, throw a jar on the wheel, fire it and carry water.', steps: POTTER_STEPS,

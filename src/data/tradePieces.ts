@@ -1,4 +1,5 @@
 import type { StructureDef } from './structures';
+import { FISH } from './fish';
 
 // The things that make a workplace look like one: a trade's hanging sign
 // beside its door, and what stands in its yard (logs stacked for the
@@ -26,7 +27,22 @@ const piece = (id: string, name: string, icon: string, boxes: StructureDef['boxe
   id, name, icon, category: 'Decor', snap: false, village: true, boxes, snaps: [], materials: [], skill: 'carpentry', difficulty: 5, stepTime: 1, desc, ...extra,
 });
 
+/** Market stalls by what they sell (from the settlement's own stores): the goods, the awning's colours. */
+export const STALLS: Record<string, { name: string; goods: string[]; awning: [number, number] }> = {
+  firewood: { name: 'Firewood stall', goods: ['kindling', 'branch', 'log', 'charcoal'], awning: [0x5a6a2a, 0xe8dcc0] },
+  fruit: { name: 'Fruit stall', goods: ['apple', 'berries'], awning: [0xb8402a, 0xe8dcc0] },
+  bread: { name: 'Bread stall', goods: ['bread', 'flour', 'wheat'], awning: [0xc8862a, 0xf2e6c8] },
+  pots: { name: 'Pot stall', goods: ['clay_jar', 'jar_of_water', 'crucible'], awning: [0x2e5a7a, 0xe8dcc0] },
+  meat: { name: 'Meat stall', goods: ['cooked_meat', 'raw_meat', 'hide'], awning: [0x7a1e1e, 0xe8dcc0] },
+  fish: { name: 'Fish stall', goods: ['cooked_fish', ...FISH.map((f) => f.id)], awning: [0x1e5a6a, 0xe8dcc0] },
+};
+/** The stalls round a market, in turn (a port's fish market is all fish). */
+export const STALL_ROUND = ['firewood', 'fruit', 'bread', 'pots', 'meat', 'firewood', 'fruit', 'bread'];
+
 export const TRADE_PIECES: StructureDef[] = [
+  ...Object.entries(STALLS).map(([k, s]) => piece(`stall_${k}`, s.name, '⛺',
+    [box(0, 0.45, -0.4, 1.0, 0.45, 0.3), box(-0.95, 1.1, 0.4, 0.06, 1.1, 0.06), box(0.95, 1.1, 0.4, 0.06, 1.1, 0.06)],
+    `A stall on the market selling ${s.goods.slice(0, 2).join(' and ').replace(/_/g, ' ')}: buy and sell at it.`)),
   ...Object.entries(SIGNS).map(([k, s]) => piece(`sign_${k}`, `${s.name} sign`, '🪧', [box(0, 0, 0.45, 0.06, 0.3, 0.3)], `A painted sign hung out over the street: ${s.name.toLowerCase()}.`)),
   piece('log_stack', 'Log stack', '🪵', [box(0, 0.45, 0, 1.3, 0.45, 0.6)], 'Felled trunks stacked to season, ends out.'),
   piece('sawhorse', 'Sawhorse', '🪚', [box(0, 0.45, 0, 0.7, 0.45, 0.3)], 'A trestle to saw on, a log across it and the saw left in the cut.'),
